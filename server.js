@@ -18,6 +18,11 @@ app.get('/api', (req, res) => {
   res.json({ message: 'API работает 🚀' });
 });
 
+// новый тестовый маршрут для проверки связи фронта и бэка
+app.get('/api/test', (req, res) => {
+  res.json({ message: 'Backend is working!' });
+});
+
 const PORT = process.env.PORT || 5050;
 app.listen(PORT, () => {
   console.log(`Сервер запущен на порту ${PORT}`);

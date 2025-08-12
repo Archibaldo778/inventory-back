@@ -1,13 +1,19 @@
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
 import mongoose from 'mongoose';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-dotenv.config();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const app = express();
 
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
+// serve uploaded images statically: GET /uploads/<filename>
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // роуты товаров
 import productRoutes from './routes/products.js';

@@ -26,13 +26,13 @@ const upload = multer({
 // CREATE
 router.post('/', upload.single('image'), async (req, res) => {
   try {
-    const { name, qty, supplier, location, category } = req.body;
+    const { name, qty, quantity, supplier, location, category } = req.body;
 
     if (!name || !name.trim()) {
       return res.status(400).json({ error: 'Name is required' });
     }
 
-    const qtyNum = Number(qty ?? 0);
+    const qtyNum = Number((quantity ?? qty) ?? 0);
     let image = null;
     if (req.file) {
       try {
@@ -53,14 +53,17 @@ router.post('/', upload.single('image'), async (req, res) => {
 
     const doc = await Product.create({
       name: name.trim(),
-      qty: Number.isFinite(qtyNum) ? qtyNum : 0,
+      quantity: Number.isFinite(qtyNum) ? qtyNum : 0,
       supplier: supplier || '',
       location: location || '',
       category: category || 'Trays',
       image,
     });
 
-    res.status(201).json(doc);
+    // Backwards-compat alias
+    const out = doc.toObject();
+    out.qty = out.quantity;
+    res.status(201).json(out);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -70,7 +73,8 @@ router.post('/', upload.single('image'), async (req, res) => {
 router.get('/', async (_req, res) => {
   try {
     const items = await Product.find().sort({ createdAt: -1 });
-    res.json(items);
+    const mapped = items.map((d) => ({ ...d.toObject(), qty: d.quantity }));
+    res.json(mapped);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -87,9 +91,10 @@ router.patch('/:id', upload.single('image'), async (req, res) => {
       if (!n) return res.status(400).json({ error: 'Name is required' });
       updates.name = n;
     }
-    if (typeof req.body.qty !== 'undefined') {
-      const q = Number(req.body.qty);
-      updates.qty = Number.isFinite(q) ? q : 0;
+    const hasQty = typeof req.body.qty !== 'undefined' || typeof req.body.quantity !== 'undefined';
+    if (hasQty) {
+      const q = Number((req.body.quantity ?? req.body.qty));
+      updates.quantity = Number.isFinite(q) ? q : 0;
     }
     if (typeof req.body.supplier !== 'undefined') updates.supplier = req.body.supplier || '';
     if (typeof req.body.location !== 'undefined') updates.location = req.body.location || '';
@@ -116,7 +121,9 @@ router.patch('/:id', upload.single('image'), async (req, res) => {
     }
 
     const doc = await Product.findByIdAndUpdate(req.params.id, updates, { new: true });
-    res.json(doc);
+    const out = doc.toObject();
+    out.qty = out.quantity;
+    res.json(out);
   } catch (err) {
     console.error('PATCH /products/:id failed:', err);
     res.status(400).json({ error: err.message });

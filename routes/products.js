@@ -26,7 +26,7 @@ const upload = multer({
 // CREATE
 router.post('/', upload.single('image'), async (req, res) => {
   try {
-    const { name, qty, quantity, supplier, location, category } = req.body;
+    const { name, qty, quantity, supplier, location, category, material, color } = req.body;
 
     if (!name || !name.trim()) {
       return res.status(400).json({ error: 'Name is required' });
@@ -57,6 +57,8 @@ router.post('/', upload.single('image'), async (req, res) => {
       supplier: supplier || '',
       location: location || '',
       category: category || 'Trays',
+      material: material || '',
+      color: color || '',
       image,
     });
 
@@ -99,6 +101,8 @@ router.patch('/:id', upload.single('image'), async (req, res) => {
     if (typeof req.body.supplier !== 'undefined') updates.supplier = req.body.supplier || '';
     if (typeof req.body.location !== 'undefined') updates.location = req.body.location || '';
     if (typeof req.body.category !== 'undefined') updates.category = req.body.category || 'Trays';
+    if (typeof req.body.material !== 'undefined') updates.material = req.body.material || '';
+    if (typeof req.body.color !== 'undefined') updates.color = req.body.color || '';
 
     // Если прислали новый файл — заливаем в Cloudinary
     if (req.file) {

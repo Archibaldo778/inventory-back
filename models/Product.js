@@ -11,6 +11,8 @@ const productSchema = new mongoose.Schema(
     // optional meta
     description: { type: String, trim: true },
     category: { type: String, trim: true, index: true },
+    material: { type: String, trim: true },
+    color: { type: String, trim: true },
     supplier: { type: String, trim: true },
     location: { type: String, trim: true },
 

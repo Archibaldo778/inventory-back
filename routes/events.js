@@ -54,5 +54,15 @@ router.patch('/:id', async (req, res) => {
   }
 });
 
-export default router;
+// Delete
+router.delete('/:id', async (req, res) => {
+  try {
+    const doc = await Event.findByIdAndDelete(req.params.id);
+    if (!doc) return res.status(404).json({ error: 'Not found' });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
 
+export default router;

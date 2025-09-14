@@ -11,7 +11,9 @@ const __dirname = path.dirname(__filename);
 const app = express();
 
 app.use(cors({ origin: true, credentials: true }));
-app.use(express.json());
+// Increase body limit to allow page preview (base64) and large canvases
+app.use(express.json({ limit: '15mb' }));
+app.use(express.urlencoded({ extended: true, limit: '15mb' }));
 // serve uploaded images statically: GET /uploads/<filename>
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 

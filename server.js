@@ -18,9 +18,15 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 // роуты товаров
 import productRoutes from './routes/products.js';
 import userRoutes from './routes/users.js';
+import eventRoutes from './routes/events.js';
+import deckRoutes from './routes/decks.js';
+import pageRoutes from './routes/pages.js';
 app.use('/api/products', productRoutes);
 app.use('/api/users', userRoutes);
 app.use('/users', userRoutes);
+app.use('/api/events', eventRoutes);
+app.use('/api/decks', deckRoutes);
+app.use('/api/pages', pageRoutes);
 
 // подключение к Mongo
 const MONGO_URI = process.env.MONGO_URI;

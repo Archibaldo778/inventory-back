@@ -26,6 +26,7 @@ import authRoutes from './routes/auth.js';
 import eventRoutes from './routes/events.js';
 import deckRoutes from './routes/decks.js';
 import pageRoutes from './routes/pages.js';
+import staffRoutes from './routes/staff.js';
 app.use('/api/products', productRoutes);
 app.use('/api/users', userRoutes);
 app.use('/users', userRoutes);
@@ -33,6 +34,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/events', eventRoutes);
 app.use('/api/decks', deckRoutes);
 app.use('/api/pages', pageRoutes);
+app.use('/api/staff', staffRoutes);
 
 // подключение к Mongo
 const MONGO_URI = process.env.MONGO_URI;

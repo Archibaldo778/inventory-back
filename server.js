@@ -4,6 +4,8 @@ import cors from 'cors';
 import mongoose from 'mongoose';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import bcrypt from 'bcryptjs';
+import User from './models/Users.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -20,12 +22,14 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 // роуты товаров
 import productRoutes from './routes/products.js';
 import userRoutes from './routes/users.js';
+import authRoutes from './routes/auth.js';
 import eventRoutes from './routes/events.js';
 import deckRoutes from './routes/decks.js';
 import pageRoutes from './routes/pages.js';
 app.use('/api/products', productRoutes);
 app.use('/api/users', userRoutes);
 app.use('/users', userRoutes);
+app.use('/api/auth', authRoutes);
 app.use('/api/events', eventRoutes);
 app.use('/api/decks', deckRoutes);
 app.use('/api/pages', pageRoutes);
@@ -52,6 +56,31 @@ app.get('/api', (req, res) => {
 app.get('/api/test', (req, res) => {
   res.json({ message: 'Backend is working!' });
 });
+
+// Ensure super admin exists (email/password from env, never logged)
+async function ensureSuperAdmin() {
+  try {
+    const email = process.env.SUPERADMIN_EMAIL;
+    const password = process.env.SUPERADMIN_PASSWORD;
+    const username = process.env.SUPERADMIN_USERNAME || 'superadmin';
+    if (!email || !password) return; // skip if not configured
+    const existing = await User.findOne({ email: email.toLowerCase().trim() }).select('_id');
+    if (existing) return;
+    const hash = await bcrypt.hash(password, 10);
+    await User.create({
+      username,
+      email: email.toLowerCase().trim(),
+      role: 'admin', // or 'super Admin' if you rely on that level
+      password: hash,
+    });
+    console.log('✅ Super admin created:', email);
+  } catch (e) {
+    console.error('❌ ensureSuperAdmin failed:', e?.message || e);
+  }
+}
+
+// Call once DB is ready
+mongoose.connection.once('open', () => { ensureSuperAdmin(); });
 
 const PORT = process.env.PORT || 5050;
 app.listen(PORT, () => {

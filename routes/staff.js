@@ -1,35 +1,37 @@
 import { Router } from 'express';
 import multer from 'multer';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import { Readable } from 'stream';
+import { v2 as cloudinary } from 'cloudinary';
 import Staff from '../models/Staff.js';
 
 const router = Router();
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const uploadDir = path.join(__dirname, '..', 'uploads', 'staff');
-fs.mkdirSync(uploadDir, { recursive: true });
-
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, uploadDir),
-  filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname || '').toLowerCase() || '.jpg';
-    const safeExt = ['.jpg', '.jpeg', '.png', '.webp', '.gif'].includes(ext) ? ext : '.jpg';
-    const name = `${Date.now()}-${Math.round(Math.random() * 1e9)}${safeExt}`;
-    cb(null, name);
-  }
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
 const upload = multer({
-  storage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const ok = /jpeg|jpg|png|webp|gif/.test((file.mimetype || '').toLowerCase());
-    if (ok) return cb(null, true);
-    cb(new multer.MulterError('LIMIT_UNEXPECTED_FILE', 'photo'));
+    cb(ok ? null : new multer.MulterError('LIMIT_UNEXPECTED_FILE', 'photo'), ok);
   },
+});
+
+const uploadToCloudinary = (file) => new Promise((resolve, reject) => {
+  if (!file) return resolve('');
+  const folder = process.env.CLOUDINARY_FOLDER || 'staff';
+  const stream = cloudinary.uploader.upload_stream(
+    { folder, resource_type: 'image' },
+    (error, result) => {
+      if (error) return reject(error);
+      resolve(result.secure_url);
+    }
+  );
+  Readable.from(file.buffer).pipe(stream);
 });
 
 const resolvePositions = (body = {}) => {
@@ -61,11 +63,6 @@ const resolvePositions = (body = {}) => {
   }
   const unique = Array.from(new Set(bucket.map(String))).map(s => s.trim()).filter(Boolean);
   return { values: unique, provided };
-};
-
-const buildPhotoPath = (file) => {
-  if (!file) return '';
-  return `/uploads/staff/${file.filename}`;
 };
 
 const sanitizeStr = (value) => {
@@ -117,7 +114,12 @@ router.post('/', upload.single('photo'), async (req, res) => {
       jacketSize: sanitizeStr(body.jacketSize),
     };
     if (req.file) {
-      payload.photo = buildPhotoPath(req.file);
+      try {
+        payload.photo = await uploadToCloudinary(req.file);
+      } catch (err) {
+        console.error('Cloudinary upload failed', err);
+        return res.status(500).json({ message: 'Failed to upload staff photo' });
+      }
     } else if (body.photo) {
       payload.photo = sanitizeStr(body.photo);
     }
@@ -158,7 +160,12 @@ router.patch('/:id', upload.single('photo'), async (req, res) => {
     if (typeof body.jacketSize !== 'undefined') updates.jacketSize = sanitizeStr(body.jacketSize);
 
     if (req.file) {
-      updates.photo = buildPhotoPath(req.file);
+      try {
+        updates.photo = await uploadToCloudinary(req.file);
+      } catch (err) {
+        console.error('Cloudinary upload failed', err);
+        return res.status(500).json({ message: 'Failed to upload staff photo' });
+      }
     } else if (typeof body.photo !== 'undefined') {
       updates.photo = sanitizeStr(body.photo);
     }

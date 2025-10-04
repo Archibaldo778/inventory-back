@@ -8,6 +8,13 @@ import Staff from '../models/Staff.js';
 const router = Router();
 const cache = apicache.middleware;
 const CACHE_GROUP = 'staff';
+const cacheWithGroup = (duration, group) => {
+  const middleware = cache(duration);
+  return (req, res, next) => {
+    res.apicacheGroup = group;
+    return middleware(req, res, next);
+  };
+};
 const clearCache = () => apicache.clear(CACHE_GROUP);
 
 cloudinary.config({
@@ -75,7 +82,7 @@ const sanitizeStr = (value) => {
 };
 
 // List with optional filters: ?q= & positions=Waiter,Bartender & active=true
-router.get('/', cache('5 minutes', CACHE_GROUP), async (req, res) => {
+router.get('/', cacheWithGroup('5 minutes', CACHE_GROUP), async (req, res) => {
   try {
     const { q, positions, active } = req.query || {};
     const filter = {};
@@ -136,7 +143,7 @@ router.post('/', upload.single('photo'), async (req, res) => {
 });
 
 // Get by id
-router.get('/:id', cache('5 minutes', CACHE_GROUP), async (req, res) => {
+router.get('/:id', cacheWithGroup('5 minutes', CACHE_GROUP), async (req, res) => {
   try {
     const doc = await Staff.findById(req.params.id);
     if (!doc) return res.status(404).json({ message: 'Not found' });

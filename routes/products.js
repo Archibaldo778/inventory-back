@@ -14,6 +14,13 @@ cloudinary.config({
 const router = Router();
 const cache = apicache.middleware;
 const CACHE_GROUP = 'products';
+const cacheWithGroup = (duration, group) => {
+  const middleware = cache(duration);
+  return (req, res, next) => {
+    res.apicacheGroup = group;
+    return middleware(req, res, next);
+  };
+};
 
 const clearCache = () => {
   apicache.clear(CACHE_GROUP);
@@ -80,7 +87,7 @@ router.post('/', upload.single('image'), async (req, res) => {
 });
 
 // READ all
-router.get('/', cache('5 minutes', CACHE_GROUP), async (_req, res) => {
+router.get('/', cacheWithGroup('5 minutes', CACHE_GROUP), async (_req, res) => {
   try {
     const items = await Product.find().sort({ createdAt: -1 });
     const mapped = items.map((d) => ({ ...d.toObject(), qty: d.quantity }));

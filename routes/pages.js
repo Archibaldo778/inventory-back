@@ -5,6 +5,13 @@ import Page from '../models/Page.js';
 const router = Router();
 const cache = apicache.middleware;
 const CACHE_GROUP = 'pages';
+const cacheWithGroup = (duration, group) => {
+  const middleware = cache(duration);
+  return (req, res, next) => {
+    res.apicacheGroup = group;
+    return middleware(req, res, next);
+  };
+};
 const clearCache = () => {
   apicache.clear(CACHE_GROUP);
   apicache.clear('decks');
@@ -22,7 +29,7 @@ router.post('/', async (req, res) => {
 });
 
 // Get page
-router.get('/:id', cache('2 minutes', CACHE_GROUP), async (req, res) => {
+router.get('/:id', cacheWithGroup('2 minutes', CACHE_GROUP), async (req, res) => {
   try {
     const page = await Page.findById(req.params.id);
     if (!page) return res.status(404).json({ error: 'Not found' });

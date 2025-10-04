@@ -6,6 +6,13 @@ import Page from '../models/Page.js';
 const router = Router();
 const cache = apicache.middleware;
 const CACHE_GROUP = 'decks';
+const cacheWithGroup = (duration, group) => {
+  const middleware = cache(duration);
+  return (req, res, next) => {
+    res.apicacheGroup = group;
+    return middleware(req, res, next);
+  };
+};
 
 const clearCache = () => apicache.clear(CACHE_GROUP);
 
@@ -21,7 +28,7 @@ router.post('/', async (req, res) => {
 });
 
 // List decks (by eventId/type if provided)
-router.get('/', cache('5 minutes', CACHE_GROUP), async (req, res) => {
+router.get('/', cacheWithGroup('5 minutes', CACHE_GROUP), async (req, res) => {
   try {
     const q = {};
     if (req.query.eventId) q.eventId = req.query.eventId;
@@ -32,7 +39,7 @@ router.get('/', cache('5 minutes', CACHE_GROUP), async (req, res) => {
 });
 
 // Get deck with pages
-router.get('/:id', cache('5 minutes', CACHE_GROUP), async (req, res) => {
+router.get('/:id', cacheWithGroup('5 minutes', CACHE_GROUP), async (req, res) => {
   try {
     const deck = await Deck.findById(req.params.id);
     if (!deck) return res.status(404).json({ error: 'Not found' });

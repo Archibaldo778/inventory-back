@@ -5,6 +5,13 @@ import Event from '../models/Event.js';
 const router = Router();
 const cache = apicache.middleware;
 const CACHE_GROUP = 'events';
+const cacheWithGroup = (duration, group) => {
+  const middleware = cache(duration);
+  return (req, res, next) => {
+    res.apicacheGroup = group;
+    return middleware(req, res, next);
+  };
+};
 
 const clearCache = () => apicache.clear(CACHE_GROUP);
 
@@ -22,7 +29,7 @@ router.post('/', async (req, res) => {
 });
 
 // List (optionally by manager)
-router.get('/', cache('5 minutes', CACHE_GROUP), async (req, res) => {
+router.get('/', cacheWithGroup('5 minutes', CACHE_GROUP), async (req, res) => {
   try {
     const q = {};
     if (req.query.managerId) q.managerId = req.query.managerId;
@@ -34,7 +41,7 @@ router.get('/', cache('5 minutes', CACHE_GROUP), async (req, res) => {
 });
 
 // Get by id
-router.get('/:id', cache('5 minutes', CACHE_GROUP), async (req, res) => {
+router.get('/:id', cacheWithGroup('5 minutes', CACHE_GROUP), async (req, res) => {
   try {
     const doc = await Event.findById(req.params.id);
     if (!doc) return res.status(404).json({ error: 'Not found' });

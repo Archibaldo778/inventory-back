@@ -1,7 +1,12 @@
 import { Router } from 'express';
+import apicache from 'apicache';
 import Event from '../models/Event.js';
 
 const router = Router();
+const cache = apicache.middleware;
+const CACHE_GROUP = 'events';
+
+const clearCache = () => apicache.clear(CACHE_GROUP);
 
 // Create
 router.post('/', async (req, res) => {
@@ -10,13 +15,14 @@ router.post('/', async (req, res) => {
     if (!title || !String(title).trim()) return res.status(400).json({ error: 'title is required' });
     const doc = await Event.create({ title: String(title).trim(), date, client, managerId, status, meta });
     res.status(201).json(doc);
+    clearCache();
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
 });
 
 // List (optionally by manager)
-router.get('/', async (req, res) => {
+router.get('/', cache('5 minutes', CACHE_GROUP), async (req, res) => {
   try {
     const q = {};
     if (req.query.managerId) q.managerId = req.query.managerId;
@@ -28,7 +34,7 @@ router.get('/', async (req, res) => {
 });
 
 // Get by id
-router.get('/:id', async (req, res) => {
+router.get('/:id', cache('5 minutes', CACHE_GROUP), async (req, res) => {
   try {
     const doc = await Event.findById(req.params.id);
     if (!doc) return res.status(404).json({ error: 'Not found' });
@@ -49,6 +55,7 @@ router.patch('/:id', async (req, res) => {
     const doc = await Event.findByIdAndUpdate(req.params.id, updates, { new: true });
     if (!doc) return res.status(404).json({ error: 'Not found' });
     res.json(doc);
+    clearCache();
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
@@ -60,6 +67,7 @@ router.delete('/:id', async (req, res) => {
     const doc = await Event.findByIdAndDelete(req.params.id);
     if (!doc) return res.status(404).json({ error: 'Not found' });
     res.json({ ok: true });
+    clearCache();
   } catch (e) {
     res.status(400).json({ error: e.message });
   }

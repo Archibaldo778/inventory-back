@@ -1,7 +1,14 @@
 import { Router } from 'express';
+import apicache from 'apicache';
 import Page from '../models/Page.js';
 
 const router = Router();
+const cache = apicache.middleware;
+const CACHE_GROUP = 'pages';
+const clearCache = () => {
+  apicache.clear(CACHE_GROUP);
+  apicache.clear('decks');
+};
 
 // Create page
 router.post('/', async (req, res) => {
@@ -10,11 +17,12 @@ router.post('/', async (req, res) => {
     if (!deckId) return res.status(400).json({ error: 'deckId is required' });
     const page = await Page.create({ deckId, index, canvas, preview });
     res.status(201).json(page);
+    clearCache();
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 // Get page
-router.get('/:id', async (req, res) => {
+router.get('/:id', cache('2 minutes', CACHE_GROUP), async (req, res) => {
   try {
     const page = await Page.findById(req.params.id);
     if (!page) return res.status(404).json({ error: 'Not found' });
@@ -30,6 +38,7 @@ router.patch('/:id', async (req, res) => {
     const page = await Page.findByIdAndUpdate(req.params.id, updates, { new: true });
     if (!page) return res.status(404).json({ error: 'Not found' });
     res.json(page);
+    clearCache();
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
@@ -38,8 +47,8 @@ router.delete('/:id', async (req, res) => {
   try {
     await Page.findByIdAndDelete(req.params.id);
     res.json({ ok: true });
+    clearCache();
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 export default router;
-

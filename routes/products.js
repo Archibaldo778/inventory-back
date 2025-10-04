@@ -1,6 +1,7 @@
 import multer from 'multer';
 import path from 'path';
 import { Router } from 'express';
+import apicache from 'apicache';
 import Product from '../models/Product.js';
 import { v2 as cloudinary } from 'cloudinary';
 
@@ -11,6 +12,12 @@ cloudinary.config({
 });
 
 const router = Router();
+const cache = apicache.middleware;
+const CACHE_GROUP = 'products';
+
+const clearCache = () => {
+  apicache.clear(CACHE_GROUP);
+};
 
 const storage = multer.memoryStorage();
 const upload = multer({
@@ -66,13 +73,14 @@ router.post('/', upload.single('image'), async (req, res) => {
     const out = doc.toObject();
     out.qty = out.quantity;
     res.status(201).json(out);
+    clearCache();
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
 });
 
 // READ all
-router.get('/', async (_req, res) => {
+router.get('/', cache('5 minutes', CACHE_GROUP), async (_req, res) => {
   try {
     const items = await Product.find().sort({ createdAt: -1 });
     const mapped = items.map((d) => ({ ...d.toObject(), qty: d.quantity }));
@@ -128,6 +136,7 @@ router.patch('/:id', upload.single('image'), async (req, res) => {
     const out = doc.toObject();
     out.qty = out.quantity;
     res.json(out);
+    clearCache();
   } catch (err) {
     console.error('PATCH /products/:id failed:', err);
     res.status(400).json({ error: err.message });
@@ -139,6 +148,7 @@ router.delete('/:id', async (req, res) => {
   try {
     await Product.findByIdAndDelete(req.params.id);
     res.json({ ok: true });
+    clearCache();
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

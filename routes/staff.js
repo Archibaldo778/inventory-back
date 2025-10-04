@@ -2,9 +2,13 @@ import { Router } from 'express';
 import multer from 'multer';
 import { Readable } from 'stream';
 import { v2 as cloudinary } from 'cloudinary';
+import apicache from 'apicache';
 import Staff from '../models/Staff.js';
 
 const router = Router();
+const cache = apicache.middleware;
+const CACHE_GROUP = 'staff';
+const clearCache = () => apicache.clear(CACHE_GROUP);
 
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -71,7 +75,7 @@ const sanitizeStr = (value) => {
 };
 
 // List with optional filters: ?q= & positions=Waiter,Bartender & active=true
-router.get('/', async (req, res) => {
+router.get('/', cache('5 minutes', CACHE_GROUP), async (req, res) => {
   try {
     const { q, positions, active } = req.query || {};
     const filter = {};
@@ -125,13 +129,14 @@ router.post('/', upload.single('photo'), async (req, res) => {
     }
     const doc = await Staff.create(payload);
     res.status(201).json(doc);
+    clearCache();
   } catch (e) {
     res.status(400).json({ message: e.message || 'Failed to create staff' });
   }
 });
 
 // Get by id
-router.get('/:id', async (req, res) => {
+router.get('/:id', cache('5 minutes', CACHE_GROUP), async (req, res) => {
   try {
     const doc = await Staff.findById(req.params.id);
     if (!doc) return res.status(404).json({ message: 'Not found' });
@@ -173,6 +178,7 @@ router.patch('/:id', upload.single('photo'), async (req, res) => {
     const doc = await Staff.findByIdAndUpdate(req.params.id, updates, { new: true });
     if (!doc) return res.status(404).json({ message: 'Not found' });
     res.json(doc);
+    clearCache();
   } catch (e) {
     res.status(400).json({ message: e.message || 'Failed to update staff' });
   }
@@ -183,6 +189,7 @@ router.delete('/:id', async (req, res) => {
   try {
     await Staff.findByIdAndDelete(req.params.id);
     res.json({ ok: true });
+    clearCache();
   } catch (e) {
     res.status(400).json({ message: e.message || 'Failed to delete staff' });
   }

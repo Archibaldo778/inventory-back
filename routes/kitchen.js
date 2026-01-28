@@ -1,9 +1,16 @@
 import { Router } from 'express';
 import multer from 'multer';
 import path from 'path';
+import fs from 'fs';
 import KitchenItem from '../models/KitchenItem.js';
 
 const router = Router();
+
+// Ensure uploads directory exists (Render fs is ephemeral but writable during runtime)
+const uploadsDir = path.join(process.cwd(), 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+  try { fs.mkdirSync(uploadsDir, { recursive: true }); } catch (e) { /* ignore */ }
+}
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, path.join(process.cwd(), 'uploads')),

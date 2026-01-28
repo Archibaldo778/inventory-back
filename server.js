@@ -48,6 +48,7 @@ import eventRoutes from './routes/events.js';
 import deckRoutes from './routes/decks.js';
 import pageRoutes from './routes/pages.js';
 import staffRoutes from './routes/staff.js';
+import kitchenRoutes from './routes/kitchen.js';
 app.use('/api/products', productRoutes);
 app.use('/api/users', userRoutes);
 app.use('/users', userRoutes);
@@ -56,9 +57,10 @@ app.use('/api/events', eventRoutes);
 app.use('/api/decks', deckRoutes);
 app.use('/api/pages', pageRoutes);
 app.use('/api/staff', staffRoutes);
+app.use('/api/kitchen-items', kitchenRoutes);
 
 // подключение к Mongo
-const MONGO_URI = process.env.MONGO_URI;
+const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/inventory';
 if (!MONGO_URI) {
   console.error('❌ MONGO_URI is not set');
 } else {

@@ -1,4 +1,4 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
 import express from 'express';
 import cors from 'cors';
 import compression from 'compression';
@@ -11,6 +11,11 @@ import User from './models/Users.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+const envFile = process.env.NODE_ENV === 'production' ? '.env.production' : '.env.development';
+dotenv.config({ path: path.join(__dirname, envFile) });
+dotenv.config({ path: path.join(__dirname, '.env') });
+
 
 const app = express();
 app.disable('x-powered-by');
@@ -61,10 +66,16 @@ app.use('/api/kitchen-items', kitchenRoutes);
 
 // подключение к Mongo
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/inventory';
+const MONGO_DB_NAME = process.env.MONGO_DB_NAME;
+
 if (!MONGO_URI) {
   console.error('❌ MONGO_URI is not set');
 } else {
-  mongoose.connect(MONGO_URI)
+  const mongoOptions = {};
+  if (MONGO_DB_NAME) {
+    mongoOptions.dbName = MONGO_DB_NAME;
+  }
+  mongoose.connect(MONGO_URI, mongoOptions)
     .then(() => console.log('✅ MongoDB connected'))
     .catch(err => console.error('❌ MongoDB error:', err));
 }

@@ -54,6 +54,7 @@ import deckRoutes from './routes/decks.js';
 import pageRoutes from './routes/pages.js';
 import staffRoutes from './routes/staff.js';
 import kitchenRoutes from './routes/kitchen.js';
+import clientRoutes from './routes/clients.js';
 app.use('/api/products', productRoutes);
 app.use('/api/users', userRoutes);
 app.use('/users', userRoutes);
@@ -63,6 +64,7 @@ app.use('/api/decks', deckRoutes);
 app.use('/api/pages', pageRoutes);
 app.use('/api/staff', staffRoutes);
 app.use('/api/kitchen-items', kitchenRoutes);
+app.use('/api/clients', clientRoutes);
 
 // подключение к Mongo
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/inventory';

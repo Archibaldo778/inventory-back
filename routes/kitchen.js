@@ -86,7 +86,7 @@ const readGuestLimit = (body = {}) => (
 
 const uploadToCloudinary = (file) => new Promise((resolve, reject) => {
   if (!file) return resolve('');
-  const folder = process.env.CLOUDINARY_KITCHEN_FOLDER || 'inventory/kitchen';
+  const folder = process.env.CLOUDINARY_KITCHEN_FOLDER || 'kitchen';
   const stream = cloudinary.uploader.upload_stream(
     { folder, resource_type: 'image' },
     (error, result) => {

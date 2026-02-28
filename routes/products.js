@@ -23,6 +23,45 @@ const TAPE_CATEGORY_FOLDERS = Object.freeze({
   'tape-swatches-prints': 'tape-swatches-prints',
   'tape-swatches-low-inventory': 'tape-swatches-low-inventory',
 });
+const SIZE_LIST_SPLIT_RE = /[,;\n|]+/;
+const SIZE_BODY_KEYS = Object.freeze([
+  'sizes',
+  'sizeOptions',
+  'size_options',
+  'sizeVariants',
+  'size_variants',
+  'selectedSize',
+  'selected_size',
+  'size',
+  'sizeLabel',
+  'size_label',
+  'sizeWidth',
+  'size_width',
+  'widthIn',
+  'width_in',
+  'sizeHeight',
+  'size_height',
+  'heightIn',
+  'height_in',
+  'sizeDepth',
+  'size_depth',
+  'depthIn',
+  'depth_in',
+  'sizeLength',
+  'size_length',
+  'sizeLetter',
+  'size_letter',
+  'letterSize',
+  'letter_size',
+  'sizeCode',
+  'size_code',
+  'selectedSizeDimensions',
+  'selected_size_dimensions',
+  'sizeDimensions',
+  'size_dimensions',
+]);
+
+const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
 
 const cacheWithGroup = (duration, group) => {
   const middleware = cache(duration);
@@ -78,6 +117,184 @@ const upload = multer({
   },
 });
 
+const normalizeString = (value, { upper = false } = {}) => {
+  if (value === undefined || value === null) return '';
+  const normalized = String(value).replace(/\s+/g, ' ').trim();
+  if (!normalized) return '';
+  return upper ? normalized.toUpperCase() : normalized;
+};
+
+const dedupeStrings = (list) => {
+  const out = [];
+  const seen = new Set();
+  (Array.isArray(list) ? list : []).forEach((entry) => {
+    const normalized = normalizeString(entry);
+    if (!normalized) return;
+    const key = normalized.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(normalized);
+  });
+  return out;
+};
+
+const parseStringArray = (value) => {
+  if (value === undefined || value === null || value === '') return [];
+  if (Array.isArray(value)) {
+    return value.flatMap((entry) => parseStringArray(entry));
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return [];
+    if (
+      (trimmed.startsWith('[') && trimmed.endsWith(']'))
+      || (trimmed.startsWith('{') && trimmed.endsWith('}'))
+    ) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (parsed !== value) {
+          return parseStringArray(parsed);
+        }
+      } catch {
+        // treat as plain text below
+      }
+    }
+    return trimmed
+      .split(SIZE_LIST_SPLIT_RE)
+      .map((entry) => normalizeString(entry))
+      .filter(Boolean);
+  }
+  if (typeof value === 'object') {
+    const maybeList = [
+      value.sizes,
+      value.sizeOptions,
+      value.size_options,
+      value.sizeVariants,
+      value.size_variants,
+      value.options,
+      value.values,
+    ];
+    const resolved = maybeList.flatMap((entry) => parseStringArray(entry));
+    if (resolved.length) return resolved;
+    const scalar = [
+      value.selectedSize,
+      value.selected_size,
+      value.size,
+      value.sizeLabel,
+      value.size_label,
+      value.label,
+      value.value,
+      value.name,
+      value.title,
+    ]
+      .map((entry) => normalizeString(entry))
+      .filter(Boolean);
+    return scalar;
+  }
+  return [normalizeString(value)].filter(Boolean);
+};
+
+const pickFirstBodyValue = (body, keys) => {
+  for (const key of keys) {
+    if (hasOwn(body, key)) return body[key];
+  }
+  return undefined;
+};
+
+const parseNumberOrUndefined = (value) => {
+  if (value === undefined || value === null || value === '') return undefined;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return undefined;
+  return parsed;
+};
+
+const parseSelectedSizeDimensions = (body) => {
+  const raw = pickFirstBodyValue(body, [
+    'selectedSizeDimensions',
+    'selected_size_dimensions',
+    'sizeDimensions',
+    'size_dimensions',
+  ]);
+  if (raw === undefined || raw === null || raw === '') return undefined;
+
+  let source = raw;
+  if (typeof source === 'string') {
+    const trimmed = source.trim();
+    if (!trimmed) return undefined;
+    try {
+      source = JSON.parse(trimmed);
+    } catch {
+      return undefined;
+    }
+  }
+
+  if (!source || typeof source !== 'object' || Array.isArray(source)) return undefined;
+
+  const width = parseNumberOrUndefined(source.width ?? source.w ?? source.x);
+  const height = parseNumberOrUndefined(source.height ?? source.h ?? source.y ?? source.length ?? source.l);
+  const depth = parseNumberOrUndefined(source.depth ?? source.d ?? source.z ?? source.length ?? source.l);
+  const length = parseNumberOrUndefined(source.length ?? source.l ?? source.depth ?? source.d);
+
+  const out = {};
+  if (width !== undefined) out.width = width;
+  if (height !== undefined) out.height = height;
+  if (depth !== undefined) out.depth = depth;
+  if (length !== undefined) out.length = length;
+
+  return Object.keys(out).length ? out : undefined;
+};
+
+const buildSizePayload = (body, { forUpdate = false } = {}) => {
+  const hasAnyInput = SIZE_BODY_KEYS.some((key) => hasOwn(body, key));
+  if (!hasAnyInput) return { hasAnyInput: false, payload: {} };
+
+  const listRaw = pickFirstBodyValue(body, ['sizeOptions', 'size_options', 'sizes', 'sizeVariants', 'size_variants']);
+  let sizeOptions = dedupeStrings(parseStringArray(listRaw));
+
+  let selectedSize = normalizeString(
+    pickFirstBodyValue(body, ['selectedSize', 'selected_size', 'size', 'sizeLabel', 'size_label'])
+  );
+  let sizeLabel = normalizeString(
+    pickFirstBodyValue(body, ['sizeLabel', 'size_label', 'selectedSize', 'selected_size', 'size'])
+  );
+
+  const sizeWidth = normalizeString(
+    pickFirstBodyValue(body, ['sizeWidth', 'size_width', 'widthIn', 'width_in'])
+  );
+  const sizeHeight = normalizeString(
+    pickFirstBodyValue(body, ['sizeHeight', 'size_height', 'heightIn', 'height_in'])
+  );
+  const sizeDepth = normalizeString(
+    pickFirstBodyValue(body, ['sizeDepth', 'size_depth', 'depthIn', 'depth_in', 'sizeLength', 'size_length'])
+  );
+  const sizeLetter = normalizeString(
+    pickFirstBodyValue(body, ['sizeLetter', 'size_letter', 'letterSize', 'letter_size', 'sizeCode', 'size_code']),
+    { upper: true }
+  );
+
+  if (selectedSize && !sizeOptions.some((entry) => entry.toLowerCase() === selectedSize.toLowerCase())) {
+    sizeOptions = [selectedSize, ...sizeOptions];
+  }
+  if (!selectedSize && sizeOptions.length) selectedSize = sizeOptions[0];
+  if (!sizeLabel && selectedSize) sizeLabel = selectedSize;
+
+  const selectedSizeDimensions = parseSelectedSizeDimensions(body);
+
+  const payload = {
+    sizes: sizeOptions,
+    sizeOptions,
+    selectedSize: selectedSize || '',
+    sizeLabel: sizeLabel || '',
+    sizeWidth: sizeWidth || '',
+    sizeHeight: sizeHeight || '',
+    sizeDepth: sizeDepth || '',
+    sizeLetter: sizeLetter || '',
+    selectedSizeDimensions: selectedSizeDimensions ?? (forUpdate ? null : undefined),
+  };
+
+  return { hasAnyInput: true, payload };
+};
+
 // CREATE
 router.post('/', upload.single('image'), async (req, res) => {
   try {
@@ -90,6 +307,7 @@ router.post('/', upload.single('image'), async (req, res) => {
       category,
       material,
       color,
+      description,
     } = req.body;
 
     if (!name || !name.trim()) {
@@ -109,6 +327,8 @@ router.post('/', upload.single('image'), async (req, res) => {
       }
     }
 
+    const sizeMeta = buildSizePayload(req.body, { forUpdate: false });
+
     const doc = await Product.create({
       name: name.trim(),
       quantity: Number.isFinite(qtyNum) ? qtyNum : 0,
@@ -117,7 +337,9 @@ router.post('/', upload.single('image'), async (req, res) => {
       category: categoryValue,
       material: material || '',
       color: color || '',
+      description: description || '',
       image,
+      ...(sizeMeta.hasAnyInput ? sizeMeta.payload : {}),
     });
 
     const out = doc.toObject();
@@ -171,6 +393,12 @@ router.patch('/:id', upload.single('image'), async (req, res) => {
 
     if (typeof req.body.material !== 'undefined') updates.material = req.body.material || '';
     if (typeof req.body.color !== 'undefined') updates.color = req.body.color || '';
+    if (typeof req.body.description !== 'undefined') updates.description = req.body.description || '';
+
+    const sizeMeta = buildSizePayload(req.body, { forUpdate: true });
+    if (sizeMeta.hasAnyInput) {
+      Object.assign(updates, sizeMeta.payload);
+    }
 
     if (req.file) {
       try {

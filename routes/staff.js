@@ -27,7 +27,7 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
-    const ok = /jpeg|jpg|png|webp|gif/.test((file.mimetype || '').toLowerCase());
+    const ok = /jpeg|jpg|png|webp|gif|heic|heif/.test((file.mimetype || '').toLowerCase());
     cb(ok ? null : new multer.MulterError('LIMIT_UNEXPECTED_FILE', 'photo'), ok);
   },
 });
@@ -35,8 +35,12 @@ const upload = multer({
 const uploadToCloudinary = (file) => new Promise((resolve, reject) => {
   if (!file) return resolve('');
   const folder = process.env.CLOUDINARY_FOLDER || 'staff';
+  const mime = String(file?.mimetype || '').toLowerCase();
+  const shouldForceJpeg = mime.includes('heic') || mime.includes('heif');
+  const uploadOptions = { folder, resource_type: 'image' };
+  if (shouldForceJpeg) uploadOptions.format = 'jpg';
   const stream = cloudinary.uploader.upload_stream(
-    { folder, resource_type: 'image' },
+    uploadOptions,
     (error, result) => {
       if (error) return reject(error);
       resolve(result.secure_url);

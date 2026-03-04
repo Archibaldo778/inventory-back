@@ -96,8 +96,12 @@ const resolveCloudinaryFolderForCategory = (categoryValue) => {
 
 const uploadImageToCloudinary = (file, categoryValue = '') => new Promise((resolve, reject) => {
   const folder = resolveCloudinaryFolderForCategory(categoryValue);
+  const mime = String(file?.mimetype || '').toLowerCase();
+  const shouldForceJpeg = mime.includes('heic') || mime.includes('heif');
+  const uploadOptions = { folder, resource_type: 'image' };
+  if (shouldForceJpeg) uploadOptions.format = 'jpg';
   const stream = cloudinary.uploader.upload_stream(
-    { folder },
+    uploadOptions,
     (error, result) => {
       if (error) return reject(error);
       resolve(result?.secure_url || result?.url || null);
@@ -111,7 +115,7 @@ const upload = multer({
   storage,
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
-    const ok = /jpeg|jpg|png|webp/.test((file.mimetype || '').toLowerCase());
+    const ok = /jpeg|jpg|png|webp|heic|heif/.test((file.mimetype || '').toLowerCase());
     if (ok) return cb(null, true);
     cb(new multer.MulterError('LIMIT_UNEXPECTED_FILE', 'image'));
   },

@@ -97,7 +97,8 @@ const resolveCloudinaryFolderForCategory = (categoryValue) => {
 const uploadImageToCloudinary = (file, categoryValue = '') => new Promise((resolve, reject) => {
   const folder = resolveCloudinaryFolderForCategory(categoryValue);
   const mime = String(file?.mimetype || '').toLowerCase();
-  const shouldForceJpeg = mime.includes('heic') || mime.includes('heif');
+  const originalName = String(file?.originalname || '').toLowerCase();
+  const shouldForceJpeg = mime.includes('heic') || mime.includes('heif') || /\.(heic|heif)$/i.test(originalName);
   const uploadOptions = { folder, resource_type: 'image' };
   if (shouldForceJpeg) uploadOptions.format = 'jpg';
   const stream = cloudinary.uploader.upload_stream(
@@ -111,11 +112,19 @@ const uploadImageToCloudinary = (file, categoryValue = '') => new Promise((resol
 });
 
 const storage = multer.memoryStorage();
+const isAcceptedImageUpload = (file) => {
+  const mime = String(file?.mimetype || '').toLowerCase();
+  const originalName = String(file?.originalname || '').toLowerCase();
+  if (/jpeg|jpg|png|webp|heic|heif/.test(mime)) return true;
+  if (/\.(jpe?g|png|webp|heic|heif)$/i.test(originalName)) return true;
+  return false;
+};
+
 const upload = multer({
   storage,
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
-    const ok = /jpeg|jpg|png|webp|heic|heif/.test((file.mimetype || '').toLowerCase());
+    const ok = isAcceptedImageUpload(file);
     if (ok) return cb(null, true);
     cb(new multer.MulterError('LIMIT_UNEXPECTED_FILE', 'image'));
   },

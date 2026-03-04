@@ -23,7 +23,10 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
-    const ok = /jpeg|jpg|png|webp|heic|heif/.test((file.mimetype || '').toLowerCase());
+    const mime = String(file?.mimetype || '').toLowerCase();
+    const originalName = String(file?.originalname || '').toLowerCase();
+    const ok = /jpeg|jpg|png|webp|heic|heif/.test(mime)
+      || /\.(jpe?g|png|webp|heic|heif)$/i.test(originalName);
     if (ok) return cb(null, true);
     cb(new multer.MulterError('LIMIT_UNEXPECTED_FILE', 'image'));
   },
@@ -85,7 +88,8 @@ const uploadToCloudinary = (file) => new Promise((resolve, reject) => {
   if (!file) return resolve('');
   const folder = process.env.CLOUDINARY_BEVERAGE_FOLDER || 'beverage';
   const mime = String(file.mimetype || '').toLowerCase();
-  const shouldForceJpeg = mime.includes('heic') || mime.includes('heif');
+  const originalName = String(file?.originalname || '').toLowerCase();
+  const shouldForceJpeg = mime.includes('heic') || mime.includes('heif') || /\.(heic|heif)$/i.test(originalName);
   const uploadOptions = { folder, resource_type: 'image' };
   if (shouldForceJpeg) uploadOptions.format = 'jpg';
   const stream = cloudinary.uploader.upload_stream(

@@ -58,6 +58,7 @@ import beverageRoutes from './routes/beverage.js';
 import clientRoutes from './routes/clients.js';
 import proposalRoutes from './routes/proposals.js';
 import proposalTemplateRoutes from './routes/proposalTemplates.js';
+import toolsRoutes from './routes/tools.js';
 app.use('/api/products', productRoutes);
 app.use('/api/users', userRoutes);
 app.use('/users', userRoutes);
@@ -71,6 +72,7 @@ app.use('/api/beverage-items', beverageRoutes);
 app.use('/api/clients', clientRoutes);
 app.use('/api/proposals', proposalRoutes);
 app.use('/api/proposal-templates', proposalTemplateRoutes);
+app.use('/api/tools', toolsRoutes);
 
 // подключение к Mongo
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/inventory';

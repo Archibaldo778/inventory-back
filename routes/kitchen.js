@@ -94,6 +94,16 @@ const readGuestLimit = (body = {}) => (
   ?? body.guest_limit_text
 );
 
+const readHidden = (body = {}) => (
+  body.hidden
+  ?? body.isHidden
+  ?? body.is_hidden
+  ?? body.hideFromBoard
+  ?? body.hide_from_board
+  ?? body.hideFromBoards
+  ?? body.hide_from_boards
+);
+
 const ensureUploadsDir = async () => {
   const target = path.join(__dirname, '..', 'uploads', 'kitchen');
   await fs.promises.mkdir(target, { recursive: true });
@@ -161,6 +171,7 @@ router.post('/', upload.single('image'), async (req, res) => {
       categories: parseStringArray(body.categories),
       allSeason: parseBoolean(body.allSeason) ?? false,
       guestLimit: sanitizeStr(readGuestLimit(body)),
+      hidden: parseBoolean(readHidden(body)) ?? false,
     };
 
     const season = normalizeSeason(body.season);
@@ -217,6 +228,18 @@ router.patch('/:id', upload.single('image'), async (req, res) => {
     if (body.allSeason !== undefined) {
       const bool = parseBoolean(body.allSeason);
       updates.allSeason = Boolean(bool);
+    }
+
+    if (
+      body.hidden !== undefined
+      || body.isHidden !== undefined
+      || body.is_hidden !== undefined
+      || body.hideFromBoard !== undefined
+      || body.hide_from_board !== undefined
+      || body.hideFromBoards !== undefined
+      || body.hide_from_boards !== undefined
+    ) {
+      updates.hidden = Boolean(parseBoolean(readHidden(body)));
     }
 
     if (

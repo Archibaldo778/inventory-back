@@ -9,6 +9,7 @@ const KitchenItemSchema = new mongoose.Schema({
   seasonYear: { type: Number, default: null },
   allSeason: { type: Boolean, default: false },
   guestLimit: { type: String, default: '', trim: true },
+  hidden: { type: Boolean, default: false },
   image: { type: String, default: null },
 }, { timestamps: true });
 

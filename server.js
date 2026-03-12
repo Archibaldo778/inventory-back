@@ -8,6 +8,13 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import bcrypt from 'bcryptjs';
 import User from './models/Users.js';
+import {
+  requireAdmin,
+  requireAdminForMutations,
+  requireAuth,
+  requireMethodGuards,
+  requireProposalAccess,
+} from './middleware/auth.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -16,13 +23,75 @@ const envFile = process.env.NODE_ENV === 'production' ? '.env.production' : '.en
 dotenv.config({ path: path.join(__dirname, envFile) });
 dotenv.config({ path: path.join(__dirname, '.env') });
 
+if (!String(process.env.JWT_SECRET || '').trim()) {
+  throw new Error('JWT_SECRET is required');
+}
+
+const parseOriginList = (...values) => values
+  .flatMap((value) => String(value || '').split(','))
+  .map((value) => value.trim())
+  .filter(Boolean);
+
+const allowedCorsOrigins = new Set([
+  ...parseOriginList(
+    process.env.CORS_ALLOWED_ORIGINS,
+    process.env.CORS_ORIGINS,
+    process.env.CORS_ORIGIN,
+    process.env.FRONTEND_URL,
+    process.env.FRONTEND_ORIGIN,
+    process.env.CLIENT_URL,
+    process.env.APP_URL
+  ),
+  ...(process.env.NODE_ENV === 'production'
+    ? []
+    : [
+        'http://localhost:3000',
+        'http://127.0.0.1:3000',
+        'http://localhost:4173',
+        'http://127.0.0.1:4173',
+        'http://localhost:5173',
+        'http://127.0.0.1:5173',
+      ]),
+]);
+
+if (allowedCorsOrigins.size === 0) {
+  console.warn('⚠️ No allowed CORS origins configured. Only same-origin and non-browser requests will work.');
+}
+
+const corsOptions = {
+  origin(origin, callback) {
+    if (!origin) return callback(null, true);
+    return callback(null, allowedCorsOrigins.has(origin));
+  },
+  credentials: true,
+  optionsSuccessStatus: 204,
+  allowedHeaders: ['Authorization', 'Content-Type'],
+};
+
+const requireAdminForPatchDelete = requireMethodGuards((req) => {
+  const method = String(req.method || '').toUpperCase();
+  return ['PATCH', 'PUT', 'DELETE'].includes(method) ? requireAdmin : null;
+});
+
+const requireUsersAccess = requireMethodGuards((req) => {
+  const method = String(req.method || '').toUpperCase();
+  return ['GET', 'HEAD'].includes(method) ? requireProposalAccess : requireAdmin;
+});
+
+const requireProposalTemplateAccess = requireMethodGuards((req) => {
+  const method = String(req.method || '').toUpperCase();
+  const requestPath = String(req.path || '');
+  if (['GET', 'HEAD'].includes(method)) return requireProposalAccess;
+  if (method === 'POST' && /\/apply\/?$/.test(requestPath)) return requireProposalAccess;
+  return requireAdmin;
+});
 
 const app = express();
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
 
 app.use(helmet({ crossOriginResourcePolicy: false }));
-app.use(cors({ origin: true, credentials: true }));
+app.use(cors(corsOptions));
 app.use(compression());
 
 // Increase body limit to allow page preview (base64) and large canvases
@@ -59,20 +128,21 @@ import clientRoutes from './routes/clients.js';
 import proposalRoutes from './routes/proposals.js';
 import proposalTemplateRoutes from './routes/proposalTemplates.js';
 import toolsRoutes from './routes/tools.js';
-app.use('/api/products', productRoutes);
-app.use('/api/users', userRoutes);
-app.use('/users', userRoutes);
+
 app.use('/api/auth', authRoutes);
-app.use('/api/events', eventRoutes);
-app.use('/api/decks', deckRoutes);
-app.use('/api/pages', pageRoutes);
-app.use('/api/staff', staffRoutes);
-app.use('/api/kitchen-items', kitchenRoutes);
-app.use('/api/beverage-items', beverageRoutes);
-app.use('/api/clients', clientRoutes);
-app.use('/api/proposals', proposalRoutes);
-app.use('/api/proposal-templates', proposalTemplateRoutes);
-app.use('/api/tools', toolsRoutes);
+app.use('/api/products', requireAuth, requireAdminForMutations, productRoutes);
+app.use('/api/users', requireAuth, requireUsersAccess, userRoutes);
+app.use('/users', requireAuth, requireUsersAccess, userRoutes);
+app.use('/api/events', requireAuth, eventRoutes);
+app.use('/api/decks', requireAuth, deckRoutes);
+app.use('/api/pages', requireAuth, pageRoutes);
+app.use('/api/staff', requireAuth, requireAdminForMutations, staffRoutes);
+app.use('/api/kitchen-items', requireAuth, requireAdminForMutations, kitchenRoutes);
+app.use('/api/beverage-items', requireAuth, requireAdminForMutations, beverageRoutes);
+app.use('/api/clients', requireAuth, requireAdminForPatchDelete, clientRoutes);
+app.use('/api/proposals', requireAuth, requireProposalAccess, proposalRoutes);
+app.use('/api/proposal-templates', requireAuth, requireProposalTemplateAccess, proposalTemplateRoutes);
+app.use('/api/tools', requireAuth, requireAdmin, toolsRoutes);
 
 // подключение к Mongo
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/inventory';

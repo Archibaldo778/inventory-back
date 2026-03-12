@@ -2,6 +2,7 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import User from '../models/Users.js';
+import { getJwtSecret } from '../middleware/auth.js';
 
 const router = Router();
 
@@ -9,7 +10,7 @@ function setRefreshCookie(res, token) {
   const isProd = process.env.NODE_ENV === 'production';
   res.cookie('rt', token, {
     httpOnly: true,
-    sameSite: 'lax',
+    sameSite: isProd ? 'none' : 'lax',
     secure: isProd,
     path: '/api/auth',
     // maxAge will be embedded in token; still set a cap here if needed
@@ -90,20 +91,26 @@ router.post('/login', async (req, res) => {
     if (!password || (!email && !username)) {
       return res.status(400).json({ message: 'email or username and password are required' });
     }
-    const q = email ? { email: String(email).toLowerCase().trim() } : { username: String(username).trim() };
-    const user = await User.findOne(q).select('+password');
+    const query = email
+      ? { email: String(email).toLowerCase().trim() }
+      : { username: String(username).trim() };
+    const user = await User.findOne(query).select('+password');
     if (!user) return res.status(401).json({ message: 'Invalid credentials' });
+    if (user.isActive === false) return res.status(403).json({ message: 'User account is inactive' });
+
     const ok = await bcrypt.compare(String(password), user.password);
     if (!ok) return res.status(401).json({ message: 'Invalid credentials' });
 
     const payload = buildTokenPayload(user);
+    const jwtSecret = getJwtSecret();
     const exp = remember ? '30d' : '12h';
-    const token = jwt.sign(payload, process.env.JWT_SECRET || 'dev_secret', { expiresIn: exp });
+    const token = jwt.sign(payload, jwtSecret, { expiresIn: exp });
 
     // issue refresh token with longer lifetime (90d) and set httpOnly cookie
-    const rt = jwt.sign(payload, process.env.JWT_SECRET || 'dev_secret', { expiresIn: remember ? '90d' : '30d' });
-    setRefreshCookie(res, rt);
+    const refreshToken = jwt.sign(payload, jwtSecret, { expiresIn: remember ? '90d' : '30d' });
+    setRefreshCookie(res, refreshToken);
 
+    res.setHeader('Cache-Control', 'no-store');
     res.json({ token, user: buildUserResponse(user) });
   } catch (e) {
     res.status(500).json({ message: e.message || 'Login error' });
@@ -113,16 +120,20 @@ router.post('/login', async (req, res) => {
 // Refresh access token using refresh cookie
 router.post('/refresh', async (req, res) => {
   try {
-    const rt = readCookie(req, 'rt');
-    if (!rt) return res.status(401).json({ message: 'No refresh token' });
-    const data = jwt.verify(rt, process.env.JWT_SECRET || 'dev_secret');
+    const refreshToken = readCookie(req, 'rt');
+    if (!refreshToken) return res.status(401).json({ message: 'No refresh token' });
 
-    const user = await User.findById(data?.sub).select('_id username email role seeProposals permissions');
+    const jwtSecret = getJwtSecret();
+    const data = jwt.verify(refreshToken, jwtSecret);
+
+    const user = await User.findById(data?.sub).select('_id username email role seeProposals permissions isActive');
     if (!user) return res.status(401).json({ message: 'User not found' });
+    if (user.isActive === false) return res.status(403).json({ message: 'User account is inactive' });
 
     const payload = buildTokenPayload(user);
-    const token = jwt.sign(payload, process.env.JWT_SECRET || 'dev_secret', { expiresIn: '12h' });
+    const token = jwt.sign(payload, jwtSecret, { expiresIn: '12h' });
 
+    res.setHeader('Cache-Control', 'no-store');
     res.json({ token, user: buildUserResponse(user) });
   } catch (e) {
     res.status(401).json({ message: 'Invalid refresh' });
@@ -131,7 +142,13 @@ router.post('/refresh', async (req, res) => {
 
 router.post('/logout', (req, res) => {
   const isProd = process.env.NODE_ENV === 'production';
-  res.clearCookie('rt', { httpOnly: true, sameSite: 'lax', secure: isProd, path: '/api/auth' });
+  res.clearCookie('rt', {
+    httpOnly: true,
+    sameSite: isProd ? 'none' : 'lax',
+    secure: isProd,
+    path: '/api/auth',
+  });
+  res.setHeader('Cache-Control', 'no-store');
   res.json({ ok: true });
 });
 

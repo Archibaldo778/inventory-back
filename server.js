@@ -24,7 +24,7 @@ dotenv.config({ path: path.join(__dirname, envFile) });
 dotenv.config({ path: path.join(__dirname, '.env') });
 
 if (!String(process.env.JWT_SECRET || '').trim()) {
-  throw new Error('JWT_SECRET is required');
+  console.warn('JWT_SECRET is not configured. Auth endpoints will reject requests until it is set.');
 }
 
 const parseOriginList = (...values) => values

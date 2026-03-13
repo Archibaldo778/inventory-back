@@ -43,7 +43,10 @@ const allowedCorsOrigins = new Set([
     process.env.APP_URL
   ),
   ...(process.env.NODE_ENV === 'production'
-    ? []
+    ? [
+        'https://ocdecks.com',
+        'https://www.ocdecks.com',
+      ]
     : [
         'http://localhost:3000',
         'http://127.0.0.1:3000',

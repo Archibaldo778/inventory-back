@@ -61,10 +61,26 @@ if (allowedCorsOrigins.size === 0) {
   console.warn('⚠️ No allowed CORS origins configured. Only same-origin and non-browser requests will work.');
 }
 
+const isAllowedCorsOrigin = (origin) => {
+  const normalized = String(origin || '').trim();
+  if (!normalized) return true;
+  return allowedCorsOrigins.has(normalized);
+};
+
+const applyCorsHeaders = (req, res) => {
+  const origin = String(req.headers?.origin || '').trim();
+  if (!origin || !isAllowedCorsOrigin(origin)) return false;
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Headers', 'Authorization,Content-Type');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS');
+  res.append('Vary', 'Origin');
+  return true;
+};
+
 const corsOptions = {
   origin(origin, callback) {
-    if (!origin) return callback(null, true);
-    return callback(null, allowedCorsOrigins.has(origin));
+    return callback(null, isAllowedCorsOrigin(origin));
   },
   credentials: true,
   optionsSuccessStatus: 204,
@@ -94,6 +110,13 @@ app.disable('x-powered-by');
 app.set('trust proxy', 1);
 
 app.use(helmet({ crossOriginResourcePolicy: false }));
+app.use((req, res, next) => {
+  const applied = applyCorsHeaders(req, res);
+  if (req.method === 'OPTIONS' && applied) {
+    return res.sendStatus(204);
+  }
+  return next();
+});
 app.use(cors(corsOptions));
 app.use(compression());
 

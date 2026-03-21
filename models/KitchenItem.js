@@ -8,6 +8,7 @@ const KitchenItemSchema = new mongoose.Schema({
   season: { type: String, enum: ['', 'fall_winter', 'spring_summer'], default: '' },
   seasonYear: { type: Number, default: null },
   allSeason: { type: Boolean, default: false },
+  seasonWindow: { type: String, enum: ['', 'apr_jun', 'jul_sep'], default: '' },
   guestLimit: { type: String, default: '', trim: true },
   hidden: { type: Boolean, default: false },
   image: { type: String, default: null },

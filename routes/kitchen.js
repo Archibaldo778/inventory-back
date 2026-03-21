@@ -77,6 +77,30 @@ const normalizeSeason = (value) => {
   return '';
 };
 
+const normalizeSeasonWindow = (value) => {
+  if (value === undefined || value === null) return undefined;
+  const normalized = String(value).trim().toLowerCase();
+  if (!normalized) return '';
+  if (
+    normalized === 'apr_jun'
+    || normalized === 'april_june'
+    || normalized === 'april-june'
+    || normalized === 'april_jun'
+  ) {
+    return 'apr_jun';
+  }
+  if (
+    normalized === 'jul_sep'
+    || normalized === 'july_sept'
+    || normalized === 'july-sept'
+    || normalized === 'july_sep'
+    || normalized === 'jul_sept'
+  ) {
+    return 'jul_sep';
+  }
+  return '';
+};
+
 const parseSeasonYear = (value) => {
   if (value === undefined || value === null) return undefined;
   if (value === '') return null;
@@ -92,6 +116,15 @@ const readGuestLimit = (body = {}) => (
   ?? body.guest_limit_note
   ?? body.guestLimitText
   ?? body.guest_limit_text
+);
+
+const readSeasonWindow = (body = {}) => (
+  body.seasonWindow
+  ?? body.season_window
+  ?? body.springSummerWindow
+  ?? body.spring_summer_window
+  ?? body.availabilityWindow
+  ?? body.availability_window
 );
 
 const readHidden = (body = {}) => (
@@ -170,6 +203,7 @@ router.post('/', upload.single('image'), async (req, res) => {
       dietary: parseStringArray(body.dietary),
       categories: parseStringArray(body.categories),
       allSeason: parseBoolean(body.allSeason) ?? false,
+      seasonWindow: normalizeSeasonWindow(readSeasonWindow(body)) ?? '',
       guestLimit: sanitizeStr(readGuestLimit(body)),
       hidden: parseBoolean(readHidden(body)) ?? false,
     };
@@ -228,6 +262,17 @@ router.patch('/:id', upload.single('image'), async (req, res) => {
     if (body.allSeason !== undefined) {
       const bool = parseBoolean(body.allSeason);
       updates.allSeason = Boolean(bool);
+    }
+
+    if (
+      body.seasonWindow !== undefined
+      || body.season_window !== undefined
+      || body.springSummerWindow !== undefined
+      || body.spring_summer_window !== undefined
+      || body.availabilityWindow !== undefined
+      || body.availability_window !== undefined
+    ) {
+      updates.seasonWindow = normalizeSeasonWindow(readSeasonWindow(body)) || '';
     }
 
     if (

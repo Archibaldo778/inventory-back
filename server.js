@@ -140,19 +140,39 @@ app.use('/uploads', express.static(uploadsDir, {
   },
 }));
 
-const PUBLIC_IMAGE_PROXY_HOSTS = new Set([
-  'res.cloudinary.com',
-  'inventory-back-y61h.onrender.com',
+const LOCAL_IMAGE_PROXY_HOSTS = new Set([
   'localhost',
   '127.0.0.1',
   '0.0.0.0',
 ]);
 
+const isPrivateIpv4 = (hostname) => {
+  const parts = String(hostname || '').trim().split('.').map((part) => Number(part));
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false;
+  if (parts[0] === 10) return true;
+  if (parts[0] === 127) return true;
+  if (parts[0] === 169 && parts[1] === 254) return true;
+  if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
+  if (parts[0] === 192 && parts[1] === 168) return true;
+  return false;
+};
+
+const isPrivateIpv6 = (hostname) => {
+  const normalized = String(hostname || '').trim().toLowerCase();
+  if (!normalized) return false;
+  if (normalized === '::1') return true;
+  if (normalized.startsWith('fc') || normalized.startsWith('fd')) return true;
+  if (normalized.startsWith('fe80:')) return true;
+  return false;
+};
+
 const isAllowedPublicImageHost = (hostname) => {
   const normalized = String(hostname || '').trim().toLowerCase();
   if (!normalized) return false;
-  if (PUBLIC_IMAGE_PROXY_HOSTS.has(normalized)) return true;
-  return normalized.endsWith('.cloudinary.com');
+  if (LOCAL_IMAGE_PROXY_HOSTS.has(normalized)) return false;
+  if (normalized.endsWith('.local') || normalized.endsWith('.internal')) return false;
+  if (isPrivateIpv4(normalized) || isPrivateIpv6(normalized)) return false;
+  return true;
 };
 
 app.get('/api/image-proxy', async (req, res) => {

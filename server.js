@@ -140,6 +140,67 @@ app.use('/uploads', express.static(uploadsDir, {
   },
 }));
 
+const PUBLIC_IMAGE_PROXY_HOSTS = new Set([
+  'res.cloudinary.com',
+  'inventory-back-y61h.onrender.com',
+  'localhost',
+  '127.0.0.1',
+  '0.0.0.0',
+]);
+
+const isAllowedPublicImageHost = (hostname) => {
+  const normalized = String(hostname || '').trim().toLowerCase();
+  if (!normalized) return false;
+  if (PUBLIC_IMAGE_PROXY_HOSTS.has(normalized)) return true;
+  return normalized.endsWith('.cloudinary.com');
+};
+
+app.get('/api/image-proxy', async (req, res) => {
+  const rawUrl = String(req.query?.url || '').trim();
+  if (!rawUrl) {
+    return res.status(400).json({ message: 'url query param is required' });
+  }
+
+  let targetUrl;
+  try {
+    targetUrl = new URL(rawUrl);
+  } catch {
+    return res.status(400).json({ message: 'Invalid image URL' });
+  }
+
+  if (!['http:', 'https:'].includes(targetUrl.protocol)) {
+    return res.status(400).json({ message: 'Unsupported image protocol' });
+  }
+
+  if (!isAllowedPublicImageHost(targetUrl.hostname)) {
+    return res.status(403).json({ message: 'Image host is not allowed' });
+  }
+
+  try {
+    const upstream = await fetch(targetUrl.toString(), {
+      method: 'GET',
+      redirect: 'follow',
+    });
+
+    if (!upstream.ok) {
+      return res.status(502).json({ message: `Upstream image request failed (${upstream.status})` });
+    }
+
+    const contentType = String(upstream.headers.get('content-type') || '').trim().toLowerCase();
+    if (!contentType.startsWith('image/')) {
+      return res.status(415).json({ message: 'Upstream resource is not an image' });
+    }
+
+    const buffer = Buffer.from(await upstream.arrayBuffer());
+    const cacheControl = String(upstream.headers.get('cache-control') || '').trim();
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Cache-Control', cacheControl || 'public, max-age=86400');
+    return res.status(200).send(buffer);
+  } catch (error) {
+    return res.status(502).json({ message: error instanceof Error ? error.message : 'Failed to proxy image' });
+  }
+});
+
 // роуты товаров
 import productRoutes from './routes/products.js';
 import userRoutes from './routes/users.js';

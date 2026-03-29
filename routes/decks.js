@@ -96,4 +96,23 @@ router.patch('/:id', async (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
+// Delete deck with all pages
+router.delete('/:id', async (req, res) => {
+  try {
+    const deck = await Deck.findById(req.params.id);
+    if (!deck) return res.status(404).json({ error: 'Not found' });
+
+    const siblingCount = await Deck.countDocuments({ eventId: deck.eventId, type: deck.type });
+    if (siblingCount <= 1) {
+      return res.status(409).json({ error: 'At least one deck must remain' });
+    }
+
+    await Page.deleteMany({ deckId: deck._id });
+    await Deck.deleteOne({ _id: deck._id });
+
+    clearCache();
+    res.json({ ok: true });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
 export default router;

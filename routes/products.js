@@ -1,8 +1,16 @@
+import fs from 'fs';
+import path from 'path';
+import crypto from 'crypto';
 import multer from 'multer';
 import { Router } from 'express';
 import apicache from 'apicache';
+import { Readable } from 'stream';
+import { fileURLToPath } from 'url';
 import Product from '../models/Product.js';
 import { v2 as cloudinary } from 'cloudinary';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -94,6 +102,31 @@ const resolveCloudinaryFolderForCategory = (categoryValue) => {
   return `${DEFAULT_TAPE_FOLDER_ROOT}/${tapeSubfolder}`;
 };
 
+const ensureUploadsDir = async () => {
+  const target = path.join(__dirname, '..', 'uploads', 'decor');
+  await fs.promises.mkdir(target, { recursive: true });
+  return target;
+};
+
+const writeLocalDecorImage = async (file) => {
+  if (!file?.buffer) return '';
+  const uploadsDir = await ensureUploadsDir();
+  const original = String(file.originalname || '').trim();
+  const ext = (path.extname(original).toLowerCase().replace(/[^.a-z0-9]/g, '')) || '.jpg';
+  const safeExt = ['.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif'].includes(ext) ? ext : '.jpg';
+  const filename = `decor-${Date.now()}-${crypto.randomUUID()}${safeExt}`;
+  const destination = path.join(uploadsDir, filename);
+  await fs.promises.writeFile(destination, file.buffer);
+  return `/uploads/decor/${filename}`;
+};
+
+const shouldFallbackToLocalUpload = () => {
+  const explicit = String(process.env.DECOR_UPLOAD_FALLBACK || '').trim().toLowerCase();
+  if (explicit === 'local') return true;
+  if (explicit === 'cloudinary-only') return false;
+  return process.env.NODE_ENV !== 'production';
+};
+
 const uploadImageToCloudinary = (file, categoryValue = '') => new Promise((resolve, reject) => {
   const folder = resolveCloudinaryFolderForCategory(categoryValue);
   const mime = String(file?.mimetype || '').toLowerCase();
@@ -108,7 +141,7 @@ const uploadImageToCloudinary = (file, categoryValue = '') => new Promise((resol
       resolve(result?.secure_url || result?.url || null);
     }
   );
-  stream.end(file.buffer);
+  Readable.from(file.buffer).pipe(stream);
 });
 
 const storage = multer.memoryStorage();
@@ -336,7 +369,16 @@ router.post('/', upload.single('image'), async (req, res) => {
         image = await uploadImageToCloudinary(req.file, categoryValue);
       } catch (err) {
         console.error('Cloudinary upload failed:', err);
-        return res.status(500).json({ error: 'Image upload failed' });
+        if (shouldFallbackToLocalUpload()) {
+          try {
+            image = await writeLocalDecorImage(req.file);
+          } catch (fallbackErr) {
+            console.error('Local decor image fallback failed:', fallbackErr);
+            return res.status(500).json({ error: `Failed to upload decor image: ${fallbackErr?.message || fallbackErr}` });
+          }
+        } else {
+          return res.status(500).json({ error: `Failed to upload decor image: ${err?.message || err}` });
+        }
       }
     }
 
@@ -418,7 +460,16 @@ router.patch('/:id', upload.single('image'), async (req, res) => {
         updates.image = await uploadImageToCloudinary(req.file, nextCategoryValue);
       } catch (err) {
         console.error('Cloudinary upload failed on PATCH:', err);
-        return res.status(500).json({ error: 'Image upload failed' });
+        if (shouldFallbackToLocalUpload()) {
+          try {
+            updates.image = await writeLocalDecorImage(req.file);
+          } catch (fallbackErr) {
+            console.error('Local decor image fallback failed on PATCH:', fallbackErr);
+            return res.status(500).json({ error: `Failed to upload decor image: ${fallbackErr?.message || fallbackErr}` });
+          }
+        } else {
+          return res.status(500).json({ error: `Failed to upload decor image: ${err?.message || err}` });
+        }
       }
     }
 

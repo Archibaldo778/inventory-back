@@ -16,8 +16,8 @@ const hasCloudinaryConfig = Boolean(
   && String(process.env.CLOUDINARY_API_KEY || '').trim()
   && String(process.env.CLOUDINARY_API_SECRET || '').trim()
 );
-const photoRoomApiKey = String(process.env.PHOTOROOM_API_KEY || '').trim();
-const hasPhotoRoomConfig = Boolean(photoRoomApiKey);
+const getPhotoRoomApiKey = () => String(process.env.PHOTOROOM_API_KEY || '').trim();
+const hasPhotoRoomConfig = () => Boolean(getPhotoRoomApiKey());
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -111,7 +111,8 @@ router.post('/heif-to-jpg', upload.single('image'), async (req, res) => {
 });
 
 router.post('/remove-background', imageUpload.single('image'), async (req, res) => {
-  if (!hasPhotoRoomConfig) {
+  const photoRoomApiKey = getPhotoRoomApiKey();
+  if (!hasPhotoRoomConfig()) {
     return res.status(500).json({ error: 'Photoroom is not configured on the server' });
   }
   if (!req.file?.buffer) {

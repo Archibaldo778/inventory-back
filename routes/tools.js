@@ -16,7 +16,20 @@ const hasCloudinaryConfig = Boolean(
   && String(process.env.CLOUDINARY_API_KEY || '').trim()
   && String(process.env.CLOUDINARY_API_SECRET || '').trim()
 );
-const getPhotoRoomApiKey = () => String(process.env.PHOTOROOM_API_KEY || '').trim();
+const PHOTOROOM_ENV_KEYS = [
+  'PHOTOROOM_API_KEY',
+  'PHOTOROOM_KEY',
+  'PHOTOROOM_APIKEY',
+  'PHOTO_ROOM_API_KEY',
+  'PHOTOROOM_SDK_API_KEY',
+];
+const getPhotoRoomApiKey = () => {
+  for (const key of PHOTOROOM_ENV_KEYS) {
+    const value = String(process.env[key] || '').trim();
+    if (value) return value;
+  }
+  return '';
+};
 const hasPhotoRoomConfig = () => Boolean(getPhotoRoomApiKey());
 
 const upload = multer({
@@ -113,7 +126,9 @@ router.post('/heif-to-jpg', upload.single('image'), async (req, res) => {
 router.post('/remove-background', imageUpload.single('image'), async (req, res) => {
   const photoRoomApiKey = getPhotoRoomApiKey();
   if (!hasPhotoRoomConfig()) {
-    return res.status(500).json({ error: 'Photoroom is not configured on the server' });
+    return res.status(500).json({
+      error: `Photoroom is not configured on the server. Expected one of: ${PHOTOROOM_ENV_KEYS.join(', ')}`,
+    });
   }
   if (!req.file?.buffer) {
     return res.status(400).json({ error: 'image file is required' });

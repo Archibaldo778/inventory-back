@@ -137,6 +137,24 @@ const readHidden = (body = {}) => (
   ?? body.hide_from_boards
 );
 
+const readWrongPicture = (body = {}) => (
+  body.wrongPicture
+  ?? body.wrong_picture
+  ?? body.isWrongPicture
+  ?? body.is_wrong_picture
+  ?? body.wrongImage
+  ?? body.wrong_image
+);
+
+const readNeedReview = (body = {}) => (
+  body.needReview
+  ?? body.need_review
+  ?? body.needsReview
+  ?? body.needs_review
+  ?? body.reviewNeeded
+  ?? body.review_needed
+);
+
 const ensureUploadsDir = async () => {
   const target = path.join(__dirname, '..', 'uploads', 'kitchen');
   await fs.promises.mkdir(target, { recursive: true });
@@ -206,6 +224,8 @@ router.post('/', upload.single('image'), async (req, res) => {
       seasonWindow: normalizeSeasonWindow(readSeasonWindow(body)) ?? '',
       guestLimit: sanitizeStr(readGuestLimit(body)),
       hidden: parseBoolean(readHidden(body)) ?? false,
+      wrongPicture: parseBoolean(readWrongPicture(body)) ?? false,
+      needReview: parseBoolean(readNeedReview(body)) ?? false,
     };
 
     const season = normalizeSeason(body.season);
@@ -285,6 +305,28 @@ router.patch('/:id', upload.single('image'), async (req, res) => {
       || body.hide_from_boards !== undefined
     ) {
       updates.hidden = Boolean(parseBoolean(readHidden(body)));
+    }
+
+    if (
+      body.wrongPicture !== undefined
+      || body.wrong_picture !== undefined
+      || body.isWrongPicture !== undefined
+      || body.is_wrong_picture !== undefined
+      || body.wrongImage !== undefined
+      || body.wrong_image !== undefined
+    ) {
+      updates.wrongPicture = Boolean(parseBoolean(readWrongPicture(body)));
+    }
+
+    if (
+      body.needReview !== undefined
+      || body.need_review !== undefined
+      || body.needsReview !== undefined
+      || body.needs_review !== undefined
+      || body.reviewNeeded !== undefined
+      || body.review_needed !== undefined
+    ) {
+      updates.needReview = Boolean(parseBoolean(readNeedReview(body)));
     }
 
     if (

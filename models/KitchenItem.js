@@ -11,6 +11,8 @@ const KitchenItemSchema = new mongoose.Schema({
   seasonWindow: { type: String, enum: ['', 'apr_jun', 'jul_sep'], default: '' },
   guestLimit: { type: String, default: '', trim: true },
   hidden: { type: Boolean, default: false },
+  wrongPicture: { type: Boolean, default: false },
+  needReview: { type: Boolean, default: false },
   image: { type: String, default: null },
 }, { timestamps: true });
 

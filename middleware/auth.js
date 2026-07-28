@@ -1,4 +1,5 @@
 import jwt from 'jsonwebtoken';
+import User from '../models/Users.js';
 
 export const ADMIN_ROLES = Object.freeze(['admin', 'super admin']);
 
@@ -86,20 +87,53 @@ export const isAdminAuth = (auth) => ADMIN_ROLE_SET.has(normalizeRole(auth?.role
 
 export const canAccessProposals = (auth) => isAdminAuth(auth) || resolveSeeProposals(auth);
 
-export const requireAuth = (req, res, next) => {
+export const requireAuth = async (req, res, next) => {
   const token = getRequestToken(req);
   if (!token) {
     return res.status(401).json({ message: 'Authentication required' });
   }
 
+  let payload;
   try {
-    const payload = jwt.verify(token, getJwtSecret());
-    const auth = buildAuthContext(payload);
+    payload = jwt.verify(token, getJwtSecret());
+    if (payload?.tokenType && payload.tokenType !== 'access') {
+      return res.status(401).json({ message: 'Invalid token type' });
+    }
+  } catch {
+    return res.status(401).json({ message: 'Invalid or expired token' });
+  }
+
+  const tokenAuth = buildAuthContext(payload);
+  if (!/^[a-f\d]{24}$/i.test(tokenAuth.userId)) {
+    return res.status(401).json({ message: 'Invalid token subject' });
+  }
+
+  try {
+    const persistedUser = await User.findById(tokenAuth.userId)
+      .select('_id username email role seeProposals permissions isActive')
+      .lean();
+    if (!persistedUser) {
+      return res.status(401).json({ message: 'User not found' });
+    }
+    if (persistedUser.isActive === false) {
+      return res.status(403).json({ message: 'User account is inactive' });
+    }
+
+    const auth = buildAuthContext({
+      ...payload,
+      sub: String(persistedUser._id),
+      username: persistedUser.username,
+      email: persistedUser.email,
+      role: persistedUser.role,
+      seeProposals: persistedUser.seeProposals,
+      permissions: persistedUser.permissions,
+    });
     req.auth = auth;
     req.user = auth;
     return next();
-  } catch {
-    return res.status(401).json({ message: 'Invalid or expired token' });
+  } catch (error) {
+    console.error('Authentication state lookup failed:', error?.message || error);
+    return res.status(503).json({ message: 'Authentication service unavailable' });
   }
 };
 

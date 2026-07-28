@@ -5,15 +5,23 @@ import User from '../models/Users.js';
 import { getJwtSecret } from '../middleware/auth.js';
 
 const router = Router();
+const ACCESS_TOKEN_TTL = '15m';
+const REFRESH_TOKEN_TTL_REMEMBERED = '90d';
+const REFRESH_TOKEN_TTL_DEFAULT = '30d';
+const LOGIN_RATE_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_RATE_MAX = 10;
+const LOGIN_RATE_BUCKET_MAX = 10_000;
+const loginRateBuckets = new Map();
 
-function setRefreshCookie(res, token) {
+function setRefreshCookie(res, token, remember = false) {
   const isProd = process.env.NODE_ENV === 'production';
+  const maxAge = (remember ? 90 : 30) * 24 * 60 * 60 * 1000;
   res.cookie('rt', token, {
     httpOnly: true,
     sameSite: isProd ? 'none' : 'lax',
     secure: isProd,
     path: '/api/auth',
-    // maxAge will be embedded in token; still set a cap here if needed
+    maxAge,
   });
 }
 
@@ -85,7 +93,46 @@ function buildTokenPayload(source) {
   };
 }
 
-router.post('/login', async (req, res) => {
+function getLoginRateKey(req) {
+  const body = req.body || {};
+  const identity = String(body.email || body.username || 'unknown').trim().toLowerCase();
+  const ip = String(req.ip || req.socket?.remoteAddress || 'unknown');
+  return `${ip}:${identity}`;
+}
+
+function enforceLoginRateLimit(req, res, next) {
+  const now = Date.now();
+  const key = getLoginRateKey(req);
+  const current = loginRateBuckets.get(key);
+
+  if (!current && loginRateBuckets.size >= LOGIN_RATE_BUCKET_MAX) {
+    for (const [bucketKey, bucket] of loginRateBuckets) {
+      if (bucket.resetAt <= now) loginRateBuckets.delete(bucketKey);
+    }
+    if (loginRateBuckets.size >= LOGIN_RATE_BUCKET_MAX) {
+      res.setHeader('Retry-After', String(Math.ceil(LOGIN_RATE_WINDOW_MS / 1000)));
+      return res.status(429).json({ message: 'Too many login attempts' });
+    }
+  }
+
+  const bucket = !current || current.resetAt <= now
+    ? { count: 0, resetAt: now + LOGIN_RATE_WINDOW_MS }
+    : current;
+  bucket.count += 1;
+  loginRateBuckets.set(key, bucket);
+  req.loginRateKey = key;
+
+  res.setHeader('RateLimit-Limit', String(LOGIN_RATE_MAX));
+  res.setHeader('RateLimit-Remaining', String(Math.max(0, LOGIN_RATE_MAX - bucket.count)));
+  res.setHeader('RateLimit-Reset', String(Math.ceil(bucket.resetAt / 1000)));
+  if (bucket.count > LOGIN_RATE_MAX) {
+    res.setHeader('Retry-After', String(Math.ceil((bucket.resetAt - now) / 1000)));
+    return res.status(429).json({ message: 'Too many login attempts' });
+  }
+  return next();
+}
+
+router.post('/login', enforceLoginRateLimit, async (req, res) => {
   try {
     const { email, username, password, remember } = req.body || {};
     if (!password || (!email && !username)) {
@@ -103,12 +150,18 @@ router.post('/login', async (req, res) => {
 
     const payload = buildTokenPayload(user);
     const jwtSecret = getJwtSecret();
-    const exp = remember ? '30d' : '12h';
-    const token = jwt.sign(payload, jwtSecret, { expiresIn: exp });
+    const token = jwt.sign({ ...payload, tokenType: 'access' }, jwtSecret, {
+      expiresIn: ACCESS_TOKEN_TTL,
+    });
 
-    // issue refresh token with longer lifetime (90d) and set httpOnly cookie
-    const refreshToken = jwt.sign(payload, jwtSecret, { expiresIn: remember ? '90d' : '30d' });
-    setRefreshCookie(res, refreshToken);
+    const isRemembered = toBool(remember) === true;
+    const refreshToken = jwt.sign(
+      { ...payload, tokenType: 'refresh', remember: isRemembered },
+      jwtSecret,
+      { expiresIn: isRemembered ? REFRESH_TOKEN_TTL_REMEMBERED : REFRESH_TOKEN_TTL_DEFAULT }
+    );
+    setRefreshCookie(res, refreshToken, isRemembered);
+    if (req.loginRateKey) loginRateBuckets.delete(req.loginRateKey);
 
     res.setHeader('Cache-Control', 'no-store');
     res.json({ token, user: buildUserResponse(user) });
@@ -125,13 +178,25 @@ router.post('/refresh', async (req, res) => {
 
     const jwtSecret = getJwtSecret();
     const data = jwt.verify(refreshToken, jwtSecret);
+    if (data?.tokenType && data.tokenType !== 'refresh') {
+      return res.status(401).json({ message: 'Invalid refresh token type' });
+    }
 
     const user = await User.findById(data?.sub).select('_id username email role seeProposals permissions isActive');
     if (!user) return res.status(401).json({ message: 'User not found' });
     if (user.isActive === false) return res.status(403).json({ message: 'User account is inactive' });
 
     const payload = buildTokenPayload(user);
-    const token = jwt.sign(payload, jwtSecret, { expiresIn: '12h' });
+    const token = jwt.sign({ ...payload, tokenType: 'access' }, jwtSecret, {
+      expiresIn: ACCESS_TOKEN_TTL,
+    });
+    const isRemembered = data?.remember === true;
+    const nextRefreshToken = jwt.sign(
+      { ...payload, tokenType: 'refresh', remember: isRemembered },
+      jwtSecret,
+      { expiresIn: isRemembered ? REFRESH_TOKEN_TTL_REMEMBERED : REFRESH_TOKEN_TTL_DEFAULT }
+    );
+    setRefreshCookie(res, nextRefreshToken, isRemembered);
 
     res.setHeader('Cache-Control', 'no-store');
     res.json({ token, user: buildUserResponse(user) });

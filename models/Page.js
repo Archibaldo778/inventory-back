@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 
 const pageSchema = new mongoose.Schema(
   {
-    deckId: { type: mongoose.Schema.Types.ObjectId, ref: 'Deck', index: true },
+    deckId: { type: mongoose.Schema.Types.ObjectId, ref: 'Deck', required: true, index: true },
     index: { type: Number, default: 0 },
     canvas: { type: Object, default: {} },
     preview: { type: String, default: '' },

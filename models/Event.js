@@ -8,10 +8,10 @@ const eventSchema = new mongoose.Schema(
     managerId: { type: String, trim: true },
     status: { type: String, trim: true, default: 'draft' },
     meta: { type: Object, default: {} },
+    deckRevision: { type: Number, default: 0, min: 0, select: false },
   },
   { timestamps: true }
 );
 
 const Event = mongoose.model('Event', eventSchema);
 export default Event;
-

@@ -7,6 +7,7 @@ import { Readable } from 'stream';
 import { fileURLToPath } from 'url';
 import apicache from 'apicache';
 import Page from '../models/Page.js';
+import Deck from '../models/Deck.js';
 import { sanitizeBoardCanvas } from '../utils/boardSnapshotSanitizer.js';
 import { v2 as cloudinary } from 'cloudinary';
 
@@ -114,6 +115,8 @@ router.post('/', async (req, res) => {
   try {
     const { deckId, index = 0, canvas = {}, preview = '' } = req.body || {};
     if (!deckId) return res.status(400).json({ error: 'deckId is required' });
+    const deckExists = await Deck.exists({ _id: deckId });
+    if (!deckExists) return res.status(404).json({ error: 'Deck not found' });
     const page = await Page.create({
       deckId,
       index,
@@ -208,7 +211,8 @@ router.patch('/:id', async (req, res) => {
 // Delete page
 router.delete('/:id', async (req, res) => {
   try {
-    await Page.findByIdAndDelete(req.params.id);
+    const deleted = await Page.findByIdAndDelete(req.params.id);
+    if (!deleted) return res.status(404).json({ error: 'Not found' });
     res.json({ ok: true });
     clearCache();
   } catch (e) { res.status(400).json({ error: e.message }); }

@@ -6,10 +6,10 @@ const pageSchema = new mongoose.Schema(
     index: { type: Number, default: 0 },
     canvas: { type: Object, default: {} },
     preview: { type: String, default: '' },
+    revision: { type: Number, default: 0, min: 0 },
   },
   { timestamps: true }
 );
 
 const Page = mongoose.model('Page', pageSchema);
 export default Page;
-

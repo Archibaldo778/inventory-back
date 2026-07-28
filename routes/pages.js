@@ -97,25 +97,11 @@ const imageUpload = multer({
   },
 });
 
-const areEqualJson = (left, right) => {
-  try {
-    return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
-  } catch {
-    return false;
-  }
-};
-
-const sanitizePageCanvasForResponse = async (pageDoc) => {
+const sanitizePageCanvasForResponse = (pageDoc) => {
   const page = pageDoc?.toObject ? pageDoc.toObject() : pageDoc;
   if (!page || typeof page !== 'object') return page;
 
   const nextCanvas = sanitizeBoardCanvas(page.canvas);
-  const changed = !areEqualJson(page.canvas, nextCanvas);
-
-  if (changed && pageDoc?._id) {
-    await Page.updateOne({ _id: pageDoc._id }, { $set: { canvas: nextCanvas } }).catch(() => {});
-    clearCache();
-  }
 
   return {
     ...page,
@@ -144,7 +130,7 @@ router.get('/:id', cacheWithGroup('2 minutes', CACHE_GROUP), async (req, res) =>
   try {
     const page = await Page.findById(req.params.id);
     if (!page) return res.status(404).json({ error: 'Not found' });
-    const responsePage = await sanitizePageCanvasForResponse(page);
+    const responsePage = sanitizePageCanvasForResponse(page);
     res.json(responsePage);
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
@@ -183,13 +169,37 @@ router.patch('/:id', async (req, res) => {
       updates.canvas = sanitizeBoardCanvas(req.body.canvas);
     }
 
-    const page = await Page.findByIdAndUpdate(req.params.id, updates, {
+    const hasExpectedRevision = req.body?.expectedRevision !== undefined;
+    const expectedRevision = Number(req.body?.expectedRevision);
+    if (hasExpectedRevision && (!Number.isInteger(expectedRevision) || expectedRevision < 0)) {
+      return res.status(400).json({ error: 'expectedRevision must be a non-negative integer' });
+    }
+
+    const filter = { _id: req.params.id };
+    if (hasExpectedRevision) filter.revision = expectedRevision;
+    const page = await Page.findOneAndUpdate(filter, {
+      $set: updates,
+      $inc: { revision: 1 },
+    }, {
       new: true,
       runValidators: true,
     });
-    if (!page) return res.status(404).json({ error: 'Not found' });
+    if (!page) {
+      if (hasExpectedRevision) {
+        const current = await Page.findById(req.params.id).select('_id revision updatedAt').lean();
+        if (current) {
+          return res.status(409).json({
+            error: 'Page was changed by another session. Reload before saving again.',
+            code: 'PAGE_REVISION_CONFLICT',
+            currentRevision: current.revision,
+            updatedAt: current.updatedAt,
+          });
+        }
+      }
+      return res.status(404).json({ error: 'Not found' });
+    }
 
-    const responsePage = await sanitizePageCanvasForResponse(page);
+    const responsePage = sanitizePageCanvasForResponse(page);
     res.json(responsePage);
     clearCache();
   } catch (e) { res.status(400).json({ error: e.message }); }

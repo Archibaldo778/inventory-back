@@ -20,14 +20,6 @@ const clearCache = () => {
   apicache.clear('pages');
 };
 
-const areEqualJson = (left, right) => {
-  try {
-    return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
-  } catch {
-    return false;
-  }
-};
-
 // Create deck
 router.post('/', async (req, res) => {
   try {
@@ -57,28 +49,14 @@ router.get('/:id', cacheWithGroup('5 minutes', CACHE_GROUP), async (req, res) =>
     if (!deck) return res.status(404).json({ error: 'Not found' });
     const pages = await Page.find({ deckId: deck._id }).sort({ index: 1, createdAt: 1 });
 
-    const bulkOps = [];
     const sanitizedPages = pages.map((pageDoc) => {
       const page = pageDoc.toObject();
       const nextCanvas = sanitizeBoardCanvas(page.canvas);
-      if (!areEqualJson(page.canvas, nextCanvas)) {
-        bulkOps.push({
-          updateOne: {
-            filter: { _id: pageDoc._id },
-            update: { $set: { canvas: nextCanvas } },
-          },
-        });
-      }
       return {
         ...page,
         canvas: nextCanvas,
       };
     });
-
-    if (bulkOps.length > 0) {
-      await Page.bulkWrite(bulkOps).catch(() => {});
-      clearCache();
-    }
 
     res.json({ ...deck.toObject(), pages: sanitizedPages });
   } catch (e) { res.status(400).json({ error: e.message }); }

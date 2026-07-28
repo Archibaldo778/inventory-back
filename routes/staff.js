@@ -11,7 +11,7 @@ const CACHE_GROUP = 'staff';
 const cacheWithGroup = (duration, group) => {
   const middleware = cache(duration);
   return (req, res, next) => {
-    res.apicacheGroup = group;
+    req.apicacheGroup = group;
     return middleware(req, res, next);
   };
 };

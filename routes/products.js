@@ -74,7 +74,7 @@ const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key
 const cacheWithGroup = (duration, group) => {
   const middleware = cache(duration);
   return (req, res, next) => {
-    res.apicacheGroup = group;
+    req.apicacheGroup = group;
     return middleware(req, res, next);
   };
 };

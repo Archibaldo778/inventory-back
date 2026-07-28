@@ -260,7 +260,10 @@ router.patch('/:id', async (req, res) => {
       const parsed = req.body.lastExportedAt ? new Date(req.body.lastExportedAt) : null;
       updates.lastExportedAt = parsed && !Number.isNaN(parsed.getTime()) ? parsed : null;
     }
-    const updated = await Proposal.findByIdAndUpdate(req.params.id, updates, { new: true });
+    const updated = await Proposal.findByIdAndUpdate(req.params.id, updates, {
+      new: true,
+      runValidators: true,
+    });
     if (!updated) return res.status(404).json({ error: 'Not found' });
     res.json(serializeProposal(updated));
   } catch (err) {

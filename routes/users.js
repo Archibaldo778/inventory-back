@@ -81,6 +81,7 @@ const serializeUser = (source) => {
     see_proposals: seeProposals,
     can_see_proposals: seeProposals,
     permissions: buildPermissionsPayload(user?.permissions, seeProposals),
+    isActive: user?.isActive !== false,
     createdAt: user?.createdAt,
     updatedAt: user?.updatedAt,
   };
@@ -101,6 +102,11 @@ const applyUserPayload = async (user, body, { allowPassword = false } = {}) => {
 
   if (typeof payload.role !== 'undefined') {
     user.role = normalizeRole(payload.role);
+  }
+
+  if (typeof payload.isActive !== 'undefined' || typeof payload.active !== 'undefined') {
+    const nextIsActive = toBool(payload.isActive ?? payload.active);
+    if (typeof nextIsActive === 'boolean') user.isActive = nextIsActive;
   }
 
   const nextSeeProposals = resolveSeeProposals(payload);
@@ -185,6 +191,7 @@ router.post('/', async (req, res) => {
     const email = normalizeEmail(body.email);
     const password = String(body.password || '');
     const role = normalizeRole(body.role || 'user');
+    const isActive = toBool(body.isActive ?? body.active);
 
     if (!username || !email || !password) {
       return res.status(400).json({ message: 'username, email и password обязательны' });
@@ -209,6 +216,7 @@ router.post('/', async (req, res) => {
       seeProposals: nextSeeProposals,
       permissions: buildPermissionsPayload(body?.permissions, nextSeeProposals),
       password: hash,
+      isActive: typeof isActive === 'boolean' ? isActive : true,
     });
 
     res.status(201).json(serializeUser(user));
@@ -226,14 +234,14 @@ router.post('/', async (req, res) => {
 });
 
 // Универсальное обновление пользователя
+router.patch('/update', handleUpdateByBodyId);
+router.put('/update', handleUpdateByBodyId);
+router.post('/update', handleUpdateByBodyId);
 router.patch('/:id', handleUpdateByPathId);
 router.put('/:id', handleUpdateByPathId);
 router.patch('/:id/update', handleUpdateByPathId);
 router.put('/:id/update', handleUpdateByPathId);
 router.post('/:id/update', handleUpdateByPathId);
-router.patch('/update', handleUpdateByBodyId);
-router.put('/update', handleUpdateByBodyId);
-router.post('/update', handleUpdateByBodyId);
 
 // Обновление роли
 router.put('/:id/role', handleUpdateByPathId);
@@ -251,7 +259,7 @@ router.put('/:id/password', async (req, res) => {
     const { password } = req.body;
     if (!password) return res.status(400).json({ message: 'password обязателен' });
     const hash = await bcrypt.hash(password, 10);
-    await User.findByIdAndUpdate(req.params.id, { password: hash });
+    await User.findByIdAndUpdate(req.params.id, { password: hash }, { runValidators: true });
     res.json({ ok: true });
   } catch (e) {
     console.error('Change password error:', e);

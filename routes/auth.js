@@ -79,6 +79,7 @@ function buildUserResponse(source) {
       ...(user?.permissions && typeof user.permissions === 'object' ? user.permissions : {}),
       seeProposals,
     },
+    isActive: user?.isActive !== false,
   };
 }
 

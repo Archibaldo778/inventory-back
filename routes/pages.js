@@ -183,7 +183,10 @@ router.patch('/:id', async (req, res) => {
       updates.canvas = sanitizeBoardCanvas(req.body.canvas);
     }
 
-    const page = await Page.findByIdAndUpdate(req.params.id, updates, { new: true });
+    const page = await Page.findByIdAndUpdate(req.params.id, updates, {
+      new: true,
+      runValidators: true,
+    });
     if (!page) return res.status(404).json({ error: 'Not found' });
 
     const responsePage = await sanitizePageCanvasForResponse(page);

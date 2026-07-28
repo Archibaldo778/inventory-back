@@ -473,7 +473,10 @@ router.patch('/:id', upload.single('image'), async (req, res) => {
       }
     }
 
-    const doc = await Product.findByIdAndUpdate(req.params.id, updates, { new: true });
+    const doc = await Product.findByIdAndUpdate(req.params.id, updates, {
+      new: true,
+      runValidators: true,
+    });
     if (!doc) return res.status(404).json({ error: 'Not found' });
     const out = doc.toObject();
     out.qty = out.quantity;

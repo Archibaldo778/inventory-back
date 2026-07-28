@@ -59,7 +59,10 @@ router.patch('/:id', async (req, res) => {
       if (typeof req.body[k] !== 'undefined') updates[k] = req.body[k];
     });
     if (updates.title) updates.title = String(updates.title).trim();
-    const doc = await Event.findByIdAndUpdate(req.params.id, updates, { new: true });
+    const doc = await Event.findByIdAndUpdate(req.params.id, updates, {
+      new: true,
+      runValidators: true,
+    });
     if (!doc) return res.status(404).json({ error: 'Not found' });
     res.json(doc);
     clearCache();

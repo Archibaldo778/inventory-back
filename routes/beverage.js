@@ -216,7 +216,10 @@ router.patch('/:id', upload.single('image'), async (req, res) => {
       updates.image = sanitizeStr(body.image) || null;
     }
 
-    const updated = await BeverageItem.findByIdAndUpdate(req.params.id, updates, { new: true });
+    const updated = await BeverageItem.findByIdAndUpdate(req.params.id, updates, {
+      new: true,
+      runValidators: true,
+    });
     if (!updated) return res.status(404).json({ error: 'Not found' });
     res.json(updated);
   } catch (err) {

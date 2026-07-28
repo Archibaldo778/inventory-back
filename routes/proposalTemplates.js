@@ -547,7 +547,7 @@ router.post('/seed-defaults', async (_req, res) => {
       const doc = await ProposalTemplate.findOneAndUpdate(
         { key: sanitized.key },
         sanitized,
-        { upsert: true, new: true, setDefaultsOnInsert: true }
+        { upsert: true, new: true, setDefaultsOnInsert: true, runValidators: true }
       );
       results.push(serializeTemplate(doc));
     }
@@ -570,7 +570,10 @@ router.post('/', async (req, res) => {
 router.patch('/:id', async (req, res) => {
   try {
     const updates = sanitizeTemplatePayload(req.body || {}, { partial: true });
-    const updated = await ProposalTemplate.findByIdAndUpdate(req.params.id, updates, { new: true });
+    const updated = await ProposalTemplate.findByIdAndUpdate(req.params.id, updates, {
+      new: true,
+      runValidators: true,
+    });
     if (!updated) return res.status(404).json({ error: 'Template not found' });
     res.json(serializeTemplate(updated));
   } catch (err) {

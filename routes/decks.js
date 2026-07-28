@@ -89,7 +89,10 @@ router.patch('/:id', async (req, res) => {
   try {
     const updates = {};
     ['title', 'type'].forEach((k) => { if (typeof req.body[k] !== 'undefined') updates[k] = req.body[k]; });
-    const deck = await Deck.findByIdAndUpdate(req.params.id, updates, { new: true });
+    const deck = await Deck.findByIdAndUpdate(req.params.id, updates, {
+      new: true,
+      runValidators: true,
+    });
     if (!deck) return res.status(404).json({ error: 'Not found' });
     res.json(deck);
     clearCache();

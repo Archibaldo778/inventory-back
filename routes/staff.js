@@ -16,6 +16,7 @@ const cacheWithGroup = (duration, group) => {
   };
 };
 const clearCache = () => apicache.clear(CACHE_GROUP);
+const escapeRegex = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -96,7 +97,7 @@ router.get('/', cacheWithGroup('5 minutes', CACHE_GROUP), async (req, res) => {
     const filter = {};
     if (typeof active !== 'undefined') filter.active = String(active) === 'true';
     if (q) {
-      const re = new RegExp(String(q).trim(), 'i');
+      const re = new RegExp(escapeRegex(String(q).trim().slice(0, 100)), 'i');
       filter.$or = [ { firstName: re }, { lastName: re } ];
     }
     if (positions) {
@@ -190,7 +191,10 @@ router.patch('/:id', upload.single('photo'), async (req, res) => {
       updates.photo = sanitizeStr(body.photo);
     }
 
-    const doc = await Staff.findByIdAndUpdate(req.params.id, updates, { new: true });
+    const doc = await Staff.findByIdAndUpdate(req.params.id, updates, {
+      new: true,
+      runValidators: true,
+    });
     if (!doc) return res.status(404).json({ message: 'Not found' });
     res.json(doc);
     clearCache();

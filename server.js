@@ -7,6 +7,10 @@ import mongoose from 'mongoose';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import bcrypt from 'bcryptjs';
+import dns from 'node:dns/promises';
+import http from 'node:http';
+import https from 'node:https';
+import net from 'node:net';
 import User from './models/Users.js';
 import {
   requireAdmin,
@@ -145,37 +149,212 @@ const LOCAL_IMAGE_PROXY_HOSTS = new Set([
   '127.0.0.1',
   '0.0.0.0',
 ]);
+const IMAGE_PROXY_MAX_BYTES = 12 * 1024 * 1024;
+const IMAGE_PROXY_MAX_REDIRECTS = 3;
+const IMAGE_PROXY_TIMEOUT_MS = 10_000;
+const IMAGE_PROXY_RATE_WINDOW_MS = 60_000;
+const IMAGE_PROXY_RATE_MAX = 120;
+const IMAGE_PROXY_RATE_BUCKET_MAX = 10_000;
+const imageProxyRateBuckets = new Map();
 
-const isPrivateIpv4 = (hostname) => {
+const isPublicIpv4 = (hostname) => {
   const parts = String(hostname || '').trim().split('.').map((part) => Number(part));
   if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false;
-  if (parts[0] === 10) return true;
-  if (parts[0] === 127) return true;
-  if (parts[0] === 169 && parts[1] === 254) return true;
-  if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
-  if (parts[0] === 192 && parts[1] === 168) return true;
-  return false;
-};
-
-const isPrivateIpv6 = (hostname) => {
-  const normalized = String(hostname || '').trim().toLowerCase();
-  if (!normalized) return false;
-  if (normalized === '::1') return true;
-  if (normalized.startsWith('fc') || normalized.startsWith('fd')) return true;
-  if (normalized.startsWith('fe80:')) return true;
-  return false;
-};
-
-const isAllowedPublicImageHost = (hostname) => {
-  const normalized = String(hostname || '').trim().toLowerCase();
-  if (!normalized) return false;
-  if (LOCAL_IMAGE_PROXY_HOSTS.has(normalized)) return false;
-  if (normalized.endsWith('.local') || normalized.endsWith('.internal')) return false;
-  if (isPrivateIpv4(normalized) || isPrivateIpv6(normalized)) return false;
+  const [a, b, c] = parts;
+  if (a === 0 || a === 10 || a === 127 || a >= 224) return false;
+  if (a === 100 && b >= 64 && b <= 127) return false;
+  if (a === 169 && b === 254) return false;
+  if (a === 172 && b >= 16 && b <= 31) return false;
+  if (a === 192 && (b === 0 || b === 168)) return false;
+  if (a === 192 && b === 88 && c === 99) return false;
+  if (a === 198 && (b === 18 || b === 19)) return false;
+  if (a === 192 && b === 0 && c === 2) return false;
+  if (a === 198 && b === 51 && c === 100) return false;
+  if (a === 203 && b === 0 && c === 113) return false;
   return true;
 };
 
-app.get('/api/image-proxy', async (req, res) => {
+const isPublicIpAddress = (address) => {
+  const normalized = String(address || '').trim().toLowerCase().replace(/^\[|\]$/g, '');
+  const family = net.isIP(normalized);
+  if (family === 4) return isPublicIpv4(normalized);
+  if (family === 6) {
+    // Public IPv6 unicast currently lives in 2000::/3. Reject mapped and
+    // special-purpose ranges instead of trying to maintain a partial denylist.
+    return /^[23][0-9a-f]{0,3}:/.test(normalized);
+  }
+  return false;
+};
+
+const normalizeImageProxyHostname = (hostname) => (
+  String(hostname || '').trim().toLowerCase().replace(/^\[|\]$/g, '')
+);
+
+const isAllowedPublicImageHost = (hostname) => {
+  const normalized = normalizeImageProxyHostname(hostname);
+  if (!normalized) return false;
+  if (LOCAL_IMAGE_PROXY_HOSTS.has(normalized)) return false;
+  if (normalized.endsWith('.local') || normalized.endsWith('.internal')) return false;
+  if (net.isIP(normalized) && !isPublicIpAddress(normalized)) return false;
+  return true;
+};
+
+const resolvePublicImageAddress = async (hostname) => {
+  const normalized = normalizeImageProxyHostname(hostname);
+  if (!isAllowedPublicImageHost(normalized)) {
+    throw new Error('Image host is not allowed');
+  }
+
+  if (net.isIP(normalized)) {
+    return { address: normalized, family: net.isIP(normalized) };
+  }
+
+  const addresses = await dns.lookup(normalized, { all: true, verbatim: true });
+  if (!addresses.length || addresses.some(({ address }) => !isPublicIpAddress(address))) {
+    throw new Error('Image host resolved to a non-public address');
+  }
+  return addresses[0];
+};
+
+const validateImageProxyUrl = (value) => {
+  const targetUrl = value instanceof URL ? value : new URL(String(value || ''));
+  if (!['http:', 'https:'].includes(targetUrl.protocol)) {
+    throw new Error('Unsupported image protocol');
+  }
+  if (targetUrl.username || targetUrl.password) {
+    throw new Error('Image URL credentials are not allowed');
+  }
+  const expectedPort = targetUrl.protocol === 'https:' ? '443' : '80';
+  if (targetUrl.port && targetUrl.port !== expectedPort) {
+    throw new Error('Non-standard image ports are not allowed');
+  }
+  if (!isAllowedPublicImageHost(targetUrl.hostname)) {
+    throw new Error('Image host is not allowed');
+  }
+  return targetUrl;
+};
+
+const readBoundedImageResponse = (response) => new Promise((resolve, reject) => {
+  const statusCode = Number(response.statusCode || 0);
+  const contentType = String(response.headers['content-type'] || '').trim().toLowerCase();
+  const cacheControl = String(response.headers['cache-control'] || '').trim();
+  const contentLength = Number(response.headers['content-length'] || 0);
+
+  if (statusCode < 200 || statusCode >= 300) {
+    response.resume();
+    reject(Object.assign(new Error(`Upstream image request failed (${statusCode})`), { statusCode: 502 }));
+    return;
+  }
+  if (!contentType.startsWith('image/')) {
+    response.resume();
+    reject(Object.assign(new Error('Upstream resource is not an image'), { statusCode: 415 }));
+    return;
+  }
+  if (Number.isFinite(contentLength) && contentLength > IMAGE_PROXY_MAX_BYTES) {
+    response.resume();
+    reject(Object.assign(new Error('Upstream image is too large'), { statusCode: 413 }));
+    return;
+  }
+
+  const chunks = [];
+  let totalBytes = 0;
+  response.on('data', (chunk) => {
+    totalBytes += chunk.length;
+    if (totalBytes > IMAGE_PROXY_MAX_BYTES) {
+      response.destroy(Object.assign(new Error('Upstream image is too large'), { statusCode: 413 }));
+      return;
+    }
+    chunks.push(chunk);
+  });
+  response.on('end', () => resolve({
+    buffer: Buffer.concat(chunks, totalBytes),
+    contentType,
+    cacheControl,
+  }));
+  response.on('error', reject);
+});
+
+const fetchPublicImage = async (initialUrl, redirectCount = 0) => {
+  const targetUrl = validateImageProxyUrl(initialUrl);
+  const resolved = await resolvePublicImageAddress(targetUrl.hostname);
+  const transport = targetUrl.protocol === 'https:' ? https : http;
+
+  return new Promise((resolve, reject) => {
+    const request = transport.request(targetUrl, {
+      method: 'GET',
+      family: resolved.family,
+      lookup: (_hostname, _options, callback) => {
+        callback(null, resolved.address, resolved.family);
+      },
+      headers: {
+        Accept: 'image/avif,image/webp,image/*,*/*;q=0.8',
+        'User-Agent': 'OCDecks-Image-Proxy/1.0',
+      },
+    }, async (response) => {
+      const statusCode = Number(response.statusCode || 0);
+      const location = String(response.headers.location || '').trim();
+      if (statusCode >= 300 && statusCode < 400 && location) {
+        response.resume();
+        if (redirectCount >= IMAGE_PROXY_MAX_REDIRECTS) {
+          reject(Object.assign(new Error('Too many image redirects'), { statusCode: 502 }));
+          return;
+        }
+        try {
+          const redirectUrl = new URL(location, targetUrl);
+          resolve(await fetchPublicImage(redirectUrl, redirectCount + 1));
+        } catch (error) {
+          reject(error);
+        }
+        return;
+      }
+
+      try {
+        resolve(await readBoundedImageResponse(response));
+      } catch (error) {
+        reject(error);
+      }
+    });
+
+    request.setTimeout(IMAGE_PROXY_TIMEOUT_MS, () => {
+      request.destroy(Object.assign(new Error('Upstream image request timed out'), { statusCode: 504 }));
+    });
+    request.on('error', reject);
+    request.end();
+  });
+};
+
+const enforceImageProxyRateLimit = (req, res, next) => {
+  const now = Date.now();
+  const key = String(req.ip || req.socket?.remoteAddress || 'unknown');
+  const current = imageProxyRateBuckets.get(key);
+
+  if (!current && imageProxyRateBuckets.size >= IMAGE_PROXY_RATE_BUCKET_MAX) {
+    for (const [bucketKey, value] of imageProxyRateBuckets) {
+      if (value.resetAt <= now) imageProxyRateBuckets.delete(bucketKey);
+    }
+    if (imageProxyRateBuckets.size >= IMAGE_PROXY_RATE_BUCKET_MAX) {
+      res.setHeader('Retry-After', '60');
+      return res.status(429).json({ message: 'Image proxy is temporarily busy' });
+    }
+  }
+
+  const bucket = !current || current.resetAt <= now
+    ? { count: 0, resetAt: now + IMAGE_PROXY_RATE_WINDOW_MS }
+    : current;
+  bucket.count += 1;
+  imageProxyRateBuckets.set(key, bucket);
+
+  res.setHeader('RateLimit-Limit', String(IMAGE_PROXY_RATE_MAX));
+  res.setHeader('RateLimit-Remaining', String(Math.max(0, IMAGE_PROXY_RATE_MAX - bucket.count)));
+  res.setHeader('RateLimit-Reset', String(Math.ceil(bucket.resetAt / 1000)));
+  if (bucket.count > IMAGE_PROXY_RATE_MAX) {
+    res.setHeader('Retry-After', String(Math.ceil((bucket.resetAt - now) / 1000)));
+    return res.status(429).json({ message: 'Too many image proxy requests' });
+  }
+  return next();
+};
+
+app.get('/api/image-proxy', enforceImageProxyRateLimit, async (req, res) => {
   const rawUrl = String(req.query?.url || '').trim();
   if (!rawUrl) {
     return res.status(400).json({ message: 'url query param is required' });
@@ -188,36 +367,23 @@ app.get('/api/image-proxy', async (req, res) => {
     return res.status(400).json({ message: 'Invalid image URL' });
   }
 
-  if (!['http:', 'https:'].includes(targetUrl.protocol)) {
-    return res.status(400).json({ message: 'Unsupported image protocol' });
-  }
-
-  if (!isAllowedPublicImageHost(targetUrl.hostname)) {
-    return res.status(403).json({ message: 'Image host is not allowed' });
+  try {
+    validateImageProxyUrl(targetUrl);
+  } catch (error) {
+    return res.status(403).json({ message: error instanceof Error ? error.message : 'Image URL is not allowed' });
   }
 
   try {
-    const upstream = await fetch(targetUrl.toString(), {
-      method: 'GET',
-      redirect: 'follow',
-    });
-
-    if (!upstream.ok) {
-      return res.status(502).json({ message: `Upstream image request failed (${upstream.status})` });
-    }
-
-    const contentType = String(upstream.headers.get('content-type') || '').trim().toLowerCase();
-    if (!contentType.startsWith('image/')) {
-      return res.status(415).json({ message: 'Upstream resource is not an image' });
-    }
-
-    const buffer = Buffer.from(await upstream.arrayBuffer());
-    const cacheControl = String(upstream.headers.get('cache-control') || '').trim();
-    res.setHeader('Content-Type', contentType);
-    res.setHeader('Cache-Control', cacheControl || 'public, max-age=86400');
-    return res.status(200).send(buffer);
+    const upstream = await fetchPublicImage(targetUrl);
+    res.setHeader('Content-Type', upstream.contentType);
+    res.setHeader('Cache-Control', upstream.cacheControl || 'public, max-age=86400');
+    return res.status(200).send(upstream.buffer);
   } catch (error) {
-    return res.status(502).json({ message: error instanceof Error ? error.message : 'Failed to proxy image' });
+    const statusCode = Number(error?.statusCode);
+    const safeStatusCode = [413, 415, 502, 504].includes(statusCode) ? statusCode : 502;
+    return res.status(safeStatusCode).json({
+      message: error instanceof Error ? error.message : 'Failed to proxy image',
+    });
   }
 });
 

@@ -152,6 +152,7 @@ const syncDashboardEventsToBar = async ({ eventId = null } = {}) => {
   const dashboardEvents = await Event.find(query).lean();
   const today = todayInTimeZone();
   const eligible = dashboardEvents.filter((event) => {
+    if (eventId) return true;
     const dateKey = normalizeBarEventDate(event.date);
     return dateKey && dateKey >= today;
   });

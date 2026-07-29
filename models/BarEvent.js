@@ -58,7 +58,6 @@ const barEventSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Event',
       default: null,
-      index: true,
     },
     eventNumber: { type: String, default: '', trim: true, index: true },
     name: { type: String, required: true, trim: true },
@@ -112,6 +111,13 @@ const barEventSchema = new mongoose.Schema(
 
 barEventSchema.index({ assignedUserIds: 1, eventDate: -1 });
 barEventSchema.index({ status: 1, eventDate: -1 });
+barEventSchema.index(
+  { linkedEventId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { linkedEventId: { $type: 'objectId' } },
+  }
+);
 
 const BarEvent = mongoose.model('BarEvent', barEventSchema);
 

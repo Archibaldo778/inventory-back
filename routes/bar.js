@@ -3,17 +3,20 @@ import mongoose from 'mongoose';
 import BarEvent, { BAR_EVENT_STATUSES, BAR_ITEM_SCOPES, BAR_PRICE_UNITS } from '../models/BarEvent.js';
 import BarPackage from '../models/BarPackage.js';
 import BeverageItem from '../models/BeverageItem.js';
+import Event from '../models/Event.js';
 import User from '../models/Users.js';
 import { isAdminAuth, normalizeRole } from '../middleware/auth.js';
 import {
   calculateBarEventAccounting,
   calculateBarItemAccounting,
 } from '../utils/barEventAccounting.js';
+import { normalizeBarEventDate, todayInTimeZone } from '../utils/barEventDates.js';
 import { sendApiError } from '../utils/apiErrors.js';
 
 const router = Router();
 const BAR_MANAGER_ROLES = new Set(['bar admin']);
 const BAR_WORKER_ROLES = new Set(['bar captain', 'bartender']);
+const BAR_VIEWER_ROLES = new Set(['user', 'manager', 'sales rep']);
 const MAX_PACKOUT_ITEMS = 500;
 const MAX_AUDIT_ENTRIES = 200;
 
@@ -45,7 +48,15 @@ const isAssigned = (event, auth) => {
   return Boolean(userId) && (event?.assignedUserIds || []).some((id) => String(id) === userId);
 };
 
-const canAccessEvent = (event, auth) => isBarManager(auth) || (isBarWorker(auth) && isAssigned(event, auth));
+const canViewEvent = (event, auth) => (
+  isBarManager(auth)
+  || BAR_VIEWER_ROLES.has(normalizeRole(auth?.role))
+  || (isBarWorker(auth) && isAssigned(event, auth))
+);
+
+const canOperateEvent = (event, auth) => (
+  isBarManager(auth) || (isBarWorker(auth) && isAssigned(event, auth))
+);
 
 const addAudit = (event, auth, action, details = {}) => {
   event.audit.push({
@@ -117,6 +128,55 @@ const normalizeAssignedUserIds = (value) => (
     .map((entry) => String(entry || '').trim())
     .filter(isObjectId))]
 );
+
+const eventVenue = (event) => cleanString(
+  event?.meta?.venue
+  || event?.meta?.location
+  || event?.meta?.eventVenue
+  || event?.meta?.event_venue,
+  240
+);
+
+const eventGuestCount = (event) => cleanNumber(
+  event?.meta?.guestCount
+  ?? event?.meta?.guest_count
+  ?? event?.meta?.guests,
+  { fallback: null }
+);
+
+const syncDashboardEventsToBar = async ({ eventId = null } = {}) => {
+  const query = {
+    status: { $not: /^deleted$/i },
+    ...(eventId && isObjectId(eventId) ? { _id: eventId } : {}),
+  };
+  const dashboardEvents = await Event.find(query).lean();
+  const today = todayInTimeZone();
+  const eligible = dashboardEvents.filter((event) => {
+    const dateKey = normalizeBarEventDate(event.date);
+    return dateKey && dateKey >= today;
+  });
+  if (!eligible.length) return;
+  await BarEvent.bulkWrite(eligible.map((event) => ({
+    updateOne: {
+      filter: { linkedEventId: event._id },
+      update: {
+        $set: {
+          name: cleanString(event.title, 240) || 'Untitled event',
+          eventDate: normalizeBarEventDate(event.date) || cleanString(event.date, 80),
+          client: cleanString(event.client, 180),
+          venue: eventVenue(event),
+          guestCount: eventGuestCount(event),
+        },
+        $setOnInsert: {
+          linkedEventId: event._id,
+          status: 'draft',
+          notes: '',
+        },
+      },
+      upsert: true,
+    },
+  })), { ordered: false });
+};
 
 const normalizePackage = (value = {}, fallback = {}) => {
   const source = value && typeof value === 'object' ? value : {};
@@ -305,7 +365,7 @@ const normalizePackoutItems = async (items, { allowFinancials = false } = {}) =>
 router.get('/users', requireBarManager, async (_req, res) => {
   try {
     const users = await User.find({
-      role: { $in: ['bar admin', 'bar captain', 'bartender'] },
+      role: { $in: ['bar captain', 'bartender'] },
       isActive: { $ne: false },
     }).sort({ username: 1 });
     return res.json(users.map((user) => ({
@@ -325,10 +385,11 @@ router.get('/users', requireBarManager, async (_req, res) => {
 
 router.get('/events', async (req, res) => {
   try {
-    if (!isBarManager(req.auth) && !isBarWorker(req.auth)) {
+    if (!isBarManager(req.auth) && !isBarWorker(req.auth) && !BAR_VIEWER_ROLES.has(normalizeRole(req.auth?.role))) {
       return res.status(403).json({ message: 'Bar access required' });
     }
-    const query = isBarManager(req.auth)
+    await syncDashboardEventsToBar();
+    const query = isBarManager(req.auth) || BAR_VIEWER_ROLES.has(normalizeRole(req.auth?.role))
       ? {}
       : { assignedUserIds: req.auth.userId };
     if (req.query.status && BAR_EVENT_STATUSES.includes(String(req.query.status))) {
@@ -348,28 +409,21 @@ router.get('/events', async (req, res) => {
 
 router.post('/events', requireBarManager, async (req, res) => {
   try {
-    const name = cleanString(req.body?.name, 240);
-    if (!name) return res.status(400).json({ message: 'Event name is required' });
-    const event = new BarEvent({
-      linkedEventId: isObjectId(req.body?.linkedEventId) ? req.body.linkedEventId : null,
-      eventNumber: cleanString(req.body?.eventNumber, 80),
-      name,
-      eventDate: cleanString(req.body?.eventDate, 80),
-      client: cleanString(req.body?.client, 180),
-      venue: cleanString(req.body?.venue, 240),
-      salesRep: cleanString(req.body?.salesRep, 160),
-      eventTiming: cleanString(req.body?.eventTiming, 120),
-      deliveryTime: cleanString(req.body?.deliveryTime, 120),
-      guestCount: cleanNumber(req.body?.guestCount, { fallback: null }),
-      assignedUserIds: normalizeAssignedUserIds(req.body?.assignedUserIds),
-      packageSnapshot: normalizePackage(req.body?.packageSnapshot),
-      clientCharge: cleanNumber(req.body?.clientCharge, { fallback: 0 }),
-      currency: cleanString(req.body?.currency || 'USD', 10) || 'USD',
-      notes: cleanString(req.body?.notes, 3000),
-    });
-    addAudit(event, req.auth, 'event_created');
+    const linkedEventId = cleanString(req.body?.linkedEventId, 80);
+    if (!isObjectId(linkedEventId)) {
+      return res.status(400).json({ message: 'Create the event on Dashboard first' });
+    }
+    await syncDashboardEventsToBar({ eventId: linkedEventId });
+    const event = await BarEvent.findOne({ linkedEventId });
+    if (!event) {
+      return res.status(400).json({ message: 'Only current and future Dashboard events can use Bar Operations' });
+    }
+    if (req.body?.assignedUserIds !== undefined) {
+      event.assignedUserIds = normalizeAssignedUserIds(req.body.assignedUserIds);
+    }
+    addAudit(event, req.auth, 'event_linked_from_dashboard');
     await event.save();
-    return res.status(201).json(serializeBarEvent(event, { includeFinancials: true }));
+    return res.json(serializeBarEvent(event, { includeFinancials: true }));
   } catch (error) {
     return sendApiError(res, error, {
       context: 'Bar event creation failed',
@@ -378,11 +432,33 @@ router.post('/events', requireBarManager, async (req, res) => {
   }
 });
 
+router.get('/events/by-linked/:linkedEventId', async (req, res) => {
+  try {
+    if (!isObjectId(req.params.linkedEventId)) {
+      return res.status(400).json({ message: 'Invalid dashboard event id' });
+    }
+    await syncDashboardEventsToBar({ eventId: req.params.linkedEventId });
+    const event = await BarEvent.findOne({ linkedEventId: req.params.linkedEventId });
+    if (!event) return res.status(404).json({ message: 'Bar event not found' });
+    if (!canViewEvent(event, req.auth)) {
+      return res.status(403).json({ message: 'This bar event is not assigned to you' });
+    }
+    return res.json(serializeBarEvent(event, {
+      includeFinancials: isBarManager(req.auth),
+    }));
+  } catch (error) {
+    return sendApiError(res, error, {
+      context: 'Linked bar event lookup failed',
+      fallbackMessage: 'Failed to load linked bar event',
+    });
+  }
+});
+
 router.get('/events/:id', async (req, res) => {
   try {
     const event = await loadEvent(req, res);
     if (!event) return undefined;
-    if (!canAccessEvent(event, req.auth)) {
+    if (!canViewEvent(event, req.auth)) {
       return res.status(403).json({ message: 'This bar event is not assigned to you' });
     }
     return res.json(serializeBarEvent(event, {
@@ -543,7 +619,7 @@ router.patch('/events/:id/items/:itemId/return', async (req, res) => {
   try {
     const event = await loadEvent(req, res);
     if (!event) return undefined;
-    if (!canAccessEvent(event, req.auth)) {
+    if (!canOperateEvent(event, req.auth)) {
       return res.status(403).json({ message: 'This bar event is not assigned to you' });
     }
     if (event.status === 'closed') {
@@ -585,7 +661,7 @@ router.post('/events/:id/submit', async (req, res) => {
   try {
     const event = await loadEvent(req, res);
     if (!event) return undefined;
-    if (!canAccessEvent(event, req.auth)) {
+    if (!canOperateEvent(event, req.auth)) {
       return res.status(403).json({ message: 'This bar event is not assigned to you' });
     }
     if (event.status === 'closed') return res.status(409).json({ message: 'This bar event is closed' });

@@ -112,12 +112,12 @@ const requireBarManager = (req, res, next) => {
 
 const loadEvent = async (req, res) => {
   if (!isObjectId(req.params.id)) {
-    res.status(400).json({ message: 'Invalid bar event id' });
+    res.status(400).json({ message: 'Invalid bar report id' });
     return null;
   }
   const event = await BarEvent.findById(req.params.id);
   if (!event) {
-    res.status(404).json({ message: 'Bar event not found' });
+    res.status(404).json({ message: 'Event bar report not found' });
     return null;
   }
   return event;
@@ -401,33 +401,8 @@ router.get('/events', async (req, res) => {
     })));
   } catch (error) {
     return sendApiError(res, error, {
-      context: 'Bar events list failed',
-      fallbackMessage: 'Failed to list bar events',
-    });
-  }
-});
-
-router.post('/events', requireBarManager, async (req, res) => {
-  try {
-    const linkedEventId = cleanString(req.body?.linkedEventId, 80);
-    if (!isObjectId(linkedEventId)) {
-      return res.status(400).json({ message: 'Create the event on Dashboard first' });
-    }
-    await syncDashboardEventsToBar({ eventId: linkedEventId });
-    const event = await BarEvent.findOne({ linkedEventId });
-    if (!event) {
-      return res.status(400).json({ message: 'Only current and future Dashboard events can use Bar Operations' });
-    }
-    if (req.body?.assignedUserIds !== undefined) {
-      event.assignedUserIds = normalizeAssignedUserIds(req.body.assignedUserIds);
-    }
-    addAudit(event, req.auth, 'event_linked_from_dashboard');
-    await event.save();
-    return res.json(serializeBarEvent(event, { includeFinancials: true }));
-  } catch (error) {
-    return sendApiError(res, error, {
-      context: 'Bar event creation failed',
-      fallbackMessage: 'Failed to create bar event',
+      context: 'Event bar reports list failed',
+      fallbackMessage: 'Failed to list event bar reports',
     });
   }
 });
@@ -439,17 +414,17 @@ router.get('/events/by-linked/:linkedEventId', async (req, res) => {
     }
     await syncDashboardEventsToBar({ eventId: req.params.linkedEventId });
     const event = await BarEvent.findOne({ linkedEventId: req.params.linkedEventId });
-    if (!event) return res.status(404).json({ message: 'Bar event not found' });
+    if (!event) return res.status(404).json({ message: 'Event bar report not found' });
     if (!canViewEvent(event, req.auth)) {
-      return res.status(403).json({ message: 'This bar event is not assigned to you' });
+      return res.status(403).json({ message: 'This event is not assigned to you' });
     }
     return res.json(serializeBarEvent(event, {
       includeFinancials: isBarManager(req.auth),
     }));
   } catch (error) {
     return sendApiError(res, error, {
-      context: 'Linked bar event lookup failed',
-      fallbackMessage: 'Failed to load linked bar event',
+      context: 'Linked event bar report lookup failed',
+      fallbackMessage: 'Failed to load the event bar report',
     });
   }
 });
@@ -459,15 +434,15 @@ router.get('/events/:id', async (req, res) => {
     const event = await loadEvent(req, res);
     if (!event) return undefined;
     if (!canViewEvent(event, req.auth)) {
-      return res.status(403).json({ message: 'This bar event is not assigned to you' });
+      return res.status(403).json({ message: 'This event is not assigned to you' });
     }
     return res.json(serializeBarEvent(event, {
       includeFinancials: isBarManager(req.auth),
     }));
   } catch (error) {
     return sendApiError(res, error, {
-      context: 'Bar event lookup failed',
-      fallbackMessage: 'Failed to load bar event',
+      context: 'Event bar report lookup failed',
+      fallbackMessage: 'Failed to load the event bar report',
     });
   }
 });
@@ -517,8 +492,8 @@ router.patch('/events/:id', requireBarManager, async (req, res) => {
     return res.json(serializeBarEvent(event, { includeFinancials: true }));
   } catch (error) {
     return sendApiError(res, error, {
-      context: 'Bar event update failed',
-      fallbackMessage: 'Failed to update bar event',
+      context: 'Event bar report update failed',
+      fallbackMessage: 'Failed to update the event bar report',
     });
   }
 });
@@ -529,7 +504,7 @@ router.post('/events/:id/packout', async (req, res) => {
     if (!event) return undefined;
     const manager = isBarManager(req.auth);
     if (!manager && !(isBarWorker(req.auth) && isAssigned(event, req.auth))) {
-      return res.status(403).json({ message: 'This bar event is not assigned to you' });
+      return res.status(403).json({ message: 'This event is not assigned to you' });
     }
     if (!manager && event.items.length > 0) {
       return res.status(409).json({ message: 'A packout already exists. Ask a bar admin to replace it.' });
@@ -620,10 +595,10 @@ router.patch('/events/:id/items/:itemId/return', async (req, res) => {
     const event = await loadEvent(req, res);
     if (!event) return undefined;
     if (!canOperateEvent(event, req.auth)) {
-      return res.status(403).json({ message: 'This bar event is not assigned to you' });
+      return res.status(403).json({ message: 'This event is not assigned to you' });
     }
     if (event.status === 'closed') {
-      return res.status(409).json({ message: 'This bar event is closed' });
+      return res.status(409).json({ message: 'This event bar report is closed' });
     }
     const item = event.items.id(req.params.itemId);
     if (!item || item.included === false) {
@@ -662,9 +637,9 @@ router.post('/events/:id/submit', async (req, res) => {
     const event = await loadEvent(req, res);
     if (!event) return undefined;
     if (!canOperateEvent(event, req.auth)) {
-      return res.status(403).json({ message: 'This bar event is not assigned to you' });
+      return res.status(403).json({ message: 'This event is not assigned to you' });
     }
-    if (event.status === 'closed') return res.status(409).json({ message: 'This bar event is closed' });
+    if (event.status === 'closed') return res.status(409).json({ message: 'This event bar report is closed' });
     const unconfirmed = event.items.filter((item) => item.included !== false && item.returnConfirmed !== true);
     if (unconfirmed.length) {
       return res.status(400).json({
@@ -702,8 +677,8 @@ router.post('/events/:id/review', requireBarManager, async (req, res) => {
     return res.json(serializeBarEvent(event, { includeFinancials: true }));
   } catch (error) {
     return sendApiError(res, error, {
-      context: 'Bar event review failed',
-      fallbackMessage: 'Failed to review bar event',
+      context: 'Event bar report review failed',
+      fallbackMessage: 'Failed to review the event bar report',
     });
   }
 });
@@ -721,22 +696,8 @@ router.post('/events/:id/reopen', requireBarManager, async (req, res) => {
     return res.json(serializeBarEvent(event, { includeFinancials: true }));
   } catch (error) {
     return sendApiError(res, error, {
-      context: 'Bar event reopen failed',
-      fallbackMessage: 'Failed to reopen bar event',
-    });
-  }
-});
-
-router.delete('/events/:id', requireBarManager, async (req, res) => {
-  try {
-    if (!isObjectId(req.params.id)) return res.status(400).json({ message: 'Invalid bar event id' });
-    const deleted = await BarEvent.findByIdAndDelete(req.params.id);
-    if (!deleted) return res.status(404).json({ message: 'Bar event not found' });
-    return res.json({ ok: true });
-  } catch (error) {
-    return sendApiError(res, error, {
-      context: 'Bar event deletion failed',
-      fallbackMessage: 'Failed to delete bar event',
+      context: 'Event bar report reopen failed',
+      fallbackMessage: 'Failed to reopen the event bar report',
     });
   }
 });

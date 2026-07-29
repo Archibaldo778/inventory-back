@@ -3,11 +3,17 @@ import multer from 'multer';
 import { Readable } from 'stream';
 import { v2 as cloudinary } from 'cloudinary';
 import { sendApiError } from '../utils/apiErrors.js';
-import { fetchWithTimeout, normalizeFetchTimeout } from '../utils/fetchWithTimeout.js';
+import {
+  fetchWithTimeout,
+  normalizeFetchResponseLimit,
+  normalizeFetchTimeout,
+  readBoundedResponseBuffer,
+} from '../utils/fetchWithTimeout.js';
 import { INVALID_IMAGE_UPLOAD_RESPONSE, isAllowedImageUpload } from '../utils/imageSignature.js';
 
 const router = Router();
 const TOOL_UPSTREAM_TIMEOUT_MS = normalizeFetchTimeout(process.env.TOOL_UPSTREAM_TIMEOUT_MS);
+const TOOL_UPSTREAM_MAX_BYTES = normalizeFetchResponseLimit(process.env.TOOL_UPSTREAM_MAX_BYTES);
 
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -130,12 +136,15 @@ router.post('/heif-to-jpg', upload.single('image'), async (req, res) => {
       { timeoutMs: TOOL_UPSTREAM_TIMEOUT_MS }
     );
     if (!convertedRes.ok) {
+      await convertedRes.body?.cancel?.().catch?.(() => {});
       return res.status(502).json({ error: `Failed to download converted JPG (${convertedRes.status})` });
     }
 
-    const bytes = await convertedRes.arrayBuffer();
-    const buffer = Buffer.from(bytes);
-    res.setHeader('Content-Type', 'image/jpeg');
+    const { buffer, contentType } = await readBoundedResponseBuffer(convertedRes, {
+      maxBytes: TOOL_UPSTREAM_MAX_BYTES,
+      allowedContentTypes: ['image/jpeg', 'image/jpg'],
+    });
+    res.setHeader('Content-Type', contentType);
     res.setHeader('Cache-Control', 'no-store');
     return res.status(200).send(buffer);
   } catch (error) {
@@ -198,28 +207,18 @@ router.post('/remove-background', imageUpload.single('image'), async (req, res) 
     );
 
     if (!response.ok) {
-      const contentType = String(response.headers.get('content-type') || '').toLowerCase();
-      let details = '';
-      try {
-        if (contentType.includes('application/json')) {
-          const payload = await response.json();
-          details = String(payload?.error?.message || payload?.message || payload?.error || '').trim();
-        } else {
-          details = String(await response.text()).trim();
-        }
-      } catch {
-        details = '';
-      }
+      await response.body?.cancel?.().catch?.(() => {});
       console.error(
         `Background removal provider rejected request (${response.status})`,
-        details || response.statusText
+        response.statusText
       );
       return res.status(502).json({ error: 'Background removal service rejected the image' });
     }
 
-    const contentType = String(response.headers.get('content-type') || '').trim() || 'image/png';
-    const bytes = await response.arrayBuffer();
-    const buffer = Buffer.from(bytes);
+    const { buffer, contentType } = await readBoundedResponseBuffer(response, {
+      maxBytes: TOOL_UPSTREAM_MAX_BYTES,
+      allowedContentTypes: ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'],
+    });
     res.setHeader('Content-Type', contentType);
     res.setHeader('Cache-Control', 'no-store');
     return res.status(200).send(buffer);

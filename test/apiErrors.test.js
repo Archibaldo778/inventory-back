@@ -25,6 +25,13 @@ test('API errors sanitize database validation and conflict details', () => {
     classifyApiError({ code: 11000, keyPattern: { email: 1 }, keyValue: { email: 'private@example.com' } }),
     { statusCode: 409, message: 'email already exists' }
   );
+  assert.deepEqual(
+    classifyApiError({ name: 'VersionError', message: 'internal version state' }),
+    {
+      statusCode: 409,
+      message: 'This record was changed by another user. Refresh and try again.',
+    }
+  );
 });
 
 test('API errors hide unknown and server-side details', () => {

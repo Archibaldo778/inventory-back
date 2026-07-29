@@ -4,7 +4,6 @@ import BarEvent, { BAR_EVENT_STATUSES, BAR_ITEM_SCOPES, BAR_PRICE_UNITS } from '
 import BarPackage from '../models/BarPackage.js';
 import BeverageItem from '../models/BeverageItem.js';
 import Event from '../models/Event.js';
-import User from '../models/Users.js';
 import { isAdminAuth, normalizeRole } from '../middleware/auth.js';
 import {
   calculateBarEventAccounting,
@@ -43,19 +42,14 @@ const isBarManager = (auth) => (
 
 const isBarWorker = (auth) => BAR_WORKER_ROLES.has(normalizeRole(auth?.role));
 
-const isAssigned = (event, auth) => {
-  const userId = String(auth?.userId || '');
-  return Boolean(userId) && (event?.assignedUserIds || []).some((id) => String(id) === userId);
-};
-
-const canViewEvent = (event, auth) => (
+const canViewEvent = (_event, auth) => (
   isBarManager(auth)
   || BAR_VIEWER_ROLES.has(normalizeRole(auth?.role))
-  || (isBarWorker(auth) && isAssigned(event, auth))
+  || isBarWorker(auth)
 );
 
-const canOperateEvent = (event, auth) => (
-  isBarManager(auth) || (isBarWorker(auth) && isAssigned(event, auth))
+const canOperateEvent = (_event, auth) => (
+  isBarManager(auth) || isBarWorker(auth)
 );
 
 const addAudit = (event, auth, action, details = {}) => {
@@ -102,6 +96,7 @@ const serializeBarEvent = (source, { includeFinancials = false } = {}) => {
       confirmedItemCount: totals.confirmedItemCount,
     };
   }
+  delete event.assignedUserIds;
   return event;
 };
 
@@ -122,12 +117,6 @@ const loadEvent = async (req, res) => {
   }
   return event;
 };
-
-const normalizeAssignedUserIds = (value) => (
-  [...new Set((Array.isArray(value) ? value : [])
-    .map((entry) => String(entry || '').trim())
-    .filter(isObjectId))]
-);
 
 const eventVenue = (event) => cleanString(
   event?.meta?.venue
@@ -378,36 +367,13 @@ const normalizePackoutItems = async (items, { allowFinancials = false } = {}) =>
     .filter((item) => item.name);
 };
 
-router.get('/users', requireBarManager, async (_req, res) => {
-  try {
-    const users = await User.find({
-      role: { $in: ['bar captain', 'bartender'] },
-      isActive: { $ne: false },
-    }).sort({ username: 1 });
-    return res.json(users.map((user) => ({
-      id: user._id,
-      _id: user._id,
-      username: user.username,
-      email: user.email,
-      role: normalizeRole(user.role),
-    })));
-  } catch (error) {
-    return sendApiError(res, error, {
-      context: 'Bar users list failed',
-      fallbackMessage: 'Failed to list bar users',
-    });
-  }
-});
-
 router.get('/events', async (req, res) => {
   try {
     if (!isBarManager(req.auth) && !isBarWorker(req.auth) && !BAR_VIEWER_ROLES.has(normalizeRole(req.auth?.role))) {
       return res.status(403).json({ message: 'Bar access required' });
     }
     await syncDashboardEventsToBar();
-    const query = isBarManager(req.auth) || BAR_VIEWER_ROLES.has(normalizeRole(req.auth?.role))
-      ? {}
-      : { assignedUserIds: req.auth.userId };
+    const query = {};
     if (req.query.status && BAR_EVENT_STATUSES.includes(String(req.query.status))) {
       query.status = String(req.query.status);
     }
@@ -432,7 +398,7 @@ router.get('/events/by-linked/:linkedEventId', async (req, res) => {
     const event = await BarEvent.findOne({ linkedEventId: req.params.linkedEventId });
     if (!event) return res.status(404).json({ message: 'Event bar report not found' });
     if (!canViewEvent(event, req.auth)) {
-      return res.status(403).json({ message: 'This event is not assigned to you' });
+      return res.status(403).json({ message: 'Bar access required' });
     }
     return res.json(serializeBarEvent(event, {
       includeFinancials: isBarManager(req.auth),
@@ -450,7 +416,7 @@ router.get('/events/:id', async (req, res) => {
     const event = await loadEvent(req, res);
     if (!event) return undefined;
     if (!canViewEvent(event, req.auth)) {
-      return res.status(403).json({ message: 'This event is not assigned to you' });
+      return res.status(403).json({ message: 'Bar access required' });
     }
     return res.json(serializeBarEvent(event, {
       includeFinancials: isBarManager(req.auth),
@@ -487,9 +453,6 @@ router.patch('/events/:id', requireBarManager, async (req, res) => {
     if (req.body?.guestCount !== undefined) {
       event.guestCount = cleanNumber(req.body.guestCount, { fallback: null });
     }
-    if (req.body?.assignedUserIds !== undefined) {
-      event.assignedUserIds = normalizeAssignedUserIds(req.body.assignedUserIds);
-    }
     if (req.body?.packageSnapshot !== undefined) {
       event.packageSnapshot = normalizePackage(req.body.packageSnapshot, event.packageSnapshot);
     }
@@ -519,8 +482,8 @@ router.post('/events/:id/packout', async (req, res) => {
     const event = await loadEvent(req, res);
     if (!event) return undefined;
     const manager = isBarManager(req.auth);
-    if (!manager && !(isBarWorker(req.auth) && isAssigned(event, req.auth))) {
-      return res.status(403).json({ message: 'This event is not assigned to you' });
+    if (!manager && !isBarWorker(req.auth)) {
+      return res.status(403).json({ message: 'Bar operation access required' });
     }
     if (!manager && event.items.length > 0) {
       return res.status(409).json({ message: 'A packout already exists. Ask a bar admin to replace it.' });
@@ -611,7 +574,7 @@ router.patch('/events/:id/items/:itemId/return', async (req, res) => {
     const event = await loadEvent(req, res);
     if (!event) return undefined;
     if (!canOperateEvent(event, req.auth)) {
-      return res.status(403).json({ message: 'This event is not assigned to you' });
+      return res.status(403).json({ message: 'Bar operation access required' });
     }
     if (event.status === 'closed') {
       return res.status(409).json({ message: 'This event bar report is closed' });
@@ -619,6 +582,9 @@ router.patch('/events/:id/items/:itemId/return', async (req, res) => {
     const item = event.items.id(req.params.itemId);
     if (!item || item.included === false) {
       return res.status(404).json({ message: 'Packout item not found' });
+    }
+    if (!isBarManager(req.auth) && item.returnConfirmed === true) {
+      return res.status(409).json({ message: 'Returns for this item were already entered' });
     }
     ['returnedFullQty', 'returnedOpenQty', 'lostDamagedQty'].forEach((field) => {
       if (req.body?.[field] !== undefined) {
@@ -653,7 +619,7 @@ router.post('/events/:id/submit', async (req, res) => {
     const event = await loadEvent(req, res);
     if (!event) return undefined;
     if (!canOperateEvent(event, req.auth)) {
-      return res.status(403).json({ message: 'This event is not assigned to you' });
+      return res.status(403).json({ message: 'Bar operation access required' });
     }
     if (event.status === 'closed') return res.status(409).json({ message: 'This event bar report is closed' });
     const unconfirmed = event.items.filter((item) => item.included !== false && item.returnConfirmed !== true);

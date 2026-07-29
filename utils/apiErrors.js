@@ -54,6 +54,13 @@ export const classifyApiError = (
     };
   }
 
+  if (error?.name === 'VersionError') {
+    return {
+      statusCode: 409,
+      message: 'This record was changed by another user. Refresh and try again.',
+    };
+  }
+
   if (/^(Mongo(Network|ServerSelection)|MongooseServerSelection)Error$/.test(String(error?.name || ''))) {
     return { statusCode: 503, message: 'Database service unavailable' };
   }

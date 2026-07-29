@@ -13,33 +13,11 @@ const clearRelatedCaches = () => {
 
 router.get('/', async (req, res) => {
   try {
-    let items = await Client.find({}).sort({ name: 1 });
-    const normalizedSet = new Set(
-      (items || [])
-        .map((client) => client?.normalized || String(client?.name || '').trim().toLowerCase())
-        .filter(Boolean)
-    );
-    const distinct = await Event.distinct('client', { client: { $type: 'string', $ne: '' } });
-    const toInsert = [];
-    (distinct || []).forEach((raw) => {
-      const trimmed = String(raw || '').trim();
-      if (!trimmed) return;
-      const norm = trimmed.toLowerCase();
-      if (normalizedSet.has(norm)) return;
-      normalizedSet.add(norm);
-      toInsert.push({ name: trimmed, normalized: norm });
-    });
-    if (toInsert.length) {
-      try {
-        await Client.insertMany(toInsert, { ordered: false });
-      } catch {
-        /* ignore insert conflicts */
-      }
-      items = await Client.find({}).sort({ name: 1 });
-    }
+    const items = await Client.find({}).sort({ name: 1 });
     res.json(items);
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    console.error('Clients list error:', e);
+    res.status(500).json({ error: 'Failed to list clients' });
   }
 });
 

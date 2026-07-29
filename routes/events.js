@@ -4,6 +4,7 @@ import Event from '../models/Event.js';
 import Deck from '../models/Deck.js';
 import Page from '../models/Page.js';
 import Proposal from '../models/Proposal.js';
+import Client from '../models/Client.js';
 import { runWithTransactionFallback } from '../utils/mongoTransaction.js';
 
 const router = Router();
@@ -25,6 +26,24 @@ const clearRelatedCaches = () => {
 };
 
 const createHttpError = (statusCode, message) => Object.assign(new Error(message), { statusCode });
+
+const ensureClientRecord = async (value) => {
+  if (typeof value !== 'string') return;
+  const name = value.trim();
+  if (!name) return;
+  const normalized = name.toLowerCase();
+  try {
+    await Client.updateOne(
+      { normalized },
+      { $setOnInsert: { name, normalized } },
+      { upsert: true, runValidators: true }
+    );
+  } catch (error) {
+    // Concurrent upserts may race on the unique normalized index. In that
+    // case the desired client already exists and the event can proceed.
+    if (error?.code !== 11000) throw error;
+  }
+};
 
 const detachEventProposals = async (event, session = null) => {
   const options = session ? { session } : {};
@@ -94,6 +113,7 @@ router.post('/', async (req, res) => {
   try {
     const { title, date, client, managerId, status, meta } = req.body || {};
     if (!title || !String(title).trim()) return res.status(400).json({ error: 'title is required' });
+    await ensureClientRecord(client);
     const doc = await Event.create({ title: String(title).trim(), date, client, managerId, status, meta });
     res.status(201).json(doc);
     clearCache();
@@ -133,6 +153,7 @@ router.patch('/:id', async (req, res) => {
       if (typeof req.body[k] !== 'undefined') updates[k] = req.body[k];
     });
     if (updates.title) updates.title = String(updates.title).trim();
+    if (typeof updates.client === 'string') await ensureClientRecord(updates.client);
     const doc = await Event.findByIdAndUpdate(req.params.id, updates, {
       new: true,
       runValidators: true,

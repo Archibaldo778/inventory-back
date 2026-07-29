@@ -305,16 +305,23 @@ const resolveCatalog = async (items) => {
     .map((item) => normalizeCatalogName(item?.name))
     .filter(Boolean));
   const query = ids.length
-    ? { $or: [{ _id: { $in: ids } }, { name: { $exists: true, $ne: '' } }] }
-    : { name: { $exists: true, $ne: '' } };
+    ? {
+        active: { $ne: false },
+        $or: [{ _id: { $in: ids } }, { name: { $exists: true, $ne: '' } }],
+      }
+    : { name: { $exists: true, $ne: '' }, active: { $ne: false } };
   const catalog = await BeverageItem.find(query)
-    .select('name bottleSizeMl caseSize +purchaseCost +caseCost');
+    .select('name aliases sku bottleSizeMl caseSize +purchaseCost +caseCost');
   const byId = new Map();
   const byName = new Map();
   catalog.forEach((item) => {
     byId.set(String(item._id), item);
     const nameKey = normalizeCatalogName(item.name);
     if (nameKey && names.has(nameKey) && !byName.has(nameKey)) byName.set(nameKey, item);
+    (Array.isArray(item.aliases) ? item.aliases : []).forEach((alias) => {
+      const aliasKey = normalizeCatalogName(alias);
+      if (aliasKey && names.has(aliasKey) && !byName.has(aliasKey)) byName.set(aliasKey, item);
+    });
   });
   return { byId, byName };
 };

@@ -209,6 +209,31 @@ const handleUpdateByBodyId = async (req, res) => {
   }
 };
 
+// Limited directory used by proposal assignment. Never expose permissions,
+// activation state, or other account-management fields here.
+router.get('/options', async (req, res) => {
+  try {
+    const users = await User.find({
+      role: 'sales rep',
+      isActive: { $ne: false },
+    })
+      .select('_id username email role')
+      .sort({ username: 1, email: 1 })
+      .lean();
+    res.json(users.map((user) => ({
+      id: user._id,
+      _id: user._id,
+      username: user.username || '',
+      name: user.username || '',
+      email: user.email || '',
+      role: normalizeRole(user.role),
+    })));
+  } catch (e) {
+    console.error('User options list error:', e);
+    res.status(500).json({ message: 'Ошибка получения списка пользователей' });
+  }
+});
+
 // Список пользователей (без паролей)
 router.get('/', async (req, res) => {
   try {

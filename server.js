@@ -99,7 +99,11 @@ const requireAdminForPatchDelete = requireMethodGuards((req) => {
 
 export const resolveUsersGuard = (req) => {
   const method = String(req.method || '').toUpperCase();
-  if (['GET', 'HEAD'].includes(method)) return requireProposalAccess;
+  if (['GET', 'HEAD'].includes(method)) {
+    return /^\/options\/?$/i.test(String(req.path || ''))
+      ? requireProposalAccess
+      : requireAdmin;
+  }
   const passwordMatch = String(req.path || '').match(/^\/([a-f\d]{24})\/password\/?$/i);
   if (
     passwordMatch

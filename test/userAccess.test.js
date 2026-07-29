@@ -6,10 +6,16 @@ import { resolveUsersGuard } from '../server.js';
 const ownId = '507f1f77bcf86cd799439011';
 const otherId = '507f191e810c19729de860ea';
 
-test('users access guard allows self password changes but protects other mutations', () => {
+test('users access guard limits directory reads and allows self password changes', () => {
   assert.equal(resolveUsersGuard({
     method: 'GET',
     path: '/',
+    auth: { userId: ownId, role: 'user' },
+  }), requireAdmin);
+
+  assert.equal(resolveUsersGuard({
+    method: 'GET',
+    path: '/options',
     auth: { userId: ownId, role: 'user' },
   }), requireProposalAccess);
 

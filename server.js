@@ -4,6 +4,7 @@ import cors from 'cors';
 import compression from 'compression';
 import helmet from 'helmet';
 import mongoose from 'mongoose';
+import multer from 'multer';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import bcrypt from 'bcryptjs';
@@ -418,32 +419,34 @@ app.use('/api/proposal-templates', requireAuth, requireProposalTemplateAccess, p
 app.use('/api/tools', requireAuth, requireAdmin, toolsRoutes);
 
 // подключение к Mongo
-const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/inventory';
+const configuredMongoUri = String(process.env.MONGO_URI || '').trim();
+const MONGO_URI = configuredMongoUri || (
+  process.env.NODE_ENV === 'production' ? '' : 'mongodb://localhost:27017/inventory'
+);
 const MONGO_DB_NAME = process.env.MONGO_DB_NAME;
-
-if (!MONGO_URI) {
-  console.error('❌ MONGO_URI is not set');
-} else {
-  const mongoOptions = {};
-  if (MONGO_DB_NAME) {
-    mongoOptions.dbName = MONGO_DB_NAME;
-  }
-  mongoose.connect(MONGO_URI, mongoOptions)
-    .then(() => console.log('✅ MongoDB connected'))
-    .catch(err => console.error('❌ MongoDB error:', err));
-}
 
 // health-check
 app.get('/', (req, res) => {
-  res.send('Backend OK');
+  const connected = mongoose.connection.readyState === 1;
+  res.status(connected ? 200 : 503).json({
+    ok: connected,
+    database: connected ? 'connected' : 'unavailable',
+  });
 });
 
 app.get('/api', (req, res) => {
-  res.json({ message: 'API работает 🚀' });
+  const connected = mongoose.connection.readyState === 1;
+  res.status(connected ? 200 : 503).json({
+    message: connected ? 'API работает 🚀' : 'API unavailable',
+    database: connected ? 'connected' : 'unavailable',
+  });
 });
 
 app.get('/api/test', (req, res) => {
-  res.json({ message: 'Backend is working!' });
+  const connected = mongoose.connection.readyState === 1;
+  res.status(connected ? 200 : 503).json({
+    message: connected ? 'Backend is working!' : 'Backend database is unavailable',
+  });
 });
 
 // Ensure super admin exists (email/password from env, never logged)
@@ -462,16 +465,90 @@ async function ensureSuperAdmin() {
       role: 'admin', // or 'super Admin' if you rely on that level
       password: hash,
     });
-    console.log('✅ Super admin created:', email);
+    console.log('✅ Super admin created');
   } catch (e) {
     console.error('❌ ensureSuperAdmin failed:', e?.message || e);
   }
 }
 
-// Call once DB is ready
-mongoose.connection.once('open', () => { ensureSuperAdmin(); });
-
 const PORT = process.env.PORT || 5050;
-app.listen(PORT, () => {
-  console.log(`Сервер запущен на порту ${PORT}`);
+
+app.use((req, res) => {
+  res.status(404).json({ message: 'Route not found' });
 });
+
+app.use((error, req, res, next) => {
+  if (res.headersSent) return next(error);
+
+  if (error instanceof multer.MulterError) {
+    const statusCode = error.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+    return res.status(statusCode).json({
+      message: error.code === 'LIMIT_FILE_SIZE' ? 'Uploaded file is too large' : 'Invalid file upload',
+      code: error.code,
+    });
+  }
+
+  if (error?.type === 'entity.too.large' || Number(error?.status) === 413) {
+    return res.status(413).json({ message: 'Request body is too large' });
+  }
+
+  console.error('Unhandled request error:', error?.message || error);
+  return res.status(500).json({ message: 'Internal server error' });
+});
+
+export const startServer = async () => {
+  if (!MONGO_URI) {
+    throw new Error('MONGO_URI is required in production');
+  }
+
+  const mongoOptions = {};
+  if (MONGO_DB_NAME) mongoOptions.dbName = MONGO_DB_NAME;
+  await mongoose.connect(MONGO_URI, mongoOptions);
+  console.log('✅ MongoDB connected');
+  await ensureSuperAdmin();
+
+  const server = app.listen(PORT, () => {
+    console.log(`Сервер запущен на порту ${PORT}`);
+  });
+
+  let shuttingDown = false;
+  const shutdown = (signal) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`${signal} received, shutting down`);
+
+    const forceExit = setTimeout(() => {
+      console.error('Forced shutdown after timeout');
+      process.exit(1);
+    }, 10_000);
+    forceExit.unref();
+
+    server.close(async () => {
+      try {
+        await mongoose.disconnect();
+        clearTimeout(forceExit);
+        process.exit(0);
+      } catch (error) {
+        console.error('MongoDB disconnect failed:', error?.message || error);
+        process.exit(1);
+      }
+    });
+  };
+
+  process.once('SIGTERM', () => shutdown('SIGTERM'));
+  process.once('SIGINT', () => shutdown('SIGINT'));
+  return server;
+};
+
+const isMainModule = Boolean(
+  process.argv[1] && path.resolve(process.argv[1]) === __filename
+);
+
+if (isMainModule) {
+  startServer().catch((error) => {
+    console.error('❌ Server startup failed:', error?.message || error);
+    process.exit(1);
+  });
+}
+
+export { app };

@@ -5,6 +5,7 @@ import Page from '../models/Page.js';
 import Proposal from '../models/Proposal.js';
 import Client from '../models/Client.js';
 import { clearApiCacheGroups, createGroupedApiCache } from '../utils/apiCache.js';
+import { sendApiError } from '../utils/apiErrors.js';
 import { runWithTransactionFallback } from '../utils/mongoTransaction.js';
 
 const router = Router();
@@ -109,7 +110,10 @@ router.post('/', async (req, res) => {
     res.status(201).json(doc);
     clearCache();
   } catch (e) {
-    res.status(400).json({ error: e.message });
+    sendApiError(res, e, {
+      context: 'Event creation failed',
+      fallbackMessage: 'Failed to create event',
+    });
   }
 });
 
@@ -121,7 +125,10 @@ router.get('/', cacheWithGroup('5 minutes', CACHE_GROUP), async (req, res) => {
     const items = await Event.find(q).sort({ createdAt: -1 });
     res.json(items);
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    sendApiError(res, e, {
+      context: 'Events list failed',
+      fallbackMessage: 'Failed to list events',
+    });
   }
 });
 
@@ -132,7 +139,10 @@ router.get('/:id', cacheWithGroup('5 minutes', CACHE_GROUP), async (req, res) =>
     if (!doc) return res.status(404).json({ error: 'Not found' });
     res.json(doc);
   } catch (e) {
-    res.status(400).json({ error: e.message });
+    sendApiError(res, e, {
+      context: 'Event lookup failed',
+      fallbackMessage: 'Failed to load event',
+    });
   }
 });
 
@@ -153,7 +163,10 @@ router.patch('/:id', async (req, res) => {
     res.json(doc);
     clearCache();
   } catch (e) {
-    res.status(400).json({ error: e.message });
+    sendApiError(res, e, {
+      context: 'Event update failed',
+      fallbackMessage: 'Failed to update event',
+    });
   }
 });
 
@@ -167,8 +180,10 @@ router.delete('/:id', async (req, res) => {
     res.json({ ok: true, cleanupPending: Boolean(result?.cleanupPending) });
     clearRelatedCaches();
   } catch (e) {
-    const statusCode = Number(e?.statusCode) === 404 ? 404 : 400;
-    res.status(statusCode).json({ error: e.message });
+    sendApiError(res, e, {
+      context: 'Event deletion failed',
+      fallbackMessage: 'Failed to delete event',
+    });
   }
 });
 

@@ -4,6 +4,7 @@ import Event from '../models/Event.js';
 import Page from '../models/Page.js';
 import { sanitizeBoardCanvas } from '../utils/boardSnapshotSanitizer.js';
 import { clearApiCacheGroups, createGroupedApiCache } from '../utils/apiCache.js';
+import { sendApiError } from '../utils/apiErrors.js';
 import { runWithTransactionFallback } from '../utils/mongoTransaction.js';
 
 const router = Router();
@@ -63,7 +64,12 @@ router.post('/', async (req, res) => {
     const deck = await Deck.create({ eventId, type, title });
     res.status(201).json(deck);
     clearCache();
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) {
+    sendApiError(res, e, {
+      context: 'Deck creation failed',
+      fallbackMessage: 'Failed to create deck',
+    });
+  }
 });
 
 // List decks (by eventId/type if provided)
@@ -74,7 +80,12 @@ router.get('/', cacheWithGroup('5 minutes', CACHE_GROUP), async (req, res) => {
     if (req.query.type) q.type = req.query.type;
     const decks = await Deck.find(q).sort({ createdAt: -1 });
     res.json(decks);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) {
+    sendApiError(res, e, {
+      context: 'Decks list failed',
+      fallbackMessage: 'Failed to list decks',
+    });
+  }
 });
 
 // Get deck with pages
@@ -94,7 +105,12 @@ router.get('/:id', async (req, res) => {
     });
 
     res.json({ ...deck.toObject(), pages: sanitizedPages });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) {
+    sendApiError(res, e, {
+      context: 'Deck lookup failed',
+      fallbackMessage: 'Failed to load deck',
+    });
+  }
 });
 
 // Patch deck
@@ -109,7 +125,12 @@ router.patch('/:id', async (req, res) => {
     if (!deck) return res.status(404).json({ error: 'Not found' });
     res.json(deck);
     clearCache();
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) {
+    sendApiError(res, e, {
+      context: 'Deck update failed',
+      fallbackMessage: 'Failed to update deck',
+    });
+  }
 });
 
 // Delete deck with all pages
@@ -123,8 +144,10 @@ router.delete('/:id', async (req, res) => {
     clearCache();
     res.json({ ok: true });
   } catch (e) {
-    const statusCode = [404, 409].includes(Number(e?.statusCode)) ? Number(e.statusCode) : 400;
-    res.status(statusCode).json({ error: e.message });
+    sendApiError(res, e, {
+      context: 'Deck deletion failed',
+      fallbackMessage: 'Failed to delete deck',
+    });
   }
 });
 

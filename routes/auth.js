@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import User from '../models/Users.js';
 import { getJwtSecret } from '../middleware/auth.js';
+import { sendApiError } from '../utils/apiErrors.js';
 
 const router = Router();
 const ACCESS_TOKEN_TTL = '15m';
@@ -168,22 +169,42 @@ router.post('/login', enforceLoginRateLimit, async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     res.json({ token, user: buildUserResponse(user) });
   } catch (e) {
-    res.status(500).json({ message: e.message || 'Login error' });
+    return sendApiError(res, e, {
+      field: 'message',
+      context: 'Login failed',
+      fallbackMessage: 'Login service unavailable',
+    });
   }
 });
 
 // Refresh access token using refresh cookie
 router.post('/refresh', async (req, res) => {
-  try {
-    const refreshToken = readCookie(req, 'rt');
-    if (!refreshToken) return res.status(401).json({ message: 'No refresh token' });
+  const refreshToken = readCookie(req, 'rt');
+  if (!refreshToken) return res.status(401).json({ message: 'No refresh token' });
 
-    const jwtSecret = getJwtSecret();
-    const data = jwt.verify(refreshToken, jwtSecret);
+  let jwtSecret;
+  try {
+    jwtSecret = getJwtSecret();
+  } catch (error) {
+    return sendApiError(res, error, {
+      field: 'message',
+      context: 'Refresh configuration failed',
+      defaultStatus: 503,
+      fallbackMessage: 'Authentication service unavailable',
+    });
+  }
+
+  let data;
+  try {
+    data = jwt.verify(refreshToken, jwtSecret);
     if (data?.tokenType && data.tokenType !== 'refresh') {
       return res.status(401).json({ message: 'Invalid refresh token type' });
     }
+  } catch {
+    return res.status(401).json({ message: 'Invalid refresh' });
+  }
 
+  try {
     const user = await User.findById(data?.sub)
       .select('_id username email role seeProposals permissions isActive +tokenVersion');
     if (!user) return res.status(401).json({ message: 'User not found' });
@@ -205,9 +226,13 @@ router.post('/refresh', async (req, res) => {
     setRefreshCookie(res, nextRefreshToken, isRemembered);
 
     res.setHeader('Cache-Control', 'no-store');
-    res.json({ token, user: buildUserResponse(user) });
+    return res.json({ token, user: buildUserResponse(user) });
   } catch (e) {
-    res.status(401).json({ message: 'Invalid refresh' });
+    return sendApiError(res, e, {
+      field: 'message',
+      context: 'Refresh failed',
+      fallbackMessage: 'Authentication service unavailable',
+    });
   }
 });
 

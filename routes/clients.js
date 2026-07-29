@@ -2,6 +2,7 @@ import { Router } from 'express';
 import Client from '../models/Client.js';
 import Event from '../models/Event.js';
 import { clearApiCacheGroups } from '../utils/apiCache.js';
+import { sendApiError } from '../utils/apiErrors.js';
 
 const router = Router();
 
@@ -16,8 +17,10 @@ router.get('/', async (req, res) => {
     const items = await Client.find({}).sort({ name: 1 });
     res.json(items);
   } catch (e) {
-    console.error('Clients list error:', e);
-    res.status(500).json({ error: 'Failed to list clients' });
+    sendApiError(res, e, {
+      context: 'Clients list failed',
+      fallbackMessage: 'Failed to list clients',
+    });
   }
 });
 
@@ -33,7 +36,10 @@ router.post('/', async (req, res) => {
     res.status(201).json(doc);
     clearRelatedCaches();
   } catch (e) {
-    res.status(400).json({ error: e.message });
+    sendApiError(res, e, {
+      context: 'Client creation failed',
+      fallbackMessage: 'Failed to create client',
+    });
   }
 });
 
@@ -60,7 +66,10 @@ router.patch('/:id', async (req, res) => {
     res.json(current);
     clearRelatedCaches();
   } catch (e) {
-    res.status(400).json({ error: e.message });
+    sendApiError(res, e, {
+      context: 'Client update failed',
+      fallbackMessage: 'Failed to update client',
+    });
   }
 });
 
@@ -71,7 +80,10 @@ router.delete('/:id', async (req, res) => {
     res.json({ ok: true });
     clearRelatedCaches();
   } catch (e) {
-    res.status(400).json({ error: e.message });
+    sendApiError(res, e, {
+      context: 'Client deletion failed',
+      fallbackMessage: 'Failed to delete client',
+    });
   }
 });
 

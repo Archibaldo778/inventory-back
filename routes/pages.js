@@ -10,6 +10,7 @@ import Deck from '../models/Deck.js';
 import { sanitizeBoardCanvas } from '../utils/boardSnapshotSanitizer.js';
 import { INVALID_IMAGE_UPLOAD_RESPONSE, isAllowedImageUpload } from '../utils/imageSignature.js';
 import { clearApiCacheGroups } from '../utils/apiCache.js';
+import { sendApiError } from '../utils/apiErrors.js';
 import { v2 as cloudinary } from 'cloudinary';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -120,7 +121,12 @@ router.post('/', async (req, res) => {
     });
     res.status(201).json(page);
     clearCache();
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) {
+    sendApiError(res, e, {
+      context: 'Page creation failed',
+      fallbackMessage: 'Failed to create page',
+    });
+  }
 });
 
 // Get page
@@ -130,7 +136,12 @@ router.get('/:id', async (req, res) => {
     if (!page) return res.status(404).json({ error: 'Not found' });
     const responsePage = sanitizePageCanvasForResponse(page);
     res.json(responsePage);
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) {
+    sendApiError(res, e, {
+      context: 'Page lookup failed',
+      fallbackMessage: 'Failed to load page',
+    });
+  }
 });
 
 router.post('/upload-image', imageUpload.single('image'), async (req, res) => {
@@ -155,7 +166,10 @@ router.post('/upload-image', imageUpload.single('image'), async (req, res) => {
     }
     return res.status(201).json({ src });
   } catch (e) {
-    return res.status(400).json({ error: e.message || 'Failed to upload board image' });
+    return sendApiError(res, e, {
+      context: 'Board image upload failed',
+      fallbackMessage: 'Failed to upload board image',
+    });
   }
 });
 
@@ -203,7 +217,12 @@ router.patch('/:id', async (req, res) => {
     const responsePage = sanitizePageCanvasForResponse(page);
     res.json(responsePage);
     clearCache();
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) {
+    sendApiError(res, e, {
+      context: 'Page update failed',
+      fallbackMessage: 'Failed to update page',
+    });
+  }
 });
 
 // Delete page
@@ -213,7 +232,12 @@ router.delete('/:id', async (req, res) => {
     if (!deleted) return res.status(404).json({ error: 'Not found' });
     res.json({ ok: true });
     clearCache();
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) {
+    sendApiError(res, e, {
+      context: 'Page deletion failed',
+      fallbackMessage: 'Failed to delete page',
+    });
+  }
 });
 
 export default router;

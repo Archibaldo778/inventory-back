@@ -13,6 +13,10 @@ const getDuplicateField = (error) => {
   return fields.find((field) => /^[a-zA-Z0-9_.-]+$/.test(field)) || '';
 };
 
+export const createApiError = (statusCode, message) => (
+  Object.assign(new Error(String(message || 'Request failed')), { statusCode })
+);
+
 export const classifyApiError = (
   error,
   { defaultStatus = 500, fallbackMessage = 'Internal server error' } = {}

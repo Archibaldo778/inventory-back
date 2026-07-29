@@ -2,6 +2,7 @@ import { Router } from 'express';
 import crypto from 'crypto';
 import ProposalTemplate from '../models/ProposalTemplate.js';
 import Proposal from '../models/Proposal.js';
+import { createApiError, sendApiError } from '../utils/apiErrors.js';
 
 const router = Router();
 
@@ -498,8 +499,8 @@ const sanitizeTemplatePayload = (body = {}, { partial = false } = {}) => {
     payload.meta = body.meta && typeof body.meta === 'object' ? body.meta : {};
   }
 
-  if (!partial && !payload.key) throw new Error('key is required');
-  if (!partial && !payload.title) throw new Error('title is required');
+  if (!partial && !payload.key) throw createApiError(400, 'key is required');
+  if (!partial && !payload.title) throw createApiError(400, 'title is required');
 
   return payload;
 };
@@ -535,7 +536,10 @@ router.get('/', async (req, res) => {
     const docs = await ProposalTemplate.find(query).sort({ sortOrder: 1, title: 1 });
     res.json(docs.map(serializeTemplate));
   } catch (err) {
-    res.status(500).json({ error: err.message || 'Failed to list templates' });
+    return sendApiError(res, err, {
+      context: 'Proposal templates list failed',
+      fallbackMessage: 'Failed to list templates',
+    });
   }
 });
 
@@ -553,7 +557,10 @@ router.post('/seed-defaults', async (_req, res) => {
     }
     res.json({ ok: true, count: results.length, items: results });
   } catch (err) {
-    res.status(400).json({ error: err.message || 'Failed to seed templates' });
+    return sendApiError(res, err, {
+      context: 'Proposal template seed failed',
+      fallbackMessage: 'Failed to seed templates',
+    });
   }
 });
 
@@ -563,7 +570,10 @@ router.post('/', async (req, res) => {
     const created = await ProposalTemplate.create(payload);
     res.status(201).json(serializeTemplate(created));
   } catch (err) {
-    res.status(400).json({ error: err.message || 'Failed to create template' });
+    return sendApiError(res, err, {
+      context: 'Proposal template creation failed',
+      fallbackMessage: 'Failed to create template',
+    });
   }
 });
 
@@ -577,7 +587,10 @@ router.patch('/:id', async (req, res) => {
     if (!updated) return res.status(404).json({ error: 'Template not found' });
     res.json(serializeTemplate(updated));
   } catch (err) {
-    res.status(400).json({ error: err.message || 'Failed to update template' });
+    return sendApiError(res, err, {
+      context: 'Proposal template update failed',
+      fallbackMessage: 'Failed to update template',
+    });
   }
 });
 
@@ -587,7 +600,10 @@ router.delete('/:id', async (req, res) => {
     if (!deleted) return res.status(404).json({ error: 'Template not found' });
     res.json({ ok: true });
   } catch (err) {
-    res.status(400).json({ error: err.message || 'Failed to delete template' });
+    return sendApiError(res, err, {
+      context: 'Proposal template deletion failed',
+      fallbackMessage: 'Failed to delete template',
+    });
   }
 });
 
@@ -705,7 +721,10 @@ router.post('/:id/apply', async (req, res) => {
       proposal,
     });
   } catch (err) {
-    res.status(400).json({ error: err.message || 'Failed to apply template' });
+    return sendApiError(res, err, {
+      context: 'Proposal template apply failed',
+      fallbackMessage: 'Failed to apply template',
+    });
   }
 });
 

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import mongoose from 'mongoose';
 import Proposal, { PROPOSAL_SOURCES, PROPOSAL_STATUSES } from '../models/Proposal.js';
+import { createApiError, sendApiError } from '../utils/apiErrors.js';
 
 const router = Router();
 
@@ -97,10 +98,10 @@ const buildProposalBasePayload = (body = {}, { partial = false } = {}) => {
 
   if (!partial || body.title !== undefined || body.name !== undefined) {
     const title = trimStr(body.title ?? body.name);
-    if (!partial && !title) throw new Error('title is required');
+    if (!partial && !title) throw createApiError(400, 'title is required');
     if (title) payload.title = title;
     if (partial && !title && (body.title !== undefined || body.name !== undefined)) {
-      throw new Error('title is required');
+      throw createApiError(400, 'title is required');
     }
   }
 
@@ -111,7 +112,7 @@ const buildProposalBasePayload = (body = {}, { partial = false } = {}) => {
     } else if (mongoose.Types.ObjectId.isValid(eventId)) {
       payload.eventId = eventId;
     } else {
-      throw new Error('invalid eventId');
+      throw createApiError(400, 'invalid eventId');
     }
   }
 
@@ -126,7 +127,7 @@ const buildProposalBasePayload = (body = {}, { partial = false } = {}) => {
 
   if (body.status !== undefined) {
     const status = parseStatus(body.status);
-    if (!status) throw new Error('invalid status');
+    if (!status) throw createApiError(400, 'invalid status');
     payload.status = status;
   }
 
@@ -146,10 +147,10 @@ const buildProposalItemPayload = (input = {}, { partial = false } = {}) => {
 
   if (!partial || input.name !== undefined || input.title !== undefined) {
     const name = trimStr(input.name ?? input.title);
-    if (!partial && !name) throw new Error('item name is required');
+    if (!partial && !name) throw createApiError(400, 'item name is required');
     if (name) payload.name = name;
     if (partial && !name && (input.name !== undefined || input.title !== undefined)) {
-      throw new Error('item name is required');
+      throw createApiError(400, 'item name is required');
     }
   }
 
@@ -223,7 +224,10 @@ router.get('/', async (req, res) => {
     const items = await Proposal.find(query).sort({ updatedAt: -1 }).limit(limit);
     res.json(items.map(serializeProposal));
   } catch (err) {
-    res.status(500).json({ error: err.message || 'Failed to list proposals' });
+    return sendApiError(res, err, {
+      context: 'Proposals list failed',
+      fallbackMessage: 'Failed to list proposals',
+    });
   }
 });
 
@@ -239,7 +243,10 @@ router.post('/', async (req, res) => {
     const created = await Proposal.create(payload);
     res.status(201).json(serializeProposal(created));
   } catch (err) {
-    res.status(400).json({ error: err.message || 'Failed to create proposal' });
+    return sendApiError(res, err, {
+      context: 'Proposal creation failed',
+      fallbackMessage: 'Failed to create proposal',
+    });
   }
 });
 
@@ -249,7 +256,10 @@ router.get('/:id', async (req, res) => {
     if (!doc) return res.status(404).json({ error: 'Not found' });
     res.json(serializeProposal(doc));
   } catch (err) {
-    res.status(400).json({ error: err.message || 'Failed to load proposal' });
+    return sendApiError(res, err, {
+      context: 'Proposal lookup failed',
+      fallbackMessage: 'Failed to load proposal',
+    });
   }
 });
 
@@ -267,7 +277,10 @@ router.patch('/:id', async (req, res) => {
     if (!updated) return res.status(404).json({ error: 'Not found' });
     res.json(serializeProposal(updated));
   } catch (err) {
-    res.status(400).json({ error: err.message || 'Failed to update proposal' });
+    return sendApiError(res, err, {
+      context: 'Proposal update failed',
+      fallbackMessage: 'Failed to update proposal',
+    });
   }
 });
 
@@ -277,7 +290,10 @@ router.delete('/:id', async (req, res) => {
     if (!deleted) return res.status(404).json({ error: 'Not found' });
     res.json({ ok: true });
   } catch (err) {
-    res.status(400).json({ error: err.message || 'Failed to delete proposal' });
+    return sendApiError(res, err, {
+      context: 'Proposal deletion failed',
+      fallbackMessage: 'Failed to delete proposal',
+    });
   }
 });
 
@@ -304,7 +320,10 @@ router.post('/:id/duplicate', async (req, res) => {
     const created = await Proposal.create(clone);
     res.status(201).json(serializeProposal(created));
   } catch (err) {
-    res.status(400).json({ error: err.message || 'Failed to duplicate proposal' });
+    return sendApiError(res, err, {
+      context: 'Proposal duplication failed',
+      fallbackMessage: 'Failed to duplicate proposal',
+    });
   }
 });
 
@@ -319,7 +338,10 @@ router.post('/:id/items', async (req, res) => {
     const createdItem = proposal.items[proposal.items.length - 1];
     res.status(201).json(createdItem);
   } catch (err) {
-    res.status(400).json({ error: err.message || 'Failed to add proposal item' });
+    return sendApiError(res, err, {
+      context: 'Proposal item creation failed',
+      fallbackMessage: 'Failed to add proposal item',
+    });
   }
 });
 
@@ -339,7 +361,10 @@ router.patch('/:id/items/:itemId', async (req, res) => {
     await proposal.save();
     res.json(item);
   } catch (err) {
-    res.status(400).json({ error: err.message || 'Failed to update proposal item' });
+    return sendApiError(res, err, {
+      context: 'Proposal item update failed',
+      fallbackMessage: 'Failed to update proposal item',
+    });
   }
 });
 
@@ -353,7 +378,10 @@ router.delete('/:id/items/:itemId', async (req, res) => {
     await proposal.save();
     res.json({ ok: true });
   } catch (err) {
-    res.status(400).json({ error: err.message || 'Failed to delete proposal item' });
+    return sendApiError(res, err, {
+      context: 'Proposal item deletion failed',
+      fallbackMessage: 'Failed to delete proposal item',
+    });
   }
 });
 

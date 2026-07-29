@@ -19,7 +19,7 @@ export const runWithTransactionFallback = async (transactionWork, fallbackWork) 
     return result;
   } catch (error) {
     if (!isTransactionUnsupported(error)) throw error;
-    return fallbackWork();
+    return await fallbackWork();
   } finally {
     await session.endSession();
   }

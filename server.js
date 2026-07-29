@@ -426,26 +426,35 @@ const MONGO_URI = configuredMongoUri || (
 const MONGO_DB_NAME = process.env.MONGO_DB_NAME;
 
 // health-check
-app.get('/', (req, res) => {
+export const getDatabaseHealth = () => {
   const connected = mongoose.connection.readyState === 1;
-  res.status(connected ? 200 : 503).json({
-    ok: connected,
+  return {
+    connected,
+    statusCode: connected ? 200 : 503,
     database: connected ? 'connected' : 'unavailable',
+  };
+};
+
+app.get('/', (req, res) => {
+  const health = getDatabaseHealth();
+  res.status(health.statusCode).json({
+    ok: health.connected,
+    database: health.database,
   });
 });
 
 app.get('/api', (req, res) => {
-  const connected = mongoose.connection.readyState === 1;
-  res.status(connected ? 200 : 503).json({
-    message: connected ? 'API работает 🚀' : 'API unavailable',
-    database: connected ? 'connected' : 'unavailable',
+  const health = getDatabaseHealth();
+  res.status(health.statusCode).json({
+    message: health.connected ? 'API работает 🚀' : 'API unavailable',
+    database: health.database,
   });
 });
 
 app.get('/api/test', (req, res) => {
-  const connected = mongoose.connection.readyState === 1;
-  res.status(connected ? 200 : 503).json({
-    message: connected ? 'Backend is working!' : 'Backend database is unavailable',
+  const health = getDatabaseHealth();
+  res.status(health.statusCode).json({
+    message: health.connected ? 'Backend is working!' : 'Backend database is unavailable',
   });
 });
 
@@ -473,9 +482,11 @@ async function ensureSuperAdmin() {
 
 const PORT = process.env.PORT || 5050;
 
-app.use((req, res) => {
+export const notFoundHandler = (req, res) => {
   res.status(404).json({ message: 'Route not found' });
-});
+};
+
+app.use(notFoundHandler);
 
 app.use((error, req, res, next) => {
   if (res.headersSent) return next(error);

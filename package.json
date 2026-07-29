@@ -9,7 +9,8 @@
     "dev": "nodemon server.js",
     "sync:prod-to-dev": "node scripts/sync-prod-to-dev.mjs",
     "migrate:kitchen-images": "node scripts/migrate-kitchen-image-folders.mjs",
-    "migrate:board-snapshots": "node scripts/migrate-board-snapshots.mjs"
+    "migrate:board-snapshots": "node scripts/migrate-board-snapshots.mjs",
+    "seed:bar-inventory": "node scripts/seed-bar-inventory.mjs"
   },
   "keywords": [],
   "author": "",

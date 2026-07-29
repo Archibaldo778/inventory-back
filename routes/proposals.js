@@ -270,11 +270,47 @@ router.patch('/:id', async (req, res) => {
       const parsed = req.body.lastExportedAt ? new Date(req.body.lastExportedAt) : null;
       updates.lastExportedAt = parsed && !Number.isNaN(parsed.getTime()) ? parsed : null;
     }
-    const updated = await Proposal.findByIdAndUpdate(req.params.id, updates, {
+
+    const hasExpectedRevision = req.body?.expectedRevision !== undefined;
+    const expectedRevision = Number(req.body?.expectedRevision);
+    if (hasExpectedRevision && (!Number.isInteger(expectedRevision) || expectedRevision < 0)) {
+      return res.status(400).json({ error: 'expectedRevision must be a non-negative integer' });
+    }
+
+    const filter = { _id: req.params.id };
+    if (hasExpectedRevision) {
+      if (expectedRevision === 0) {
+        filter.$or = [
+          { revision: 0 },
+          { revision: { $exists: false } },
+        ];
+      } else {
+        filter.revision = expectedRevision;
+      }
+    }
+    const updated = await Proposal.findOneAndUpdate(filter, {
+      $set: updates,
+      $inc: { revision: 1 },
+    }, {
       new: true,
       runValidators: true,
     });
-    if (!updated) return res.status(404).json({ error: 'Not found' });
+    if (!updated) {
+      if (hasExpectedRevision) {
+        const current = await Proposal.findById(req.params.id)
+          .select('_id revision updatedAt')
+          .lean();
+        if (current) {
+          return res.status(409).json({
+            error: 'Proposal was changed by another session. Reload before saving again.',
+            code: 'PROPOSAL_REVISION_CONFLICT',
+            currentRevision: Number.isInteger(current.revision) ? current.revision : 0,
+            updatedAt: current.updatedAt,
+          });
+        }
+      }
+      return res.status(404).json({ error: 'Not found' });
+    }
     res.json(serializeProposal(updated));
   } catch (err) {
     return sendApiError(res, err, {
@@ -306,6 +342,7 @@ router.post('/:id/duplicate', async (req, res) => {
     delete clone._id;
     delete clone.createdAt;
     delete clone.updatedAt;
+    delete clone.revision;
     clone.title = `${clone.title || 'Proposal'} (copy)`;
     clone.status = 'draft';
     clone.lastExportedAt = null;

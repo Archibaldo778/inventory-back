@@ -191,7 +191,16 @@ router.patch('/:id', async (req, res) => {
     }
 
     const filter = { _id: req.params.id };
-    if (hasExpectedRevision) filter.revision = expectedRevision;
+    if (hasExpectedRevision) {
+      if (expectedRevision === 0) {
+        filter.$or = [
+          { revision: 0 },
+          { revision: { $exists: false } },
+        ];
+      } else {
+        filter.revision = expectedRevision;
+      }
+    }
     const page = await Page.findOneAndUpdate(filter, {
       $set: updates,
       $inc: { revision: 1 },

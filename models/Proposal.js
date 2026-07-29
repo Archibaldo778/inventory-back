@@ -41,6 +41,7 @@ const proposalSchema = new mongoose.Schema(
     createdBy: { type: String, default: '', trim: true },
     updatedBy: { type: String, default: '', trim: true },
     lastExportedAt: { type: Date, default: null },
+    revision: { type: Number, default: 0, min: 0 },
   },
   { timestamps: true }
 );

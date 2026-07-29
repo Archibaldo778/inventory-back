@@ -3,9 +3,11 @@ import multer from 'multer';
 import { Readable } from 'stream';
 import { v2 as cloudinary } from 'cloudinary';
 import { sendApiError } from '../utils/apiErrors.js';
+import { fetchWithTimeout, normalizeFetchTimeout } from '../utils/fetchWithTimeout.js';
 import { INVALID_IMAGE_UPLOAD_RESPONSE, isAllowedImageUpload } from '../utils/imageSignature.js';
 
 const router = Router();
+const TOOL_UPSTREAM_TIMEOUT_MS = normalizeFetchTimeout(process.env.TOOL_UPSTREAM_TIMEOUT_MS);
 
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -122,7 +124,11 @@ router.post('/heif-to-jpg', upload.single('image'), async (req, res) => {
       return res.status(502).json({ error: 'HEIF conversion service returned no image' });
     }
 
-    const convertedRes = await fetch(url, { method: 'GET' });
+    const convertedRes = await fetchWithTimeout(
+      url,
+      { method: 'GET' },
+      { timeoutMs: TOOL_UPSTREAM_TIMEOUT_MS }
+    );
     if (!convertedRes.ok) {
       return res.status(502).json({ error: `Failed to download converted JPG (${convertedRes.status})` });
     }
@@ -178,14 +184,18 @@ router.post('/remove-background', imageUpload.single('image'), async (req, res) 
     form.append('channels', channels);
     form.append('crop', String(crop));
 
-    const response = await fetch('https://sdk.photoroom.com/v1/segment', {
-      method: 'POST',
-      headers: {
-        Accept: 'image/png, image/webp, image/jpeg, application/json',
-        'x-api-key': photoRoomApiKey,
+    const response = await fetchWithTimeout(
+      'https://sdk.photoroom.com/v1/segment',
+      {
+        method: 'POST',
+        headers: {
+          Accept: 'image/png, image/webp, image/jpeg, application/json',
+          'x-api-key': photoRoomApiKey,
+        },
+        body: form,
       },
-      body: form,
-    });
+      { timeoutMs: TOOL_UPSTREAM_TIMEOUT_MS }
+    );
 
     if (!response.ok) {
       const contentType = String(response.headers.get('content-type') || '').toLowerCase();

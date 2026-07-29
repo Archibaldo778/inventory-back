@@ -9,6 +9,7 @@ import Product from '../models/Product.js';
 import { cleanupManagedImageSafely } from '../utils/managedImageCleanup.js';
 import { INVALID_IMAGE_UPLOAD_RESPONSE, isAllowedImageUpload } from '../utils/imageSignature.js';
 import { clearApiCacheGroups, createGroupedApiCache } from '../utils/apiCache.js';
+import { sendApiError } from '../utils/apiErrors.js';
 import { v2 as cloudinary } from 'cloudinary';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -342,6 +343,7 @@ const buildSizePayload = (body, { forUpdate = false } = {}) => {
 
 // CREATE
 router.post('/', upload.single('image'), async (req, res) => {
+  let uploadedImage = '';
   try {
     const {
       name,
@@ -375,13 +377,19 @@ router.post('/', upload.single('image'), async (req, res) => {
           try {
             image = await writeLocalDecorImage(req.file);
           } catch (fallbackErr) {
-            console.error('Local decor image fallback failed:', fallbackErr);
-            return res.status(500).json({ error: `Failed to upload decor image: ${fallbackErr?.message || fallbackErr}` });
+            return sendApiError(res, fallbackErr, {
+              context: 'Local decor image fallback failed',
+              fallbackMessage: 'Failed to upload decor image',
+            });
           }
         } else {
-          return res.status(500).json({ error: `Failed to upload decor image: ${err?.message || err}` });
+          return sendApiError(res, err, {
+            context: 'Cloudinary decor image upload failed',
+            fallbackMessage: 'Failed to upload decor image',
+          });
         }
       }
+      uploadedImage = image || '';
     }
 
     const sizeMeta = buildSizePayload(req.body, { forUpdate: false });
@@ -404,7 +412,11 @@ router.post('/', upload.single('image'), async (req, res) => {
     res.status(201).json(out);
     clearCache();
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    if (uploadedImage) await cleanupManagedImageSafely(uploadedImage, 'orphaned product image');
+    return sendApiError(res, err, {
+      context: 'Product creation failed',
+      fallbackMessage: 'Failed to create product',
+    });
   }
 });
 
@@ -415,12 +427,16 @@ router.get('/', cacheWithGroup('5 minutes', CACHE_GROUP), async (_req, res) => {
     const mapped = items.map((d) => ({ ...d.toObject(), qty: d.quantity }));
     res.json(mapped);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    return sendApiError(res, err, {
+      context: 'Products list failed',
+      fallbackMessage: 'Failed to list products',
+    });
   }
 });
 
 // UPDATE
 router.patch('/:id', upload.single('image'), async (req, res) => {
+  let uploadedImage = '';
   try {
     const currentDoc = await Product.findById(req.params.id);
     if (!currentDoc) return res.status(404).json({ error: 'Not found' });
@@ -469,13 +485,19 @@ router.patch('/:id', upload.single('image'), async (req, res) => {
           try {
             updates.image = await writeLocalDecorImage(req.file);
           } catch (fallbackErr) {
-            console.error('Local decor image fallback failed on PATCH:', fallbackErr);
-            return res.status(500).json({ error: `Failed to upload decor image: ${fallbackErr?.message || fallbackErr}` });
+            return sendApiError(res, fallbackErr, {
+              context: 'Local decor image update fallback failed',
+              fallbackMessage: 'Failed to upload decor image',
+            });
           }
         } else {
-          return res.status(500).json({ error: `Failed to upload decor image: ${err?.message || err}` });
+          return sendApiError(res, err, {
+            context: 'Cloudinary decor image update failed',
+            fallbackMessage: 'Failed to upload decor image',
+          });
         }
       }
+      uploadedImage = updates.image || '';
     }
 
     const doc = await Product.findByIdAndUpdate(req.params.id, updates, {
@@ -495,8 +517,11 @@ router.patch('/:id', upload.single('image'), async (req, res) => {
     res.json(out);
     clearCache();
   } catch (err) {
-    console.error('PATCH /products/:id failed:', err);
-    res.status(400).json({ error: err.message });
+    if (uploadedImage) await cleanupManagedImageSafely(uploadedImage, 'orphaned product image');
+    return sendApiError(res, err, {
+      context: 'Product update failed',
+      fallbackMessage: 'Failed to update product',
+    });
   }
 });
 
@@ -509,7 +534,10 @@ router.delete('/:id', async (req, res) => {
     res.json({ ok: true });
     clearCache();
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    return sendApiError(res, err, {
+      context: 'Product deletion failed',
+      fallbackMessage: 'Failed to delete product',
+    });
   }
 });
 

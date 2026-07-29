@@ -9,6 +9,7 @@ import { v2 as cloudinary } from 'cloudinary';
 import KitchenItem from '../models/KitchenItem.js';
 import { cleanupManagedImageSafely } from '../utils/managedImageCleanup.js';
 import { INVALID_IMAGE_UPLOAD_RESPONSE, isAllowedImageUpload } from '../utils/imageSignature.js';
+import { sendApiError } from '../utils/apiErrors.js';
 
 const router = Router();
 
@@ -212,12 +213,16 @@ router.get('/', async (_req, res) => {
     const items = await KitchenItem.find().sort({ createdAt: -1 });
     res.json(items);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    return sendApiError(res, err, {
+      context: 'Kitchen items list failed',
+      fallbackMessage: 'Failed to list kitchen items',
+    });
   }
 });
 
 // CREATE
 router.post('/', upload.single('image'), async (req, res) => {
+  let uploadedImage = '';
   try {
     const body = req.body || {};
     const name = sanitizeStr(body.name);
@@ -254,13 +259,19 @@ router.post('/', upload.single('image'), async (req, res) => {
           try {
             payload.image = await writeLocalKitchenImage(req.file);
           } catch (fallbackErr) {
-            console.error('Local kitchen image fallback failed', fallbackErr);
-            return res.status(500).json({ error: `Failed to upload kitchen image: ${fallbackErr?.message || fallbackErr}` });
+            return sendApiError(res, fallbackErr, {
+              context: 'Local kitchen image fallback failed',
+              fallbackMessage: 'Failed to upload kitchen image',
+            });
           }
         } else {
-          return res.status(500).json({ error: `Failed to upload kitchen image: ${err?.message || err}` });
+          return sendApiError(res, err, {
+            context: 'Cloudinary kitchen image upload failed',
+            fallbackMessage: 'Failed to upload kitchen image',
+          });
         }
       }
+      uploadedImage = payload.image || '';
     } else if (body.image !== undefined) {
       payload.image = sanitizeStr(body.image) || null;
     }
@@ -268,12 +279,17 @@ router.post('/', upload.single('image'), async (req, res) => {
     const created = await KitchenItem.create(payload);
     res.status(201).json(created);
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    if (uploadedImage) await cleanupManagedImageSafely(uploadedImage, 'orphaned kitchen image');
+    return sendApiError(res, err, {
+      context: 'Kitchen item creation failed',
+      fallbackMessage: 'Failed to create kitchen item',
+    });
   }
 });
 
 // UPDATE
 router.patch('/:id', upload.single('image'), async (req, res) => {
+  let uploadedImage = '';
   try {
     const body = req.body || {};
     const updates = {};
@@ -369,13 +385,19 @@ router.patch('/:id', upload.single('image'), async (req, res) => {
           try {
             updates.image = await writeLocalKitchenImage(req.file);
           } catch (fallbackErr) {
-            console.error('Local kitchen image fallback failed', fallbackErr);
-            return res.status(500).json({ error: `Failed to upload kitchen image: ${fallbackErr?.message || fallbackErr}` });
+            return sendApiError(res, fallbackErr, {
+              context: 'Local kitchen image update fallback failed',
+              fallbackMessage: 'Failed to upload kitchen image',
+            });
           }
         } else {
-          return res.status(500).json({ error: `Failed to upload kitchen image: ${err?.message || err}` });
+          return sendApiError(res, err, {
+            context: 'Cloudinary kitchen image update failed',
+            fallbackMessage: 'Failed to upload kitchen image',
+          });
         }
       }
+      uploadedImage = updates.image || '';
     } else if (body.image !== undefined) {
       updates.image = sanitizeStr(body.image) || null;
     }
@@ -394,7 +416,11 @@ router.patch('/:id', upload.single('image'), async (req, res) => {
     }
     res.json(updated);
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    if (uploadedImage) await cleanupManagedImageSafely(uploadedImage, 'orphaned kitchen image');
+    return sendApiError(res, err, {
+      context: 'Kitchen item update failed',
+      fallbackMessage: 'Failed to update kitchen item',
+    });
   }
 });
 
@@ -406,7 +432,10 @@ router.delete('/:id', async (req, res) => {
     await cleanupManagedImageSafely(deleted.image, 'kitchen image');
     res.json({ ok: true });
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    return sendApiError(res, err, {
+      context: 'Kitchen item deletion failed',
+      fallbackMessage: 'Failed to delete kitchen item',
+    });
   }
 });
 

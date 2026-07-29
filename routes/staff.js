@@ -6,6 +6,7 @@ import Staff from '../models/Staff.js';
 import { cleanupManagedImageSafely } from '../utils/managedImageCleanup.js';
 import { INVALID_IMAGE_UPLOAD_RESPONSE, isAllowedImageUpload } from '../utils/imageSignature.js';
 import { clearApiCacheGroups, createGroupedApiCache } from '../utils/apiCache.js';
+import { sendApiError } from '../utils/apiErrors.js';
 
 const router = Router();
 const CACHE_GROUP = 'staff';
@@ -108,12 +109,17 @@ router.get('/', cacheWithGroup('5 minutes', CACHE_GROUP), async (req, res) => {
     const items = await Staff.find(filter).sort({ createdAt: -1 });
     res.json(items);
   } catch (e) {
-    res.status(500).json({ message: e.message || 'Failed to list staff' });
+    return sendApiError(res, e, {
+      field: 'message',
+      context: 'Staff list failed',
+      fallbackMessage: 'Failed to list staff',
+    });
   }
 });
 
 // Create
 router.post('/', upload.single('photo'), async (req, res) => {
+  let uploadedPhoto = '';
   try {
     const body = req.body || {};
     const firstName = sanitizeStr(body.firstName);
@@ -141,9 +147,13 @@ router.post('/', upload.single('photo'), async (req, res) => {
       try {
         payload.photo = await uploadToCloudinary(req.file);
       } catch (err) {
-        console.error('Cloudinary upload failed', err);
-        return res.status(500).json({ message: 'Failed to upload staff photo' });
+        return sendApiError(res, err, {
+          field: 'message',
+          context: 'Cloudinary staff photo upload failed',
+          fallbackMessage: 'Failed to upload staff photo',
+        });
       }
+      uploadedPhoto = payload.photo || '';
     } else if (body.photo) {
       payload.photo = sanitizeStr(body.photo);
     }
@@ -151,7 +161,12 @@ router.post('/', upload.single('photo'), async (req, res) => {
     res.status(201).json(doc);
     clearCache();
   } catch (e) {
-    res.status(400).json({ message: e.message || 'Failed to create staff' });
+    if (uploadedPhoto) await cleanupManagedImageSafely(uploadedPhoto, 'orphaned staff photo');
+    return sendApiError(res, e, {
+      field: 'message',
+      context: 'Staff creation failed',
+      fallbackMessage: 'Failed to create staff',
+    });
   }
 });
 
@@ -162,12 +177,17 @@ router.get('/:id', cacheWithGroup('5 minutes', CACHE_GROUP), async (req, res) =>
     if (!doc) return res.status(404).json({ message: 'Not found' });
     res.json(doc);
   } catch (e) {
-    res.status(400).json({ message: e.message || 'Failed to get staff' });
+    return sendApiError(res, e, {
+      field: 'message',
+      context: 'Staff lookup failed',
+      fallbackMessage: 'Failed to load staff member',
+    });
   }
 });
 
 // Patch
 router.patch('/:id', upload.single('photo'), async (req, res) => {
+  let uploadedPhoto = '';
   try {
     const updates = {};
     const body = req.body || {};
@@ -193,9 +213,13 @@ router.patch('/:id', upload.single('photo'), async (req, res) => {
       try {
         updates.photo = await uploadToCloudinary(req.file);
       } catch (err) {
-        console.error('Cloudinary upload failed', err);
-        return res.status(500).json({ message: 'Failed to upload staff photo' });
+        return sendApiError(res, err, {
+          field: 'message',
+          context: 'Cloudinary staff photo update failed',
+          fallbackMessage: 'Failed to upload staff photo',
+        });
       }
+      uploadedPhoto = updates.photo || '';
     } else if (typeof body.photo !== 'undefined') {
       updates.photo = sanitizeStr(body.photo);
     }
@@ -215,7 +239,12 @@ router.patch('/:id', upload.single('photo'), async (req, res) => {
     res.json(doc);
     clearCache();
   } catch (e) {
-    res.status(400).json({ message: e.message || 'Failed to update staff' });
+    if (uploadedPhoto) await cleanupManagedImageSafely(uploadedPhoto, 'orphaned staff photo');
+    return sendApiError(res, e, {
+      field: 'message',
+      context: 'Staff update failed',
+      fallbackMessage: 'Failed to update staff member',
+    });
   }
 });
 
@@ -228,7 +257,11 @@ router.delete('/:id', async (req, res) => {
     res.json({ ok: true });
     clearCache();
   } catch (e) {
-    res.status(400).json({ message: e.message || 'Failed to delete staff' });
+    return sendApiError(res, e, {
+      field: 'message',
+      context: 'Staff deletion failed',
+      fallbackMessage: 'Failed to delete staff member',
+    });
   }
 });
 

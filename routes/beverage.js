@@ -9,6 +9,7 @@ import { v2 as cloudinary } from 'cloudinary';
 import BeverageItem from '../models/BeverageItem.js';
 import { cleanupManagedImageSafely } from '../utils/managedImageCleanup.js';
 import { INVALID_IMAGE_UPLOAD_RESPONSE, isAllowedImageUpload } from '../utils/imageSignature.js';
+import { sendApiError } from '../utils/apiErrors.js';
 
 const router = Router();
 
@@ -121,11 +122,15 @@ router.get('/', async (_req, res) => {
     const items = await BeverageItem.find().sort({ createdAt: -1 });
     res.json(items);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    return sendApiError(res, err, {
+      context: 'Beverage items list failed',
+      fallbackMessage: 'Failed to list beverage items',
+    });
   }
 });
 
 router.post('/', upload.single('image'), async (req, res) => {
+  let uploadedImage = '';
   try {
     const body = req.body || {};
     const name = sanitizeStr(body.name);
@@ -155,13 +160,19 @@ router.post('/', upload.single('image'), async (req, res) => {
           try {
             payload.image = await writeLocalBeverageImage(req.file);
           } catch (fallbackErr) {
-            console.error('Local beverage image fallback failed', fallbackErr);
-            return res.status(500).json({ error: `Failed to upload beverage image: ${fallbackErr?.message || fallbackErr}` });
+            return sendApiError(res, fallbackErr, {
+              context: 'Local beverage image fallback failed',
+              fallbackMessage: 'Failed to upload beverage image',
+            });
           }
         } else {
-          return res.status(500).json({ error: `Failed to upload beverage image: ${err?.message || err}` });
+          return sendApiError(res, err, {
+            context: 'Cloudinary beverage image upload failed',
+            fallbackMessage: 'Failed to upload beverage image',
+          });
         }
       }
+      uploadedImage = payload.image || '';
     } else if (body.image !== undefined) {
       payload.image = sanitizeStr(body.image) || null;
     }
@@ -169,11 +180,16 @@ router.post('/', upload.single('image'), async (req, res) => {
     const created = await BeverageItem.create(payload);
     res.status(201).json(created);
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    if (uploadedImage) await cleanupManagedImageSafely(uploadedImage, 'orphaned beverage image');
+    return sendApiError(res, err, {
+      context: 'Beverage item creation failed',
+      fallbackMessage: 'Failed to create beverage item',
+    });
   }
 });
 
 router.patch('/:id', upload.single('image'), async (req, res) => {
+  let uploadedImage = '';
   try {
     const body = req.body || {};
     const updates = {};
@@ -219,13 +235,19 @@ router.patch('/:id', upload.single('image'), async (req, res) => {
           try {
             updates.image = await writeLocalBeverageImage(req.file);
           } catch (fallbackErr) {
-            console.error('Local beverage image fallback failed', fallbackErr);
-            return res.status(500).json({ error: `Failed to upload beverage image: ${fallbackErr?.message || fallbackErr}` });
+            return sendApiError(res, fallbackErr, {
+              context: 'Local beverage image update fallback failed',
+              fallbackMessage: 'Failed to upload beverage image',
+            });
           }
         } else {
-          return res.status(500).json({ error: `Failed to upload beverage image: ${err?.message || err}` });
+          return sendApiError(res, err, {
+            context: 'Cloudinary beverage image update failed',
+            fallbackMessage: 'Failed to upload beverage image',
+          });
         }
       }
+      uploadedImage = updates.image || '';
     } else if (body.image !== undefined) {
       updates.image = sanitizeStr(body.image) || null;
     }
@@ -244,7 +266,11 @@ router.patch('/:id', upload.single('image'), async (req, res) => {
     }
     res.json(updated);
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    if (uploadedImage) await cleanupManagedImageSafely(uploadedImage, 'orphaned beverage image');
+    return sendApiError(res, err, {
+      context: 'Beverage item update failed',
+      fallbackMessage: 'Failed to update beverage item',
+    });
   }
 });
 
@@ -255,7 +281,10 @@ router.delete('/:id', async (req, res) => {
     await cleanupManagedImageSafely(deleted.image, 'beverage image');
     res.json({ ok: true });
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    return sendApiError(res, err, {
+      context: 'Beverage item deletion failed',
+      fallbackMessage: 'Failed to delete beverage item',
+    });
   }
 });
 

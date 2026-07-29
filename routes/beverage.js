@@ -196,7 +196,8 @@ router.post('/', upload.single('image'), async (req, res) => {
     }
 
     const created = await BeverageItem.create(payload);
-    res.status(201).json(created);
+    const responseItem = await BeverageItem.findById(created._id).select('+purchaseCost +caseCost');
+    res.status(201).json(responseItem || created);
   } catch (err) {
     if (uploadedImage) await cleanupManagedImageSafely(uploadedImage, 'orphaned beverage image');
     return sendApiError(res, err, {
@@ -285,7 +286,7 @@ router.patch('/:id', upload.single('image'), async (req, res) => {
     const updated = await BeverageItem.findByIdAndUpdate(req.params.id, updates, {
       new: true,
       runValidators: true,
-    });
+    }).select('+purchaseCost +caseCost');
     if (!updated) {
       if (uploadedImage) {
         await cleanupManagedImageSafely(uploadedImage, 'orphaned beverage image');

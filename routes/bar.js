@@ -139,23 +139,51 @@ const normalizePackage = (value = {}, fallback = {}) => {
   };
 };
 
-const resolveCatalogById = async (items) => {
+const normalizeCatalogName = (value) => cleanString(value, 240)
+  .toLowerCase()
+  .normalize('NFKD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .replace(/[^a-z0-9]+/g, ' ')
+  .trim();
+
+const resolveCatalog = async (items) => {
   const ids = [...new Set((Array.isArray(items) ? items : [])
     .map((item) => String(item?.beverageItemId || '').trim())
     .filter(isObjectId))];
-  if (!ids.length) return new Map();
-  const catalog = await BeverageItem.find({ _id: { $in: ids } })
-    .select('+purchaseCost +caseCost');
-  return new Map(catalog.map((item) => [String(item._id), item]));
+  const names = new Set((Array.isArray(items) ? items : [])
+    .map((item) => normalizeCatalogName(item?.name))
+    .filter(Boolean));
+  const query = ids.length
+    ? { $or: [{ _id: { $in: ids } }, { name: { $exists: true, $ne: '' } }] }
+    : { name: { $exists: true, $ne: '' } };
+  const catalog = await BeverageItem.find(query)
+    .select('name bottleSizeMl caseSize +purchaseCost +caseCost');
+  const byId = new Map();
+  const byName = new Map();
+  catalog.forEach((item) => {
+    byId.set(String(item._id), item);
+    const nameKey = normalizeCatalogName(item.name);
+    if (nameKey && names.has(nameKey) && !byName.has(nameKey)) byName.set(nameKey, item);
+  });
+  return { byId, byName };
 };
 
 const normalizePackoutItems = async (items, { allowFinancials = false } = {}) => {
   const source = Array.isArray(items) ? items.slice(0, MAX_PACKOUT_ITEMS) : [];
-  const catalogById = await resolveCatalogById(source);
+  const catalog = await resolveCatalog(source);
   return source
     .map((item) => {
-      const beverageItemId = isObjectId(item?.beverageItemId) ? String(item.beverageItemId) : null;
-      const catalogItem = beverageItemId ? catalogById.get(beverageItemId) : null;
+      const requestedCatalogId = isObjectId(item?.beverageItemId) ? String(item.beverageItemId) : null;
+      const catalogItem = (requestedCatalogId ? catalog.byId.get(requestedCatalogId) : null)
+        || catalog.byName.get(normalizeCatalogName(item?.name))
+        || null;
+      const beverageItemId = catalogItem?._id || requestedCatalogId || null;
+      const catalogUnitCost = cleanNumber(catalogItem?.purchaseCost, {
+        fallback: (
+          cleanNumber(catalogItem?.caseCost, { fallback: 0 })
+          / (cleanNumber(catalogItem?.caseSize, { fallback: 1, min: 1 }) || 1)
+        ),
+      });
       const scope = BAR_ITEM_SCOPES.includes(cleanString(item?.scope, 30))
         ? cleanString(item.scope, 30)
         : 'review';
@@ -175,9 +203,9 @@ const normalizePackoutItems = async (items, { allowFinancials = false } = {}) =>
         returnConfirmed: cleanBoolean(item?.returnConfirmed, false),
         unitCostSnapshot: allowFinancials
           ? cleanNumber(item?.unitCostSnapshot, {
-            fallback: cleanNumber(catalogItem?.purchaseCost, { fallback: 0 }),
+            fallback: catalogUnitCost,
           })
-          : cleanNumber(catalogItem?.purchaseCost, { fallback: 0 }),
+          : catalogUnitCost,
         bottleSizeMl: cleanNumber(item?.bottleSizeMl, {
           fallback: cleanNumber(catalogItem?.bottleSizeMl, { fallback: null }),
         }),

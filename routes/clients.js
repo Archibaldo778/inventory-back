@@ -1,14 +1,14 @@
 import { Router } from 'express';
-import apicache from 'apicache';
 import Client from '../models/Client.js';
 import Event from '../models/Event.js';
+import { clearApiCacheGroups } from '../utils/apiCache.js';
 
 const router = Router();
 
 const escapeRegex = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 const clearRelatedCaches = () => {
-  try { apicache.clear('events'); } catch { /* ignore */ }
+  clearApiCacheGroups('events');
 };
 
 router.get('/', async (req, res) => {

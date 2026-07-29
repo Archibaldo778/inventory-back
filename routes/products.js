@@ -3,12 +3,12 @@ import path from 'path';
 import crypto from 'crypto';
 import multer from 'multer';
 import { Router } from 'express';
-import apicache from 'apicache';
 import { Readable } from 'stream';
 import { fileURLToPath } from 'url';
 import Product from '../models/Product.js';
 import { cleanupManagedImageSafely } from '../utils/managedImageCleanup.js';
 import { INVALID_IMAGE_UPLOAD_RESPONSE, isAllowedImageUpload } from '../utils/imageSignature.js';
+import { clearApiCacheGroups, createGroupedApiCache } from '../utils/apiCache.js';
 import { v2 as cloudinary } from 'cloudinary';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -21,7 +21,6 @@ cloudinary.config({
 });
 
 const router = Router();
-const cache = apicache.middleware;
 const CACHE_GROUP = 'products';
 const TAPE_LIBRARY_PREFIX = '__nexel_tape_library__';
 const DEFAULT_TAPE_CATEGORY_KEY = 'tape-swatches-colors';
@@ -73,17 +72,9 @@ const SIZE_BODY_KEYS = Object.freeze([
 
 const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
 
-const cacheWithGroup = (duration, group) => {
-  const middleware = cache(duration);
-  return (req, res, next) => {
-    req.apicacheGroup = group;
-    return middleware(req, res, next);
-  };
-};
+const cacheWithGroup = createGroupedApiCache;
 
-const clearCache = () => {
-  apicache.clear(CACHE_GROUP);
-};
+const clearCache = () => clearApiCacheGroups(CACHE_GROUP);
 
 const normalizeTapeCategoryKey = (value) => {
   const raw = String(value || '').trim().toLowerCase();

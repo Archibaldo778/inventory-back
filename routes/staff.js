@@ -2,22 +2,15 @@ import { Router } from 'express';
 import multer from 'multer';
 import { Readable } from 'stream';
 import { v2 as cloudinary } from 'cloudinary';
-import apicache from 'apicache';
 import Staff from '../models/Staff.js';
 import { cleanupManagedImageSafely } from '../utils/managedImageCleanup.js';
 import { INVALID_IMAGE_UPLOAD_RESPONSE, isAllowedImageUpload } from '../utils/imageSignature.js';
+import { clearApiCacheGroups, createGroupedApiCache } from '../utils/apiCache.js';
 
 const router = Router();
-const cache = apicache.middleware;
 const CACHE_GROUP = 'staff';
-const cacheWithGroup = (duration, group) => {
-  const middleware = cache(duration);
-  return (req, res, next) => {
-    req.apicacheGroup = group;
-    return middleware(req, res, next);
-  };
-};
-const clearCache = () => apicache.clear(CACHE_GROUP);
+const cacheWithGroup = createGroupedApiCache;
+const clearCache = () => clearApiCacheGroups(CACHE_GROUP);
 const escapeRegex = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 cloudinary.config({

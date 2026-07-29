@@ -5,11 +5,11 @@ import multer from 'multer';
 import { Router } from 'express';
 import { Readable } from 'stream';
 import { fileURLToPath } from 'url';
-import apicache from 'apicache';
 import Page from '../models/Page.js';
 import Deck from '../models/Deck.js';
 import { sanitizeBoardCanvas } from '../utils/boardSnapshotSanitizer.js';
 import { INVALID_IMAGE_UPLOAD_RESPONSE, isAllowedImageUpload } from '../utils/imageSignature.js';
+import { clearApiCacheGroups } from '../utils/apiCache.js';
 import { v2 as cloudinary } from 'cloudinary';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -22,19 +22,7 @@ cloudinary.config({
 });
 
 const router = Router();
-const cache = apicache.middleware;
-const CACHE_GROUP = 'pages';
-const cacheWithGroup = (duration, group) => {
-  const middleware = cache(duration);
-  return (req, res, next) => {
-    req.apicacheGroup = group;
-    return middleware(req, res, next);
-  };
-};
-const clearCache = () => {
-  apicache.clear(CACHE_GROUP);
-  apicache.clear('decks');
-};
+const clearCache = () => clearApiCacheGroups('pages', 'decks');
 
 const ensureUploadsDir = async () => {
   const target = path.join(__dirname, '..', 'uploads', 'board');
@@ -136,7 +124,7 @@ router.post('/', async (req, res) => {
 });
 
 // Get page
-router.get('/:id', cacheWithGroup('2 minutes', CACHE_GROUP), async (req, res) => {
+router.get('/:id', async (req, res) => {
   try {
     const page = await Page.findById(req.params.id);
     if (!page) return res.status(404).json({ error: 'Not found' });

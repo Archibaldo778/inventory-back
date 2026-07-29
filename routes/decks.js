@@ -1,26 +1,16 @@
 import { Router } from 'express';
-import apicache from 'apicache';
 import Deck from '../models/Deck.js';
 import Event from '../models/Event.js';
 import Page from '../models/Page.js';
 import { sanitizeBoardCanvas } from '../utils/boardSnapshotSanitizer.js';
+import { clearApiCacheGroups, createGroupedApiCache } from '../utils/apiCache.js';
 import { runWithTransactionFallback } from '../utils/mongoTransaction.js';
 
 const router = Router();
-const cache = apicache.middleware;
 const CACHE_GROUP = 'decks';
-const cacheWithGroup = (duration, group) => {
-  const middleware = cache(duration);
-  return (req, res, next) => {
-    req.apicacheGroup = group;
-    return middleware(req, res, next);
-  };
-};
+const cacheWithGroup = createGroupedApiCache;
 
-const clearCache = () => {
-  apicache.clear(CACHE_GROUP);
-  apicache.clear('pages');
-};
+const clearCache = () => clearApiCacheGroups(CACHE_GROUP, 'pages');
 
 const createHttpError = (statusCode, message) => Object.assign(new Error(message), { statusCode });
 
@@ -88,7 +78,7 @@ router.get('/', cacheWithGroup('5 minutes', CACHE_GROUP), async (req, res) => {
 });
 
 // Get deck with pages
-router.get('/:id', cacheWithGroup('5 minutes', CACHE_GROUP), async (req, res) => {
+router.get('/:id', async (req, res) => {
   try {
     const deck = await Deck.findById(req.params.id);
     if (!deck) return res.status(404).json({ error: 'Not found' });

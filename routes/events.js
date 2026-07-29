@@ -1,28 +1,19 @@
 import { Router } from 'express';
-import apicache from 'apicache';
 import Event from '../models/Event.js';
 import Deck from '../models/Deck.js';
 import Page from '../models/Page.js';
 import Proposal from '../models/Proposal.js';
 import Client from '../models/Client.js';
+import { clearApiCacheGroups, createGroupedApiCache } from '../utils/apiCache.js';
 import { runWithTransactionFallback } from '../utils/mongoTransaction.js';
 
 const router = Router();
-const cache = apicache.middleware;
 const CACHE_GROUP = 'events';
-const cacheWithGroup = (duration, group) => {
-  const middleware = cache(duration);
-  return (req, res, next) => {
-    req.apicacheGroup = group;
-    return middleware(req, res, next);
-  };
-};
+const cacheWithGroup = createGroupedApiCache;
 
-const clearCache = () => apicache.clear(CACHE_GROUP);
+const clearCache = () => clearApiCacheGroups(CACHE_GROUP);
 const clearRelatedCaches = () => {
-  clearCache();
-  apicache.clear('decks');
-  apicache.clear('pages');
+  clearApiCacheGroups(CACHE_GROUP, 'decks', 'pages');
 };
 
 const createHttpError = (statusCode, message) => Object.assign(new Error(message), { statusCode });

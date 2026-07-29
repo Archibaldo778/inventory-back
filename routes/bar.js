@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import mongoose from 'mongoose';
 import BarEvent, { BAR_EVENT_STATUSES, BAR_ITEM_SCOPES, BAR_PRICE_UNITS } from '../models/BarEvent.js';
+import BarPackage from '../models/BarPackage.js';
 import BeverageItem from '../models/BeverageItem.js';
 import User from '../models/Users.js';
 import { isAdminAuth, normalizeRole } from '../middleware/auth.js';
@@ -138,6 +139,91 @@ const normalizePackage = (value = {}, fallback = {}) => {
     }),
   };
 };
+
+const normalizePackageTemplate = (value = {}, fallback = {}) => {
+  const source = value && typeof value === 'object' ? value : {};
+  const previous = fallback && typeof fallback === 'object' ? fallback : {};
+  const priceUnitCandidate = cleanString(source.priceUnit ?? previous.priceUnit, 30);
+  return {
+    name: cleanString(source.name ?? previous.name, 160),
+    baseRate: cleanNumber(source.baseRate, {
+      fallback: cleanNumber(previous.baseRate, { fallback: 0 }),
+    }),
+    priceUnit: BAR_PRICE_UNITS.includes(priceUnitCandidate) ? priceUnitCandidate : 'flat',
+    additionalHourRate: cleanNumber(source.additionalHourRate, {
+      fallback: cleanNumber(previous.additionalHourRate, { fallback: 0 }),
+    }),
+    defaultServiceHours: cleanNumber(source.defaultServiceHours, {
+      fallback: cleanNumber(previous.defaultServiceHours, { fallback: null }),
+    }),
+    active: source.active === undefined
+      ? cleanBoolean(previous.active, true)
+      : cleanBoolean(source.active, true),
+    notes: cleanString(source.notes ?? previous.notes, 1000),
+  };
+};
+
+router.get('/packages', requireBarManager, async (_req, res) => {
+  try {
+    const packages = await BarPackage.find().sort({ active: -1, name: 1 });
+    return res.json(packages);
+  } catch (error) {
+    return sendApiError(res, error, {
+      context: 'Bar packages list failed',
+      fallbackMessage: 'Failed to list bar packages',
+    });
+  }
+});
+
+router.post('/packages', requireBarManager, async (req, res) => {
+  try {
+    const payload = normalizePackageTemplate(req.body);
+    if (!payload.name) return res.status(400).json({ message: 'Package name is required' });
+    const created = await BarPackage.create(payload);
+    return res.status(201).json(created);
+  } catch (error) {
+    return sendApiError(res, error, {
+      context: 'Bar package creation failed',
+      fallbackMessage: error?.code === 11000 ? 'A package with this name already exists' : 'Failed to create bar package',
+    });
+  }
+});
+
+router.patch('/packages/:packageId', requireBarManager, async (req, res) => {
+  try {
+    if (!isObjectId(req.params.packageId)) {
+      return res.status(400).json({ message: 'Invalid bar package id' });
+    }
+    const current = await BarPackage.findById(req.params.packageId);
+    if (!current) return res.status(404).json({ message: 'Bar package not found' });
+    const payload = normalizePackageTemplate(req.body, current.toObject());
+    if (!payload.name) return res.status(400).json({ message: 'Package name is required' });
+    Object.assign(current, payload);
+    await current.save();
+    return res.json(current);
+  } catch (error) {
+    return sendApiError(res, error, {
+      context: 'Bar package update failed',
+      fallbackMessage: error?.code === 11000 ? 'A package with this name already exists' : 'Failed to update bar package',
+    });
+  }
+});
+
+router.delete('/packages/:packageId', requireBarManager, async (req, res) => {
+  try {
+    if (!isObjectId(req.params.packageId)) {
+      return res.status(400).json({ message: 'Invalid bar package id' });
+    }
+    const deleted = await BarPackage.findByIdAndDelete(req.params.packageId);
+    if (!deleted) return res.status(404).json({ message: 'Bar package not found' });
+    return res.json({ ok: true });
+  } catch (error) {
+    return sendApiError(res, error, {
+      context: 'Bar package deletion failed',
+      fallbackMessage: 'Failed to delete bar package',
+    });
+  }
+});
 
 const normalizeCatalogName = (value) => cleanString(value, 240)
   .toLowerCase()

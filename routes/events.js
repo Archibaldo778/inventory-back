@@ -4,6 +4,7 @@ import Deck from '../models/Deck.js';
 import Page from '../models/Page.js';
 import Proposal from '../models/Proposal.js';
 import Client from '../models/Client.js';
+import { requireAdmin } from '../middleware/auth.js';
 import { clearApiCacheGroups, createGroupedApiCache } from '../utils/apiCache.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import { runWithTransactionFallback } from '../utils/mongoTransaction.js';
@@ -18,6 +19,22 @@ const clearRelatedCaches = () => {
 };
 
 const createHttpError = (statusCode, message) => Object.assign(new Error(message), { statusCode });
+const MAX_IMPORT_ROWS = 2_000;
+const trimImportValue = (value, maxLength = 500) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, maxLength);
+
+const normalizeImportedEvent = (source) => {
+  if (!source || typeof source !== 'object' || Array.isArray(source)) return null;
+  const title = trimImportValue(source.title, 300);
+  if (!title) return null;
+  return {
+    externalId: trimImportValue(source.externalId, 120),
+    title,
+    date: trimImportValue(source.date, 100),
+    client: trimImportValue(source.client, 300),
+    managerId: trimImportValue(source.managerId, 300),
+    status: trimImportValue(source.status, 100).toLowerCase() || 'draft',
+  };
+};
 
 const ensureClientRecord = async (value) => {
   if (typeof value !== 'string') return;
@@ -113,6 +130,67 @@ router.post('/', async (req, res) => {
     sendApiError(res, e, {
       context: 'Event creation failed',
       fallbackMessage: 'Failed to create event',
+    });
+  }
+});
+
+router.post('/import', requireAdmin, async (req, res) => {
+  try {
+    const sourceRows = Array.isArray(req.body?.events) ? req.body.events : [];
+    if (!sourceRows.length) return res.status(400).json({ error: 'events array is required' });
+    if (sourceRows.length > MAX_IMPORT_ROWS) {
+      return res.status(413).json({ error: `Import is limited to ${MAX_IMPORT_ROWS} rows` });
+    }
+
+    const normalizedRows = sourceRows.map(normalizeImportedEvent).filter(Boolean);
+    const uniqueRows = [];
+    const seen = new Set();
+    normalizedRows.forEach((event) => {
+      const identity = event.externalId
+        ? `id:${event.externalId.toLowerCase()}`
+        : `event:${[event.title, event.date, event.client, event.managerId].map((value) => value.toLowerCase()).join('|')}`;
+      if (seen.has(identity)) return;
+      seen.add(identity);
+      uniqueRows.push({ ...event, identity });
+    });
+
+    const clientNames = [...new Set(uniqueRows.map((event) => event.client).filter(Boolean))];
+    for (const client of clientNames) await ensureClientRecord(client);
+
+    const stats = { processed: 0, created: 0, updated: 0, skipped: sourceRows.length - normalizedRows.length };
+    for (const { identity: _identity, ...event } of uniqueRows) {
+      const filter = event.externalId
+        ? { externalId: event.externalId }
+        : {
+            title: event.title,
+            date: event.date,
+            client: event.client,
+            managerId: event.managerId,
+          };
+      const result = await Event.updateOne(
+        filter,
+        {
+          $set: { ...event, importSource: 'caterease' },
+          $setOnInsert: { meta: {} },
+        },
+        { upsert: true, runValidators: true }
+      );
+      stats.processed += 1;
+      if (result.upsertedCount) stats.created += 1;
+      else if (result.matchedCount) stats.updated += 1;
+    }
+    stats.skipped += normalizedRows.length - uniqueRows.length;
+
+    clearRelatedCaches();
+    return res.json({
+      ok: true,
+      totalRows: sourceRows.length,
+      stats,
+    });
+  } catch (e) {
+    return sendApiError(res, e, {
+      context: 'Event calendar import failed',
+      fallbackMessage: 'Failed to import event calendar',
     });
   }
 });

@@ -8,6 +8,7 @@ import { Readable } from 'stream';
 import { fileURLToPath } from 'url';
 import Product from '../models/Product.js';
 import { cleanupManagedImageSafely } from '../utils/managedImageCleanup.js';
+import { INVALID_IMAGE_UPLOAD_RESPONSE, isAllowedImageUpload } from '../utils/imageSignature.js';
 import { v2 as cloudinary } from 'cloudinary';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -156,7 +157,13 @@ const isAcceptedImageUpload = (file) => {
 
 const upload = multer({
   storage,
-  limits: { fileSize: 10 * 1024 * 1024 },
+  limits: {
+    fileSize: 10 * 1024 * 1024,
+    files: 1,
+    fields: 100,
+    parts: 101,
+    fieldSize: 1024 * 1024,
+  },
   fileFilter: (_req, file, cb) => {
     const ok = isAcceptedImageUpload(file);
     if (ok) return cb(null, true);
@@ -360,6 +367,9 @@ router.post('/', upload.single('image'), async (req, res) => {
     if (!name || !name.trim()) {
       return res.status(400).json({ error: 'Name is required' });
     }
+    if (req.file && !isAllowedImageUpload(req.file, ['jpeg', 'png', 'webp', 'heif'])) {
+      return res.status(400).json(INVALID_IMAGE_UPLOAD_RESPONSE);
+    }
 
     const categoryValue = String(category || '').trim() || 'Trays';
     const qtyNum = Number((quantity ?? qty) ?? 0);
@@ -423,6 +433,9 @@ router.patch('/:id', upload.single('image'), async (req, res) => {
   try {
     const currentDoc = await Product.findById(req.params.id);
     if (!currentDoc) return res.status(404).json({ error: 'Not found' });
+    if (req.file && !isAllowedImageUpload(req.file, ['jpeg', 'png', 'webp', 'heif'])) {
+      return res.status(400).json(INVALID_IMAGE_UPLOAD_RESPONSE);
+    }
 
     const updates = {};
 

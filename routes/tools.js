@@ -2,6 +2,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import { Readable } from 'stream';
 import { v2 as cloudinary } from 'cloudinary';
+import { INVALID_IMAGE_UPLOAD_RESPONSE, isAllowedImageUpload } from '../utils/imageSignature.js';
 
 const router = Router();
 
@@ -34,7 +35,13 @@ const hasPhotoRoomConfig = () => Boolean(getPhotoRoomApiKey());
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 30 * 1024 * 1024 },
+  limits: {
+    fileSize: 30 * 1024 * 1024,
+    files: 1,
+    fields: 20,
+    parts: 21,
+    fieldSize: 1024 * 1024,
+  },
   fileFilter: (_req, file, cb) => {
     const mime = String(file?.mimetype || '').toLowerCase();
     const originalName = String(file?.originalname || '').toLowerCase();
@@ -46,7 +53,13 @@ const upload = multer({
 
 const imageUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 50 * 1024 * 1024 },
+  limits: {
+    fileSize: 50 * 1024 * 1024,
+    files: 1,
+    fields: 20,
+    parts: 21,
+    fieldSize: 1024 * 1024,
+  },
   fileFilter: (_req, file, cb) => {
     const mime = String(file?.mimetype || '').toLowerCase();
     const originalName = String(file?.originalname || '').toLowerCase();
@@ -95,6 +108,9 @@ router.post('/heif-to-jpg', upload.single('image'), async (req, res) => {
   if (!req.file?.buffer) {
     return res.status(400).json({ error: 'image file is required' });
   }
+  if (!isAllowedImageUpload(req.file, ['heif'])) {
+    return res.status(400).json(INVALID_IMAGE_UPLOAD_RESPONSE);
+  }
 
   let uploadResult = null;
   try {
@@ -132,6 +148,9 @@ router.post('/remove-background', imageUpload.single('image'), async (req, res) 
   }
   if (!req.file?.buffer) {
     return res.status(400).json({ error: 'image file is required' });
+  }
+  if (!isAllowedImageUpload(req.file, ['jpeg', 'png', 'webp', 'heif'])) {
+    return res.status(400).json(INVALID_IMAGE_UPLOAD_RESPONSE);
   }
 
   const format = ['png', 'jpg', 'webp'].includes(String(req.body?.format || '').trim().toLowerCase())

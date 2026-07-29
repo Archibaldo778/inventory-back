@@ -8,6 +8,7 @@ import { Readable } from 'stream';
 import { v2 as cloudinary } from 'cloudinary';
 import BeverageItem from '../models/BeverageItem.js';
 import { cleanupManagedImageSafely } from '../utils/managedImageCleanup.js';
+import { INVALID_IMAGE_UPLOAD_RESPONSE, isAllowedImageUpload } from '../utils/imageSignature.js';
 
 const router = Router();
 
@@ -22,7 +23,13 @@ cloudinary.config({
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 },
+  limits: {
+    fileSize: 10 * 1024 * 1024,
+    files: 1,
+    fields: 100,
+    parts: 101,
+    fieldSize: 1024 * 1024,
+  },
   fileFilter: (_req, file, cb) => {
     const mime = String(file?.mimetype || '').toLowerCase();
     const originalName = String(file?.originalname || '').toLowerCase();
@@ -123,6 +130,9 @@ router.post('/', upload.single('image'), async (req, res) => {
     const body = req.body || {};
     const name = sanitizeStr(body.name);
     if (!name) return res.status(400).json({ error: 'name is required' });
+    if (req.file && !isAllowedImageUpload(req.file, ['jpeg', 'png', 'webp', 'heif'])) {
+      return res.status(400).json(INVALID_IMAGE_UPLOAD_RESPONSE);
+    }
 
     const category = sanitizeStr(body.category);
     const categories = normalizeCategories(category, parseStringArray(body.categories));
@@ -169,6 +179,9 @@ router.patch('/:id', upload.single('image'), async (req, res) => {
     const updates = {};
     const current = await BeverageItem.findById(req.params.id);
     if (!current) return res.status(404).json({ error: 'Not found' });
+    if (req.file && !isAllowedImageUpload(req.file, ['jpeg', 'png', 'webp', 'heif'])) {
+      return res.status(400).json(INVALID_IMAGE_UPLOAD_RESPONSE);
+    }
 
     if (body.name !== undefined) {
       const nextName = sanitizeStr(body.name);

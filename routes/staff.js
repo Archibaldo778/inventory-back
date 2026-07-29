@@ -5,6 +5,7 @@ import { v2 as cloudinary } from 'cloudinary';
 import apicache from 'apicache';
 import Staff from '../models/Staff.js';
 import { cleanupManagedImageSafely } from '../utils/managedImageCleanup.js';
+import { INVALID_IMAGE_UPLOAD_RESPONSE, isAllowedImageUpload } from '../utils/imageSignature.js';
 
 const router = Router();
 const cache = apicache.middleware;
@@ -27,7 +28,13 @@ cloudinary.config({
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 },
+  limits: {
+    fileSize: 10 * 1024 * 1024,
+    files: 1,
+    fields: 100,
+    parts: 101,
+    fieldSize: 1024 * 1024,
+  },
   fileFilter: (_req, file, cb) => {
     const mime = String(file?.mimetype || '').toLowerCase();
     const originalName = String(file?.originalname || '').toLowerCase();
@@ -121,6 +128,9 @@ router.post('/', upload.single('photo'), async (req, res) => {
     if (!firstName || !lastName) {
       return res.status(400).json({ message: 'firstName and lastName are required' });
     }
+    if (req.file && !isAllowedImageUpload(req.file, ['jpeg', 'png', 'webp', 'gif', 'heif'])) {
+      return res.status(400).json(INVALID_IMAGE_UPLOAD_RESPONSE);
+    }
     const { values: positions } = resolvePositions(body);
     const payload = {
       firstName,
@@ -170,6 +180,9 @@ router.patch('/:id', upload.single('photo'), async (req, res) => {
     const body = req.body || {};
     const current = await Staff.findById(req.params.id);
     if (!current) return res.status(404).json({ message: 'Not found' });
+    if (req.file && !isAllowedImageUpload(req.file, ['jpeg', 'png', 'webp', 'gif', 'heif'])) {
+      return res.status(400).json(INVALID_IMAGE_UPLOAD_RESPONSE);
+    }
 
     if (typeof body.firstName !== 'undefined') updates.firstName = sanitizeStr(body.firstName);
     if (typeof body.lastName !== 'undefined') updates.lastName = sanitizeStr(body.lastName);

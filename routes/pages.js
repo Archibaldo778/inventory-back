@@ -9,6 +9,7 @@ import apicache from 'apicache';
 import Page from '../models/Page.js';
 import Deck from '../models/Deck.js';
 import { sanitizeBoardCanvas } from '../utils/boardSnapshotSanitizer.js';
+import { INVALID_IMAGE_UPLOAD_RESPONSE, isAllowedImageUpload } from '../utils/imageSignature.js';
 import { v2 as cloudinary } from 'cloudinary';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -90,7 +91,13 @@ const isAcceptedImageUpload = (file) => {
 
 const imageUpload = multer({
   storage,
-  limits: { fileSize: 12 * 1024 * 1024 },
+  limits: {
+    fileSize: 12 * 1024 * 1024,
+    files: 1,
+    fields: 20,
+    parts: 21,
+    fieldSize: 1024 * 1024,
+  },
   fileFilter: (_req, file, cb) => {
     const ok = isAcceptedImageUpload(file);
     if (ok) return cb(null, true);
@@ -142,6 +149,9 @@ router.post('/upload-image', imageUpload.single('image'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'image file is required' });
+    }
+    if (!isAllowedImageUpload(req.file, ['jpeg', 'png', 'webp', 'heif'])) {
+      return res.status(400).json(INVALID_IMAGE_UPLOAD_RESPONSE);
     }
     let src = '';
     try {

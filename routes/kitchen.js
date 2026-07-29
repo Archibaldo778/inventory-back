@@ -7,6 +7,7 @@ import multer from 'multer';
 import { Readable } from 'stream';
 import { v2 as cloudinary } from 'cloudinary';
 import KitchenItem from '../models/KitchenItem.js';
+import { cleanupManagedImageSafely } from '../utils/managedImageCleanup.js';
 
 const router = Router();
 
@@ -266,6 +267,8 @@ router.patch('/:id', upload.single('image'), async (req, res) => {
   try {
     const body = req.body || {};
     const updates = {};
+    const current = await KitchenItem.findById(req.params.id);
+    if (!current) return res.status(404).json({ error: 'Not found' });
 
     if (body.name !== undefined) {
       const nextName = sanitizeStr(body.name);
@@ -369,6 +372,13 @@ router.patch('/:id', upload.single('image'), async (req, res) => {
       runValidators: true,
     });
     if (!updated) return res.status(404).json({ error: 'Not found' });
+    if (
+      Object.prototype.hasOwnProperty.call(updates, 'image')
+      && current.image
+      && String(current.image) !== String(updates.image || '')
+    ) {
+      await cleanupManagedImageSafely(current.image, 'kitchen image');
+    }
     res.json(updated);
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -380,6 +390,7 @@ router.delete('/:id', async (req, res) => {
   try {
     const deleted = await KitchenItem.findByIdAndDelete(req.params.id);
     if (!deleted) return res.status(404).json({ error: 'Not found' });
+    await cleanupManagedImageSafely(deleted.image, 'kitchen image');
     res.json({ ok: true });
   } catch (err) {
     res.status(400).json({ error: err.message });

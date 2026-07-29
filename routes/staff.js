@@ -4,6 +4,7 @@ import { Readable } from 'stream';
 import { v2 as cloudinary } from 'cloudinary';
 import apicache from 'apicache';
 import Staff from '../models/Staff.js';
+import { cleanupManagedImageSafely } from '../utils/managedImageCleanup.js';
 
 const router = Router();
 const cache = apicache.middleware;
@@ -167,6 +168,8 @@ router.patch('/:id', upload.single('photo'), async (req, res) => {
   try {
     const updates = {};
     const body = req.body || {};
+    const current = await Staff.findById(req.params.id);
+    if (!current) return res.status(404).json({ message: 'Not found' });
 
     if (typeof body.firstName !== 'undefined') updates.firstName = sanitizeStr(body.firstName);
     if (typeof body.lastName !== 'undefined') updates.lastName = sanitizeStr(body.lastName);
@@ -196,6 +199,13 @@ router.patch('/:id', upload.single('photo'), async (req, res) => {
       runValidators: true,
     });
     if (!doc) return res.status(404).json({ message: 'Not found' });
+    if (
+      Object.prototype.hasOwnProperty.call(updates, 'photo')
+      && current.photo
+      && String(current.photo) !== String(updates.photo || '')
+    ) {
+      await cleanupManagedImageSafely(current.photo, 'staff photo');
+    }
     res.json(doc);
     clearCache();
   } catch (e) {
@@ -206,7 +216,9 @@ router.patch('/:id', upload.single('photo'), async (req, res) => {
 // Delete
 router.delete('/:id', async (req, res) => {
   try {
-    await Staff.findByIdAndDelete(req.params.id);
+    const deleted = await Staff.findByIdAndDelete(req.params.id);
+    if (!deleted) return res.status(404).json({ message: 'Not found' });
+    await cleanupManagedImageSafely(deleted.photo, 'staff photo');
     res.json({ ok: true });
     clearCache();
   } catch (e) {

@@ -7,6 +7,7 @@ import apicache from 'apicache';
 import { Readable } from 'stream';
 import { fileURLToPath } from 'url';
 import Product from '../models/Product.js';
+import { cleanupManagedImageSafely } from '../utils/managedImageCleanup.js';
 import { v2 as cloudinary } from 'cloudinary';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -478,6 +479,13 @@ router.patch('/:id', upload.single('image'), async (req, res) => {
       runValidators: true,
     });
     if (!doc) return res.status(404).json({ error: 'Not found' });
+    if (
+      Object.prototype.hasOwnProperty.call(updates, 'image')
+      && currentDoc.image
+      && String(currentDoc.image) !== String(updates.image || '')
+    ) {
+      await cleanupManagedImageSafely(currentDoc.image, 'product image');
+    }
     const out = doc.toObject();
     out.qty = out.quantity;
     res.json(out);
@@ -491,7 +499,9 @@ router.patch('/:id', upload.single('image'), async (req, res) => {
 // DELETE
 router.delete('/:id', async (req, res) => {
   try {
-    await Product.findByIdAndDelete(req.params.id);
+    const deleted = await Product.findByIdAndDelete(req.params.id);
+    if (!deleted) return res.status(404).json({ error: 'Not found' });
+    await cleanupManagedImageSafely(deleted.image || deleted.imageUrl, 'product image');
     res.json({ ok: true });
     clearCache();
   } catch (err) {

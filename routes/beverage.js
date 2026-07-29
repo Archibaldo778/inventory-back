@@ -7,6 +7,7 @@ import multer from 'multer';
 import { Readable } from 'stream';
 import { v2 as cloudinary } from 'cloudinary';
 import BeverageItem from '../models/BeverageItem.js';
+import { cleanupManagedImageSafely } from '../utils/managedImageCleanup.js';
 
 const router = Router();
 
@@ -166,6 +167,8 @@ router.patch('/:id', upload.single('image'), async (req, res) => {
   try {
     const body = req.body || {};
     const updates = {};
+    const current = await BeverageItem.findById(req.params.id);
+    if (!current) return res.status(404).json({ error: 'Not found' });
 
     if (body.name !== undefined) {
       const nextName = sanitizeStr(body.name);
@@ -182,10 +185,8 @@ router.patch('/:id', upload.single('image'), async (req, res) => {
       const category = body.category !== undefined
         ? sanitizeStr(body.category)
         : undefined;
-      const existing = await BeverageItem.findById(req.params.id).select('category categories');
-      if (!existing) return res.status(404).json({ error: 'Not found' });
-      const baseCategory = category !== undefined ? category : sanitizeStr(existing.category);
-      const baseCategories = body.categories !== undefined ? parseStringArray(body.categories) : (Array.isArray(existing.categories) ? existing.categories : []);
+      const baseCategory = category !== undefined ? category : sanitizeStr(current.category);
+      const baseCategories = body.categories !== undefined ? parseStringArray(body.categories) : (Array.isArray(current.categories) ? current.categories : []);
       updates.categories = normalizeCategories(baseCategory, baseCategories);
     }
     if (body.isAlcohol !== undefined || body.is_alcohol !== undefined) {
@@ -221,6 +222,13 @@ router.patch('/:id', upload.single('image'), async (req, res) => {
       runValidators: true,
     });
     if (!updated) return res.status(404).json({ error: 'Not found' });
+    if (
+      Object.prototype.hasOwnProperty.call(updates, 'image')
+      && current.image
+      && String(current.image) !== String(updates.image || '')
+    ) {
+      await cleanupManagedImageSafely(current.image, 'beverage image');
+    }
     res.json(updated);
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -231,6 +239,7 @@ router.delete('/:id', async (req, res) => {
   try {
     const deleted = await BeverageItem.findByIdAndDelete(req.params.id);
     if (!deleted) return res.status(404).json({ error: 'Not found' });
+    await cleanupManagedImageSafely(deleted.image, 'beverage image');
     res.json({ ok: true });
   } catch (err) {
     res.status(400).json({ error: err.message });

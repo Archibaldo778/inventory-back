@@ -8,6 +8,10 @@ const BeverageItemSchema = new mongoose.Schema({
   categories: { type: [String], default: [] },
   tags: { type: [String], default: [] },
   isAlcohol: { type: Boolean, default: false },
+  purchaseCost: { type: Number, default: 0, min: 0, select: false },
+  bottleSizeMl: { type: Number, default: null, min: 0 },
+  caseCost: { type: Number, default: null, min: 0, select: false },
+  caseSize: { type: Number, default: null, min: 1 },
   image: { type: String, default: null },
 }, { timestamps: true });
 

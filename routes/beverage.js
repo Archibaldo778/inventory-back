@@ -10,6 +10,7 @@ import BeverageItem from '../models/BeverageItem.js';
 import { cleanupManagedImageSafely } from '../utils/managedImageCleanup.js';
 import { INVALID_IMAGE_UPLOAD_RESPONSE, isAllowedImageUpload } from '../utils/imageSignature.js';
 import { sendApiError } from '../utils/apiErrors.js';
+import { isAdminAuth, normalizeRole } from '../middleware/auth.js';
 
 const router = Router();
 
@@ -68,6 +69,17 @@ const parseBoolean = (value) => {
   return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
 };
 
+const parseNonNegativeNumber = (value, fallback = undefined) => {
+  if (value === undefined || value === null || value === '') return fallback;
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < 0) return fallback;
+  return numeric;
+};
+
+const canSeeBeverageCosts = (auth) => (
+  isAdminAuth(auth) || normalizeRole(auth?.role) === 'bar admin'
+);
+
 const ensureUploadsDir = async () => {
   const target = path.join(__dirname, '..', 'uploads', 'beverage');
   await fs.promises.mkdir(target, { recursive: true });
@@ -117,9 +129,11 @@ const normalizeCategories = (category, categories) => {
   return list;
 };
 
-router.get('/', async (_req, res) => {
+router.get('/', async (req, res) => {
   try {
-    const items = await BeverageItem.find().sort({ createdAt: -1 });
+    const query = BeverageItem.find().sort({ createdAt: -1 });
+    if (canSeeBeverageCosts(req.auth)) query.select('+purchaseCost +caseCost');
+    const items = await query;
     res.json(items);
   } catch (err) {
     return sendApiError(res, err, {
@@ -149,6 +163,10 @@ router.post('/', upload.single('image'), async (req, res) => {
       categories,
       tags: parseStringArray(body.tags),
       isAlcohol: parseBoolean(body.isAlcohol ?? body.is_alcohol) ?? false,
+      purchaseCost: parseNonNegativeNumber(body.purchaseCost ?? body.purchase_cost, 0),
+      bottleSizeMl: parseNonNegativeNumber(body.bottleSizeMl ?? body.bottle_size_ml, null),
+      caseCost: parseNonNegativeNumber(body.caseCost ?? body.case_cost, null),
+      caseSize: parseNonNegativeNumber(body.caseSize ?? body.case_size, null),
     };
 
     if (req.file) {
@@ -221,6 +239,18 @@ router.patch('/:id', upload.single('image'), async (req, res) => {
     if (body.isAlcohol !== undefined || body.is_alcohol !== undefined) {
       const bool = parseBoolean(body.isAlcohol ?? body.is_alcohol);
       updates.isAlcohol = Boolean(bool);
+    }
+    if (body.purchaseCost !== undefined || body.purchase_cost !== undefined) {
+      updates.purchaseCost = parseNonNegativeNumber(body.purchaseCost ?? body.purchase_cost, 0);
+    }
+    if (body.bottleSizeMl !== undefined || body.bottle_size_ml !== undefined) {
+      updates.bottleSizeMl = parseNonNegativeNumber(body.bottleSizeMl ?? body.bottle_size_ml, null);
+    }
+    if (body.caseCost !== undefined || body.case_cost !== undefined) {
+      updates.caseCost = parseNonNegativeNumber(body.caseCost ?? body.case_cost, null);
+    }
+    if (body.caseSize !== undefined || body.case_size !== undefined) {
+      updates.caseSize = parseNonNegativeNumber(body.caseSize ?? body.case_size, null);
     }
     if (body.removeImage !== undefined && parseBoolean(body.removeImage)) {
       updates.image = null;

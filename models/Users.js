@@ -13,7 +13,17 @@ const userSchema = new mongoose.Schema(
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
     role: {
       type: String,
-      enum: ['user', 'manager', 'sales rep', 'admin', 'super admin', 'super Admin'],
+      enum: [
+        'user',
+        'manager',
+        'sales rep',
+        'admin',
+        'super admin',
+        'super Admin',
+        'bar admin',
+        'bar captain',
+        'bartender',
+      ],
       default: 'user',
     },
     seeProposals: { type: Boolean, default: false },

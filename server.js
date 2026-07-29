@@ -19,6 +19,7 @@ import {
   requireAuth,
   requireMethodGuards,
   requireProposalAccess,
+  requireRoles,
 } from './middleware/auth.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -95,6 +96,12 @@ const corsOptions = {
 const requireAdminForPatchDelete = requireMethodGuards((req) => {
   const method = String(req.method || '').toUpperCase();
   return ['PATCH', 'PUT', 'DELETE'].includes(method) ? requireAdmin : null;
+});
+
+const requireBeverageManager = requireRoles(['admin', 'super admin', 'bar admin']);
+const requireBeverageManagerForMutations = requireMethodGuards((req) => {
+  const method = String(req.method || '').toUpperCase();
+  return ['GET', 'HEAD', 'OPTIONS'].includes(method) ? null : requireBeverageManager;
 });
 
 export const resolveUsersGuard = (req) => {
@@ -414,6 +421,7 @@ import clientRoutes from './routes/clients.js';
 import proposalRoutes from './routes/proposals.js';
 import proposalTemplateRoutes from './routes/proposalTemplates.js';
 import toolsRoutes from './routes/tools.js';
+import barRoutes from './routes/bar.js';
 
 app.use('/api/auth', authRoutes);
 app.use('/api/products', requireAuth, requireAdminForMutations, productRoutes);
@@ -424,11 +432,12 @@ app.use('/api/decks', requireAuth, deckRoutes);
 app.use('/api/pages', requireAuth, pageRoutes);
 app.use('/api/staff', requireAuth, requireAdminForMutations, staffRoutes);
 app.use('/api/kitchen-items', requireAuth, requireAdminForMutations, kitchenRoutes);
-app.use('/api/beverage-items', requireAuth, requireAdminForMutations, beverageRoutes);
+app.use('/api/beverage-items', requireAuth, requireBeverageManagerForMutations, beverageRoutes);
 app.use('/api/clients', requireAuth, requireAdminForPatchDelete, clientRoutes);
 app.use('/api/proposals', requireAuth, requireProposalAccess, proposalRoutes);
 app.use('/api/proposal-templates', requireAuth, requireProposalTemplateAccess, proposalTemplateRoutes);
 app.use('/api/tools', requireAuth, requireAdmin, toolsRoutes);
+app.use('/api/bar', requireAuth, barRoutes);
 
 // подключение к Mongo
 const configuredMongoUri = String(process.env.MONGO_URI || '').trim();

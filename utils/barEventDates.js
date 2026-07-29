@@ -15,17 +15,3 @@ export const normalizeBarEventDate = (value) => {
     String(parsed.getUTCDate()).padStart(2, '0'),
   ].join('-');
 };
-
-export const todayInTimeZone = (
-  date = new Date(),
-  timeZone = 'America/New_York'
-) => {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(date);
-  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  return `${values.year}-${values.month}-${values.day}`;
-};

@@ -10,7 +10,7 @@ import {
   calculateBarEventAccounting,
   calculateBarItemAccounting,
 } from '../utils/barEventAccounting.js';
-import { normalizeBarEventDate, todayInTimeZone } from '../utils/barEventDates.js';
+import { normalizeBarEventDate } from '../utils/barEventDates.js';
 import { sendApiError } from '../utils/apiErrors.js';
 
 const router = Router();
@@ -150,24 +150,35 @@ const syncDashboardEventsToBar = async ({ eventId = null } = {}) => {
     ...(eventId && isObjectId(eventId) ? { _id: eventId } : {}),
   };
   const dashboardEvents = await Event.find(query).lean();
-  const today = todayInTimeZone();
-  const eligible = dashboardEvents.filter((event) => {
-    if (eventId) return true;
-    const dateKey = normalizeBarEventDate(event.date);
-    return dateKey && dateKey >= today;
-  });
-  if (!eligible.length) return;
-  await BarEvent.bulkWrite(eligible.map((event) => ({
+  if (!dashboardEvents.length) return;
+  const linkedIds = dashboardEvents.map((event) => event._id);
+  const existingReports = await BarEvent.find({ linkedEventId: { $in: linkedIds } })
+    .select('linkedEventId name eventDate client venue guestCount')
+    .lean();
+  const existingByEventId = new Map(
+    existingReports.map((report) => [String(report.linkedEventId), report])
+  );
+  const operations = dashboardEvents.flatMap((event) => {
+    const next = {
+      name: cleanString(event.title, 240) || 'Untitled event',
+      eventDate: normalizeBarEventDate(event.date) || cleanString(event.date, 80),
+      client: cleanString(event.client, 180),
+      venue: eventVenue(event),
+      guestCount: eventGuestCount(event),
+    };
+    const current = existingByEventId.get(String(event._id));
+    const unchanged = current
+      && String(current.name || '') === next.name
+      && String(current.eventDate || '') === next.eventDate
+      && String(current.client || '') === next.client
+      && String(current.venue || '') === next.venue
+      && (current.guestCount ?? null) === next.guestCount;
+    if (unchanged) return [];
+    return [{
     updateOne: {
       filter: { linkedEventId: event._id },
       update: {
-        $set: {
-          name: cleanString(event.title, 240) || 'Untitled event',
-          eventDate: normalizeBarEventDate(event.date) || cleanString(event.date, 80),
-          client: cleanString(event.client, 180),
-          venue: eventVenue(event),
-          guestCount: eventGuestCount(event),
-        },
+        $set: next,
         $setOnInsert: {
           linkedEventId: event._id,
           status: 'draft',
@@ -176,7 +187,11 @@ const syncDashboardEventsToBar = async ({ eventId = null } = {}) => {
       },
       upsert: true,
     },
-  })), { ordered: false });
+  }];
+  });
+  if (operations.length) {
+    await BarEvent.bulkWrite(operations, { ordered: false });
+  }
 };
 
 const normalizePackage = (value = {}, fallback = {}) => {

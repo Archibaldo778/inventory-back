@@ -2,6 +2,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import { Readable } from 'stream';
 import { v2 as cloudinary } from 'cloudinary';
+import { sendApiError } from '../utils/apiErrors.js';
 import { INVALID_IMAGE_UPLOAD_RESPONSE, isAllowedImageUpload } from '../utils/imageSignature.js';
 
 const router = Router();
@@ -103,7 +104,7 @@ const tryCleanupUpload = async (result) => {
 
 router.post('/heif-to-jpg', upload.single('image'), async (req, res) => {
   if (!hasCloudinaryConfig) {
-    return res.status(500).json({ error: 'Cloudinary is not configured for server-side HEIF conversion' });
+    return res.status(503).json({ error: 'HEIF conversion service is unavailable' });
   }
   if (!req.file?.buffer) {
     return res.status(400).json({ error: 'image file is required' });
@@ -117,7 +118,8 @@ router.post('/heif-to-jpg', upload.single('image'), async (req, res) => {
     uploadResult = await uploadHeifAsJpg(req.file);
     const url = String(uploadResult?.secure_url || uploadResult?.url || '').trim();
     if (!url) {
-      return res.status(500).json({ error: 'Cloudinary conversion produced no output URL' });
+      console.error('HEIF conversion failed: provider returned no output URL');
+      return res.status(502).json({ error: 'HEIF conversion service returned no image' });
     }
 
     const convertedRes = await fetch(url, { method: 'GET' });
@@ -131,7 +133,11 @@ router.post('/heif-to-jpg', upload.single('image'), async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     return res.status(200).send(buffer);
   } catch (error) {
-    return res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+    return sendApiError(res, error, {
+      context: 'HEIF conversion failed',
+      defaultStatus: 502,
+      fallbackMessage: 'Failed to convert HEIF image',
+    });
   } finally {
     if (uploadResult) {
       await tryCleanupUpload(uploadResult);
@@ -142,9 +148,7 @@ router.post('/heif-to-jpg', upload.single('image'), async (req, res) => {
 router.post('/remove-background', imageUpload.single('image'), async (req, res) => {
   const photoRoomApiKey = getPhotoRoomApiKey();
   if (!hasPhotoRoomConfig()) {
-    return res.status(500).json({
-      error: `Photoroom is not configured on the server. Expected one of: ${PHOTOROOM_ENV_KEYS.join(', ')}`,
-    });
+    return res.status(503).json({ error: 'Background removal service is unavailable' });
   }
   if (!req.file?.buffer) {
     return res.status(400).json({ error: 'image file is required' });
@@ -196,8 +200,11 @@ router.post('/remove-background', imageUpload.single('image'), async (req, res) 
       } catch {
         details = '';
       }
-      const suffix = details ? `: ${details}` : '';
-      return res.status(502).json({ error: `Photoroom remove background failed (${response.status})${suffix}` });
+      console.error(
+        `Background removal provider rejected request (${response.status})`,
+        details || response.statusText
+      );
+      return res.status(502).json({ error: 'Background removal service rejected the image' });
     }
 
     const contentType = String(response.headers.get('content-type') || '').trim() || 'image/png';
@@ -207,7 +214,11 @@ router.post('/remove-background', imageUpload.single('image'), async (req, res) 
     res.setHeader('Cache-Control', 'no-store');
     return res.status(200).send(buffer);
   } catch (error) {
-    return res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+    return sendApiError(res, error, {
+      context: 'Background removal failed',
+      defaultStatus: 502,
+      fallbackMessage: 'Background removal failed',
+    });
   }
 });
 

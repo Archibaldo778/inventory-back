@@ -2,6 +2,7 @@
 import express from 'express';
 import bcrypt from 'bcryptjs';
 import User from '../models/Users.js';
+import { sendApiError } from '../utils/apiErrors.js';
 
 const router = express.Router();
 
@@ -173,18 +174,11 @@ const handleUpdateByPathId = async (req, res) => {
     const result = await updateAndReturn(req.params.id, req.body, req.auth, { allowPassword: true });
     res.status(result.status).json(result.payload);
   } catch (e) {
-    if (Number(e?.statusCode) === 400) {
-      return res.status(400).json({ message: e.message });
-    }
-    if (e?.code === 11000) {
-      const field = Object.keys(e.keyPattern || {})[0] || 'поле';
-      return res.status(409).json({ message: `Значение для ${field} уже используется` });
-    }
-    if (e?.name === 'ValidationError') {
-      return res.status(400).json({ message: e.message });
-    }
-    console.error('Update user error:', e);
-    res.status(500).json({ message: 'Ошибка обновления пользователя' });
+    return sendApiError(res, e, {
+      field: 'message',
+      context: 'Update user failed',
+      fallbackMessage: 'Ошибка обновления пользователя',
+    });
   }
 };
 
@@ -194,18 +188,11 @@ const handleUpdateByBodyId = async (req, res) => {
     const result = await updateAndReturn(id, req.body, req.auth, { allowPassword: true });
     res.status(result.status).json(result.payload);
   } catch (e) {
-    if (Number(e?.statusCode) === 400) {
-      return res.status(400).json({ message: e.message });
-    }
-    if (e?.code === 11000) {
-      const field = Object.keys(e.keyPattern || {})[0] || 'поле';
-      return res.status(409).json({ message: `Значение для ${field} уже используется` });
-    }
-    if (e?.name === 'ValidationError') {
-      return res.status(400).json({ message: e.message });
-    }
-    console.error('Update user by body id error:', e);
-    res.status(500).json({ message: 'Ошибка обновления пользователя' });
+    return sendApiError(res, e, {
+      field: 'message',
+      context: 'Update user by body id failed',
+      fallbackMessage: 'Ошибка обновления пользователя',
+    });
   }
 };
 
@@ -229,8 +216,11 @@ router.get('/options', async (req, res) => {
       role: normalizeRole(user.role),
     })));
   } catch (e) {
-    console.error('User options list error:', e);
-    res.status(500).json({ message: 'Ошибка получения списка пользователей' });
+    return sendApiError(res, e, {
+      field: 'message',
+      context: 'User options list failed',
+      fallbackMessage: 'Ошибка получения списка пользователей',
+    });
   }
 });
 
@@ -240,8 +230,11 @@ router.get('/', async (req, res) => {
     const users = await User.find().select('-password');
     res.json(users.map((user) => serializeUser(user)));
   } catch (e) {
-    console.error('Users list error:', e);
-    res.status(500).json({ message: 'Ошибка получения пользователей' });
+    return sendApiError(res, e, {
+      field: 'message',
+      context: 'Users list failed',
+      fallbackMessage: 'Ошибка получения пользователей',
+    });
   }
 });
 
@@ -289,15 +282,11 @@ router.post('/', async (req, res) => {
 
     res.status(201).json(serializeUser(user));
   } catch (e) {
-    if (e?.code === 11000) {
-      const field = Object.keys(e.keyPattern || {})[0] || 'поле';
-      return res.status(409).json({ message: `Значение для ${field} уже используется` });
-    }
-    if (e?.name === 'ValidationError') {
-      return res.status(400).json({ message: e.message });
-    }
-    console.error('Create user error:', e);
-    res.status(500).json({ message: 'Ошибка при создании пользователя' });
+    return sendApiError(res, e, {
+      field: 'message',
+      context: 'Create user failed',
+      fallbackMessage: 'Ошибка при создании пользователя',
+    });
   }
 });
 
@@ -341,8 +330,11 @@ router.put('/:id/password', async (req, res) => {
     }, { runValidators: true });
     res.json({ ok: true });
   } catch (e) {
-    console.error('Change password error:', e);
-    res.status(500).json({ message: 'Ошибка смены пароля' });
+    return sendApiError(res, e, {
+      field: 'message',
+      context: 'Change password failed',
+      fallbackMessage: 'Ошибка смены пароля',
+    });
   }
 });
 
@@ -368,8 +360,11 @@ router.delete('/:id', async (req, res) => {
     await User.findByIdAndDelete(req.params.id);
     res.json({ ok: true });
   } catch (e) {
-    console.error('Delete user error:', e);
-    res.status(500).json({ message: 'Ошибка удаления пользователя' });
+    return sendApiError(res, e, {
+      field: 'message',
+      context: 'Delete user failed',
+      fallbackMessage: 'Ошибка удаления пользователя',
+    });
   }
 });
 

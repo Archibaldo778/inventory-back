@@ -110,13 +110,16 @@ export const requireAuth = async (req, res, next) => {
 
   try {
     const persistedUser = await User.findById(tokenAuth.userId)
-      .select('_id username email role seeProposals permissions isActive')
+      .select('_id username email role seeProposals permissions isActive +tokenVersion')
       .lean();
     if (!persistedUser) {
       return res.status(401).json({ message: 'User not found' });
     }
     if (persistedUser.isActive === false) {
       return res.status(403).json({ message: 'User account is inactive' });
+    }
+    if (Number(payload?.tokenVersion || 0) !== Number(persistedUser.tokenVersion || 0)) {
+      return res.status(401).json({ message: 'Session has been revoked' });
     }
 
     const auth = buildAuthContext({

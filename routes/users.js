@@ -51,6 +51,8 @@ const resolveSeeProposals = (source) => {
 };
 
 const normalizeEmail = (value) => String(value || '').trim().toLowerCase();
+const isSuperAdminRole = (value) => normalizeRole(value) === 'super admin';
+const isSuperAdminAuth = (auth) => isSuperAdminRole(auth?.role);
 
 const buildPermissionsPayload = (sourcePermissions, seeProposals) => {
   const base =
@@ -119,16 +121,45 @@ const applyUserPayload = async (user, body, { allowPassword = false } = {}) => {
   }
 
   if (allowPassword && typeof payload.password === 'string' && payload.password.trim()) {
-    user.password = await bcrypt.hash(payload.password.trim(), 10);
+    const nextPassword = payload.password.trim();
+    if (nextPassword.length < 8) {
+      const error = new Error('Password must be at least 8 characters');
+      error.statusCode = 400;
+      throw error;
+    }
+    user.password = await bcrypt.hash(nextPassword, 10);
+    user.tokenVersion = Number(user.tokenVersion || 0) + 1;
   }
 };
 
-const updateAndReturn = async (id, body, { allowPassword = false } = {}) => {
+const updateAndReturn = async (id, body, auth, { allowPassword = false } = {}) => {
   const userId = String(id || '').trim();
   if (!userId) return { status: 400, payload: { message: 'id обязателен' } };
 
-  const user = await User.findById(userId).select('+password');
+  const user = await User.findById(userId).select('+password +tokenVersion');
   if (!user) return { status: 404, payload: { message: 'Пользователь не найден' } };
+  if (isSuperAdminRole(user.role) && !isSuperAdminAuth(auth)) {
+    return { status: 403, payload: { message: 'Only a super admin can modify this account' } };
+  }
+  if (isSuperAdminRole(body?.role) && !isSuperAdminAuth(auth)) {
+    return { status: 403, payload: { message: 'Only a super admin can grant this role' } };
+  }
+  if (
+    String(auth?.userId || '') === String(user._id)
+    && isSuperAdminRole(user.role)
+    && body?.role !== undefined
+    && !isSuperAdminRole(body.role)
+  ) {
+    return { status: 400, payload: { message: 'You cannot remove your own super admin role' } };
+  }
+  const requestedActive = toBool(body?.isActive ?? body?.active);
+  if (
+    String(auth?.userId || '') === String(user._id)
+    && isSuperAdminRole(user.role)
+    && requestedActive === false
+  ) {
+    return { status: 400, payload: { message: 'You cannot deactivate your own super admin account' } };
+  }
 
   await applyUserPayload(user, body, { allowPassword });
   await user.save();
@@ -139,9 +170,12 @@ const updateAndReturn = async (id, body, { allowPassword = false } = {}) => {
 
 const handleUpdateByPathId = async (req, res) => {
   try {
-    const result = await updateAndReturn(req.params.id, req.body, { allowPassword: true });
+    const result = await updateAndReturn(req.params.id, req.body, req.auth, { allowPassword: true });
     res.status(result.status).json(result.payload);
   } catch (e) {
+    if (Number(e?.statusCode) === 400) {
+      return res.status(400).json({ message: e.message });
+    }
     if (e?.code === 11000) {
       const field = Object.keys(e.keyPattern || {})[0] || 'поле';
       return res.status(409).json({ message: `Значение для ${field} уже используется` });
@@ -157,9 +191,12 @@ const handleUpdateByPathId = async (req, res) => {
 const handleUpdateByBodyId = async (req, res) => {
   try {
     const id = req.body?.id || req.body?._id || req.body?.userId;
-    const result = await updateAndReturn(id, req.body, { allowPassword: true });
+    const result = await updateAndReturn(id, req.body, req.auth, { allowPassword: true });
     res.status(result.status).json(result.payload);
   } catch (e) {
+    if (Number(e?.statusCode) === 400) {
+      return res.status(400).json({ message: e.message });
+    }
     if (e?.code === 11000) {
       const field = Object.keys(e.keyPattern || {})[0] || 'поле';
       return res.status(409).json({ message: `Значение для ${field} уже используется` });
@@ -195,6 +232,12 @@ router.post('/', async (req, res) => {
 
     if (!username || !email || !password) {
       return res.status(400).json({ message: 'username, email и password обязательны' });
+    }
+    if (password.length < 8) {
+      return res.status(400).json({ message: 'Password must be at least 8 characters' });
+    }
+    if (isSuperAdminRole(role) && !isSuperAdminAuth(req.auth)) {
+      return res.status(403).json({ message: 'Only a super admin can grant this role' });
     }
 
     // Явные проверки уникальности, чтобы не сыпать 500
@@ -258,8 +301,19 @@ router.put('/:id/password', async (req, res) => {
   try {
     const { password } = req.body;
     if (!password) return res.status(400).json({ message: 'password обязателен' });
-    const hash = await bcrypt.hash(password, 10);
-    await User.findByIdAndUpdate(req.params.id, { password: hash }, { runValidators: true });
+    if (String(password).length < 8) {
+      return res.status(400).json({ message: 'Password must be at least 8 characters' });
+    }
+    const target = await User.findById(req.params.id).select('_id role');
+    if (!target) return res.status(404).json({ message: 'Пользователь не найден' });
+    if (isSuperAdminRole(target.role) && !isSuperAdminAuth(req.auth)) {
+      return res.status(403).json({ message: 'Only a super admin can reset this password' });
+    }
+    const hash = await bcrypt.hash(String(password), 10);
+    await User.findByIdAndUpdate(req.params.id, {
+      $set: { password: hash },
+      $inc: { tokenVersion: 1 },
+    }, { runValidators: true });
     res.json({ ok: true });
   } catch (e) {
     console.error('Change password error:', e);
@@ -270,6 +324,22 @@ router.put('/:id/password', async (req, res) => {
 // Удаление
 router.delete('/:id', async (req, res) => {
   try {
+    if (String(req.auth?.userId || '') === String(req.params.id)) {
+      return res.status(400).json({ message: 'You cannot delete your own account' });
+    }
+    const target = await User.findById(req.params.id).select('_id role');
+    if (!target) return res.status(404).json({ message: 'Пользователь не найден' });
+    if (isSuperAdminRole(target.role)) {
+      if (!isSuperAdminAuth(req.auth)) {
+        return res.status(403).json({ message: 'Only a super admin can delete this account' });
+      }
+      const superAdminCount = await User.countDocuments({
+        role: { $in: ['super admin', 'super Admin'] },
+      });
+      if (superAdminCount <= 1) {
+        return res.status(409).json({ message: 'At least one super admin must remain' });
+      }
+    }
     await User.findByIdAndDelete(req.params.id);
     res.json({ ok: true });
   } catch (e) {

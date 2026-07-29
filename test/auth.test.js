@@ -67,6 +67,20 @@ test('requireAuth rejects refresh tokens and uses current database permissions',
     assert.equal(accepted.next, true);
     assert.equal(accepted.auth.role, 'user');
 
+    const revokedToken = jwt.sign(
+      { sub: userId, role: 'user', tokenType: 'access', tokenVersion: 0 },
+      process.env.JWT_SECRET,
+      { expiresIn: '1h' }
+    );
+    const revoked = await runGuard(revokedToken, {
+      _id: userId,
+      role: 'user',
+      isActive: true,
+      tokenVersion: 1,
+    });
+    assert.equal(revoked.status, 401);
+    assert.equal(revoked.body.message, 'Session has been revoked');
+
     const inactive = await runGuard(accessToken, {
       _id: userId,
       role: 'admin',

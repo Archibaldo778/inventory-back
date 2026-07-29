@@ -91,6 +91,7 @@ function buildTokenPayload(source) {
     username: user.username,
     email: user.email,
     seeProposals: user.seeProposals,
+    tokenVersion: Number(source?.tokenVersion || 0),
   };
 }
 
@@ -142,7 +143,7 @@ router.post('/login', enforceLoginRateLimit, async (req, res) => {
     const query = email
       ? { email: String(email).toLowerCase().trim() }
       : { username: String(username).trim() };
-    const user = await User.findOne(query).select('+password');
+    const user = await User.findOne(query).select('+password +tokenVersion');
     if (!user) return res.status(401).json({ message: 'Invalid credentials' });
     if (user.isActive === false) return res.status(403).json({ message: 'User account is inactive' });
 
@@ -183,9 +184,13 @@ router.post('/refresh', async (req, res) => {
       return res.status(401).json({ message: 'Invalid refresh token type' });
     }
 
-    const user = await User.findById(data?.sub).select('_id username email role seeProposals permissions isActive');
+    const user = await User.findById(data?.sub)
+      .select('_id username email role seeProposals permissions isActive +tokenVersion');
     if (!user) return res.status(401).json({ message: 'User not found' });
     if (user.isActive === false) return res.status(403).json({ message: 'User account is inactive' });
+    if (Number(data?.tokenVersion || 0) !== Number(user.tokenVersion || 0)) {
+      return res.status(401).json({ message: 'Session has been revoked' });
+    }
 
     const payload = buildTokenPayload(user);
     const token = jwt.sign({ ...payload, tokenType: 'access' }, jwtSecret, {

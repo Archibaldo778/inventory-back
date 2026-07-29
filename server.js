@@ -97,10 +97,18 @@ const requireAdminForPatchDelete = requireMethodGuards((req) => {
   return ['PATCH', 'PUT', 'DELETE'].includes(method) ? requireAdmin : null;
 });
 
-const requireUsersAccess = requireMethodGuards((req) => {
+export const resolveUsersGuard = (req) => {
   const method = String(req.method || '').toUpperCase();
-  return ['GET', 'HEAD'].includes(method) ? requireProposalAccess : requireAdmin;
-});
+  if (['GET', 'HEAD'].includes(method)) return requireProposalAccess;
+  const passwordMatch = String(req.path || '').match(/^\/([a-f\d]{24})\/password\/?$/i);
+  if (
+    passwordMatch
+    && String(req.auth?.userId || '').toLowerCase() === passwordMatch[1].toLowerCase()
+  ) return null;
+  return requireAdmin;
+};
+
+const requireUsersAccess = requireMethodGuards(resolveUsersGuard);
 
 const requireProposalTemplateAccess = requireMethodGuards((req) => {
   const method = String(req.method || '').toUpperCase();
@@ -465,13 +473,26 @@ async function ensureSuperAdmin() {
     const password = process.env.SUPERADMIN_PASSWORD;
     const username = process.env.SUPERADMIN_USERNAME || 'superadmin';
     if (!email || !password) return; // skip if not configured
-    const existing = await User.findOne({ email: email.toLowerCase().trim() }).select('_id');
-    if (existing) return;
+    const existing = await User.findOne({ email: email.toLowerCase().trim() })
+      .select('_id role isActive');
+    if (existing) {
+      const updates = {};
+      if (String(existing.role || '').trim().toLowerCase() !== 'super admin') {
+        updates.role = 'super admin';
+      }
+      if (existing.isActive === false) {
+        updates.isActive = true;
+      }
+      if (Object.keys(updates).length > 0) {
+        await User.updateOne({ _id: existing._id }, { $set: updates }, { runValidators: true });
+      }
+      return;
+    }
     const hash = await bcrypt.hash(password, 10);
     await User.create({
       username,
       email: email.toLowerCase().trim(),
-      role: 'admin', // or 'super Admin' if you rely on that level
+      role: 'super admin',
       password: hash,
     });
     console.log('✅ Super admin created');

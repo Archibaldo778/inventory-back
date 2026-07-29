@@ -23,6 +23,7 @@ const userSchema = new mongoose.Schema(
     // Важно: именно "password", и скрываем по умолчанию при выборке
     password: { type: String, required: true, select: false },
     isActive: { type: Boolean, default: true },
+    tokenVersion: { type: Number, default: 0, min: 0, select: false },
   },
   { timestamps: true }
 );

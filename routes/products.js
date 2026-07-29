@@ -504,7 +504,13 @@ router.patch('/:id', upload.single('image'), async (req, res) => {
       new: true,
       runValidators: true,
     });
-    if (!doc) return res.status(404).json({ error: 'Not found' });
+    if (!doc) {
+      if (uploadedImage) {
+        await cleanupManagedImageSafely(uploadedImage, 'orphaned product image');
+        uploadedImage = '';
+      }
+      return res.status(404).json({ error: 'Not found' });
+    }
     if (
       Object.prototype.hasOwnProperty.call(updates, 'image')
       && currentDoc.image

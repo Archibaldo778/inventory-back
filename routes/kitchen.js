@@ -406,7 +406,13 @@ router.patch('/:id', upload.single('image'), async (req, res) => {
       new: true,
       runValidators: true,
     });
-    if (!updated) return res.status(404).json({ error: 'Not found' });
+    if (!updated) {
+      if (uploadedImage) {
+        await cleanupManagedImageSafely(uploadedImage, 'orphaned kitchen image');
+        uploadedImage = '';
+      }
+      return res.status(404).json({ error: 'Not found' });
+    }
     if (
       Object.prototype.hasOwnProperty.call(updates, 'image')
       && current.image

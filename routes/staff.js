@@ -228,7 +228,13 @@ router.patch('/:id', upload.single('photo'), async (req, res) => {
       new: true,
       runValidators: true,
     });
-    if (!doc) return res.status(404).json({ message: 'Not found' });
+    if (!doc) {
+      if (uploadedPhoto) {
+        await cleanupManagedImageSafely(uploadedPhoto, 'orphaned staff photo');
+        uploadedPhoto = '';
+      }
+      return res.status(404).json({ message: 'Not found' });
+    }
     if (
       Object.prototype.hasOwnProperty.call(updates, 'photo')
       && current.photo

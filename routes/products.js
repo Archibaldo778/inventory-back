@@ -13,6 +13,7 @@ import { sendApiError } from '../utils/apiErrors.js';
 import {
   allocateDecorInventoryCode,
   ensureDecorInventoryCodes,
+  parseDecorInventoryCode,
 } from '../utils/decorInventoryCodes.js';
 import { v2 as cloudinary } from 'cloudinary';
 
@@ -439,6 +440,26 @@ router.get('/', cacheWithGroup('5 minutes', CACHE_GROUP), async (_req, res) => {
     return sendApiError(res, err, {
       context: 'Products list failed',
       fallbackMessage: 'Failed to list products',
+    });
+  }
+});
+
+// READ one by stable public inventory code (used by QR labels)
+router.get('/code/:inventoryCode', async (req, res) => {
+  try {
+    await ensureDecorInventoryCodes();
+    const inventoryCode = String(req.params.inventoryCode || '').trim().toUpperCase();
+    if (!parseDecorInventoryCode(inventoryCode)) {
+      return res.status(400).json({ error: 'Invalid inventory code' });
+    }
+
+    const item = await Product.findOne({ inventoryCode });
+    if (!item) return res.status(404).json({ error: 'Inventory item not found' });
+    return res.json({ ...item.toObject(), qty: item.quantity });
+  } catch (err) {
+    return sendApiError(res, err, {
+      context: 'Product lookup by inventory code failed',
+      fallbackMessage: 'Failed to load inventory item',
     });
   }
 });

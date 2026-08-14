@@ -10,6 +10,10 @@ import { cleanupManagedImageSafely } from '../utils/managedImageCleanup.js';
 import { INVALID_IMAGE_UPLOAD_RESPONSE, isAllowedImageUpload } from '../utils/imageSignature.js';
 import { clearApiCacheGroups, createGroupedApiCache } from '../utils/apiCache.js';
 import { sendApiError } from '../utils/apiErrors.js';
+import {
+  allocateDecorInventoryCode,
+  ensureDecorInventoryCodes,
+} from '../utils/decorInventoryCodes.js';
 import { v2 as cloudinary } from 'cloudinary';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -365,6 +369,9 @@ router.post('/', upload.single('image'), async (req, res) => {
     }
 
     const categoryValue = String(category || '').trim() || 'Trays';
+    const inventoryCode = normalizeTapeCategoryKey(categoryValue)
+      ? undefined
+      : await allocateDecorInventoryCode();
     const qtyNum = Number((quantity ?? qty) ?? 0);
     let image = null;
 
@@ -395,6 +402,7 @@ router.post('/', upload.single('image'), async (req, res) => {
     const sizeMeta = buildSizePayload(req.body, { forUpdate: false });
 
     const doc = await Product.create({
+      ...(inventoryCode ? { inventoryCode } : {}),
       name: name.trim(),
       quantity: Number.isFinite(qtyNum) ? qtyNum : 0,
       supplier: supplier || '',
@@ -423,6 +431,7 @@ router.post('/', upload.single('image'), async (req, res) => {
 // READ all
 router.get('/', cacheWithGroup('5 minutes', CACHE_GROUP), async (_req, res) => {
   try {
+    await ensureDecorInventoryCodes();
     const items = await Product.find().sort({ createdAt: -1 });
     const mapped = items.map((d) => ({ ...d.toObject(), qty: d.quantity }));
     res.json(mapped);

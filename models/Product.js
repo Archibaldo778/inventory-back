@@ -15,6 +15,10 @@ const productSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true },
 
+    // Human-facing identifier. Mongo `_id` remains the internal relation key.
+    inventoryCode: { type: String, trim: true, uppercase: true, unique: true, sparse: true, index: true, immutable: true },
+    legacyInventoryId: { type: String, trim: true },
+
     // inventory
     quantity: { type: Number, default: 0, min: 0 },
 

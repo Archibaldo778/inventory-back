@@ -4,6 +4,7 @@ import Deck from '../models/Deck.js';
 import Page from '../models/Page.js';
 import Proposal from '../models/Proposal.js';
 import Client from '../models/Client.js';
+import DecorPackout from '../models/DecorPackout.js';
 import { requireAdmin } from '../middleware/auth.js';
 import { clearApiCacheGroups, createGroupedApiCache } from '../utils/apiCache.js';
 import { sendApiError } from '../utils/apiErrors.js';
@@ -86,6 +87,7 @@ const deleteEventRelations = async (event, session = null) => {
     await Page.deleteMany({ deckId: { $in: deckIds } }, options);
   }
   await Deck.deleteMany({ eventId: event._id }, options);
+  await DecorPackout.deleteMany({ eventId: event._id }, options);
   await detachEventProposals(event, session);
 };
 

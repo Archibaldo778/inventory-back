@@ -13,6 +13,7 @@ import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
 import User from './models/Users.js';
+import decorPackoutRoutes from './routes/decorPackouts.js';
 import {
   requireAdmin,
   requireAdminForMutations,
@@ -428,6 +429,7 @@ app.use('/api/products', requireAuth, requireAdminForMutations, productRoutes);
 app.use('/api/users', requireAuth, requireUsersAccess, userRoutes);
 app.use('/users', requireAuth, requireUsersAccess, userRoutes);
 app.use('/api/events', requireAuth, eventRoutes);
+app.use('/api/decor-packouts', requireAuth, decorPackoutRoutes);
 app.use('/api/decks', requireAuth, deckRoutes);
 app.use('/api/pages', requireAuth, pageRoutes);
 app.use('/api/staff', requireAuth, requireAdminForMutations, staffRoutes);

@@ -129,6 +129,10 @@ router.post('/:id/scan', async (req, res) => {
     if (!parseDecorInventoryCode(inventoryCode)) {
       return res.status(400).json({ error: 'Scan a valid OCC inventory QR code' });
     }
+    const quantity = req.body?.quantity === undefined ? 1 : Number(req.body.quantity);
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 10000) {
+      return res.status(400).json({ error: 'Quantity must be a whole number from 1 to 10000' });
+    }
     const product = await Product.findOne({ inventoryCode });
     if (!product || TAPE_LIBRARY_PATTERN.test(String(product.category || ''))) {
       return res.status(404).json({ error: 'Inventory item not found' });
@@ -136,7 +140,7 @@ router.post('/:id/scan', async (req, res) => {
 
     const existing = packout.items.find((item) => String(item.productId) === String(product._id));
     if (existing) {
-      existing.quantity = Math.min(10000, Number(existing.quantity || 0) + 1);
+      existing.quantity = Math.min(10000, Number(existing.quantity || 0) + quantity);
       existing.updatedAt = new Date();
       existing.scannedBy = actorName(req.auth);
     } else {
@@ -150,7 +154,7 @@ router.post('/:id/scan', async (req, res) => {
         image: product.image || product.imageUrl || '',
         category: product.category || '',
         location: product.location || '',
-        quantity: 1,
+        quantity,
         scannedBy: actorName(req.auth),
       });
     }

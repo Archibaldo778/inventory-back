@@ -79,7 +79,7 @@ const applyCorsHeaders = (req, res) => {
   if (!origin || !isAllowedCorsOrigin(origin)) return false;
   res.setHeader('Access-Control-Allow-Origin', origin);
   res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Allow-Headers', 'Authorization,Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Authorization,Content-Type,X-Bar-Returns-Pin');
   res.setHeader('Access-Control-Allow-Methods', 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS');
   res.append('Vary', 'Origin');
   return true;
@@ -91,7 +91,7 @@ const corsOptions = {
   },
   credentials: true,
   optionsSuccessStatus: 204,
-  allowedHeaders: ['Authorization', 'Content-Type'],
+  allowedHeaders: ['Authorization', 'Content-Type', 'X-Bar-Returns-Pin'],
 };
 
 const requireAdminForPatchDelete = requireMethodGuards((req) => {
@@ -423,6 +423,7 @@ import proposalRoutes from './routes/proposals.js';
 import proposalTemplateRoutes from './routes/proposalTemplates.js';
 import toolsRoutes from './routes/tools.js';
 import barRoutes from './routes/bar.js';
+import publicBarReturnsRoutes from './routes/publicBarReturns.js';
 
 app.use('/api/auth', authRoutes);
 app.use('/api/products', requireAuth, requireAdminForMutations, productRoutes);
@@ -439,6 +440,7 @@ app.use('/api/clients', requireAuth, requireAdminForPatchDelete, clientRoutes);
 app.use('/api/proposals', requireAuth, requireProposalAccess, proposalRoutes);
 app.use('/api/proposal-templates', requireAuth, requireProposalTemplateAccess, proposalTemplateRoutes);
 app.use('/api/tools', requireAuth, requireAdmin, toolsRoutes);
+app.use('/api/public/bar-returns', publicBarReturnsRoutes);
 app.use('/api/bar', requireAuth, barRoutes);
 
 // подключение к Mongo

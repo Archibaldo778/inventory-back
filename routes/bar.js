@@ -406,7 +406,7 @@ const resolveCatalog = async (items) => {
   return { byId, byName };
 };
 
-const normalizePackoutItems = async (items, { allowFinancials = false, guestCount = null } = {}) => {
+export const normalizePackoutItems = async (items, { allowFinancials = false, guestCount = null } = {}) => {
   const source = keepBarAccountingItems(Array.isArray(items) ? items.slice(0, MAX_PACKOUT_ITEMS) : []);
   const catalog = await resolveCatalog(source);
   return source
@@ -433,6 +433,7 @@ const normalizePackoutItems = async (items, { allowFinancials = false, guestCoun
         included: cleanBoolean(item?.included ?? item?.includedByDefault, scope !== 'non_bar'),
         sentQty,
         sentQtyText: cleanString(item?.sentQtyText ?? item?.quantityText ?? sentQty, 80),
+        sentQtyPending: cleanBoolean(item?.sentQtyPending, false),
         deliveredQty: cleanNumber(item?.deliveredQty ?? item?.delivered, { fallback: null }),
         returnedFullQty: cleanNumber(item?.returnedFullQty, { fallback: 0 }),
         returnedOpenQty: cleanNumber(item?.returnedOpenQty, { fallback: 0 }),

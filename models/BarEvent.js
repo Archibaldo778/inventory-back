@@ -26,6 +26,7 @@ const barPackoutItemSchema = new mongoose.Schema(
     included: { type: Boolean, default: true },
     sentQty: { type: Number, default: 0, min: 0 },
     sentQtyText: { type: String, default: '', trim: true },
+    sentQtyPending: { type: Boolean, default: false },
     deliveredQty: { type: Number, default: null, min: 0 },
     returnedFullQty: { type: Number, default: 0, min: 0 },
     returnedOpenQty: { type: Number, default: 0, min: 0 },
@@ -102,6 +103,13 @@ const barEventSchema = new mongoose.Schema(
     reviewedAt: { type: Date, default: null },
     reviewedBy: { type: String, default: '', trim: true },
     notes: { type: String, default: '', trim: true },
+    guestIntake: {
+      pendingReview: { type: Boolean, default: false },
+      dedupeKey: { type: String, default: '', trim: true },
+      reporterName: { type: String, default: '', trim: true },
+      createdAt: { type: Date, default: null },
+      lastSubmittedAt: { type: Date, default: null },
+    },
     audit: { type: [barAuditEntrySchema], default: [] },
     revision: { type: Number, default: 0, min: 0 },
   },
@@ -113,6 +121,13 @@ const barEventSchema = new mongoose.Schema(
 
 barEventSchema.index({ assignedUserIds: 1, eventDate: -1 });
 barEventSchema.index({ status: 1, eventDate: -1 });
+barEventSchema.index(
+  { 'guestIntake.dedupeKey': 1 },
+  {
+    unique: true,
+    partialFilterExpression: { 'guestIntake.dedupeKey': { $type: 'string', $gt: '' } },
+  }
+);
 barEventSchema.index(
   { linkedEventId: 1 },
   {

@@ -543,7 +543,11 @@ router.patch('/events/:id', requireBarManager, async (req, res) => {
       event.packageSnapshot = normalizePackage(req.body.packageSnapshot, event.packageSnapshot);
     }
     if (req.body?.clientCharge !== undefined) {
-      event.clientCharge = cleanNumber(req.body.clientCharge, { fallback: 0 });
+      const clientCharge = Number(req.body.clientCharge);
+      if (!Number.isFinite(clientCharge) || clientCharge < 0) {
+        return res.status(400).json({ message: 'Final client charge must be zero or greater' });
+      }
+      event.clientCharge = clientCharge;
     }
     if (req.body?.currency !== undefined) {
       event.currency = cleanString(req.body.currency, 10) || 'USD';
@@ -815,6 +819,84 @@ router.patch('/events/:id/items/:itemId/return', async (req, res) => {
     return sendApiError(res, error, {
       context: 'Bar return update failed',
       fallbackMessage: 'Failed to update returned quantity',
+    });
+  }
+});
+
+router.patch('/events/:id/returns', async (req, res) => {
+  try {
+    const event = await loadEvent(req, res);
+    if (!event) return undefined;
+    if (!canOperateEvent(event, req.auth)) {
+      return res.status(403).json({ message: 'Bar operation access required' });
+    }
+    if (event.status === 'closed') {
+      return res.status(409).json({ message: 'This event bar report is closed' });
+    }
+    const rows = Array.isArray(req.body?.items) ? req.body.items : [];
+    if (!rows.length || rows.length > MAX_PACKOUT_ITEMS) {
+      return res.status(400).json({ message: `Provide between 1 and ${MAX_PACKOUT_ITEMS} return items` });
+    }
+
+    const manager = isBarManager(req.auth);
+    const seen = new Set();
+    const updates = [];
+    for (const row of rows) {
+      const itemId = cleanString(row?.itemId, 80);
+      if (!isObjectId(itemId) || seen.has(itemId)) {
+        return res.status(400).json({ message: 'Every return item must have a unique itemId' });
+      }
+      seen.add(itemId);
+      const item = event.items.id(itemId);
+      if (!item || item.included === false || !requiresBarReturn(item)) {
+        return res.status(404).json({ message: 'Packout return item not found' });
+      }
+      if (!manager && item.returnConfirmed === true) {
+        return res.status(409).json({ message: `${item.name || 'Item'} was already saved` });
+      }
+      const returnedQty = Number(row?.returnedQty);
+      if (!Number.isFinite(returnedQty) || returnedQty < 0) {
+        return res.status(400).json({ message: `${item.name || 'Item'} returned quantity must be zero or greater` });
+      }
+      const returnValidation = validateBarReturnQuantities({
+        ...item.toObject(),
+        returnedFullQty: 0,
+        returnedOpenQty: returnedQty,
+        lostDamagedQty: 0,
+      });
+      if (!returnValidation.valid) {
+        return res.status(400).json({
+          message: `${item.name || 'Item'}: ${returnValidation.message}`,
+          accounting: returnValidation.accounting,
+        });
+      }
+      updates.push({
+        item,
+        returnedQty,
+        captainNotes: cleanString(row?.captainNotes, 1000),
+      });
+    }
+
+    const updatedAt = new Date();
+    const updatedBy = String(req.auth?.username || req.auth?.email || '');
+    updates.forEach(({ item, returnedQty, captainNotes }) => {
+      item.returnedFullQty = 0;
+      item.returnedOpenQty = returnedQty;
+      item.lostDamagedQty = 0;
+      item.captainNotes = captainNotes;
+      item.returnConfirmed = true;
+      item.updatedBy = updatedBy;
+      item.updatedAt = updatedAt;
+    });
+    if (event.status === 'ready') event.status = 'in_progress';
+    event.revision += 1;
+    addAudit(event, req.auth, 'returns_batch_updated', { count: updates.length });
+    await event.save();
+    return res.json(serializeBarEvent(event, { includeFinancials: manager }));
+  } catch (error) {
+    return sendApiError(res, error, {
+      context: 'Bar returns batch update failed',
+      fallbackMessage: 'Failed to save returned quantities',
     });
   }
 });

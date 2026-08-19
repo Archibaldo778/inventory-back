@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import mongoose from 'mongoose';
+import multer from 'multer';
 import BarEvent, { BAR_EVENT_STATUSES, BAR_ITEM_SCOPES, BAR_PRICE_UNITS } from '../models/BarEvent.js';
 import BarPackage from '../models/BarPackage.js';
 import BeverageItem from '../models/BeverageItem.js';
@@ -12,6 +13,11 @@ import {
 } from '../utils/barEventAccounting.js';
 import { normalizeBarEventDate } from '../utils/barEventDates.js';
 import { sendApiError } from '../utils/apiErrors.js';
+import { recognizeDocuments } from '../utils/googleDocumentAi.js';
+import {
+  matchRecognizedItemsToCatalog,
+  parseRecognizedPackout,
+} from '../utils/barPackoutRecognition.js';
 
 const router = Router();
 const BAR_MANAGER_ROLES = new Set(['bar admin']);
@@ -19,6 +25,30 @@ const BAR_WORKER_ROLES = new Set(['bar captain', 'bartender']);
 const BAR_VIEWER_ROLES = new Set(['user', 'manager', 'sales rep']);
 const MAX_PACKOUT_ITEMS = 500;
 const MAX_AUDIT_ENTRIES = 200;
+const MAX_SCAN_FILES = 6;
+const MAX_SCAN_FILE_BYTES = 12 * 1024 * 1024;
+const MAX_SCAN_TOTAL_BYTES = 40 * 1024 * 1024;
+const SCAN_RATE_WINDOW_MS = 10 * 60 * 1000;
+const SCAN_RATE_MAX = 20;
+const scanRateBuckets = new Map();
+
+const packoutScanUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    files: MAX_SCAN_FILES,
+    fileSize: MAX_SCAN_FILE_BYTES,
+    fields: 5,
+    parts: MAX_SCAN_FILES + 5,
+  },
+  fileFilter: (_req, file, callback) => {
+    const mime = String(file?.mimetype || '').toLowerCase();
+    const name = String(file?.originalname || '').toLowerCase();
+    const allowed = /^(?:application\/pdf|image\/(?:jpeg|jpg|png|bmp|webp|tiff|gif))$/.test(mime)
+      || /\.(?:pdf|jpe?g|png|bmp|webp|tiff?|gif)$/i.test(name);
+    if (allowed) return callback(null, true);
+    return callback(new multer.MulterError('LIMIT_UNEXPECTED_FILE', 'files'));
+  },
+});
 
 const isObjectId = (value) => mongoose.Types.ObjectId.isValid(String(value || ''));
 const cleanString = (value, maxLength = 500) => String(value ?? '').trim().slice(0, maxLength);
@@ -103,6 +133,33 @@ const serializeBarEvent = (source, { includeFinancials = false } = {}) => {
 
 const requireBarManager = (req, res, next) => {
   if (!isBarManager(req.auth)) return res.status(403).json({ message: 'Bar admin access required' });
+  return next();
+};
+
+const requireBarOperator = (req, res, next) => {
+  if (!isBarManager(req.auth) && !isBarWorker(req.auth)) {
+    return res.status(403).json({ message: 'Bar operation access required' });
+  }
+  return next();
+};
+
+const limitPackoutRecognition = (req, res, next) => {
+  const now = Date.now();
+  if (scanRateBuckets.size > 5000) {
+    for (const [key, bucket] of scanRateBuckets) {
+      if ((now - bucket.startedAt) > SCAN_RATE_WINDOW_MS) scanRateBuckets.delete(key);
+    }
+  }
+  const key = String(req.auth?.userId || req.ip || 'unknown');
+  let bucket = scanRateBuckets.get(key);
+  if (!bucket || (now - bucket.startedAt) > SCAN_RATE_WINDOW_MS) {
+    bucket = { startedAt: now, count: 0 };
+    scanRateBuckets.set(key, bucket);
+  }
+  bucket.count += 1;
+  if (bucket.count > SCAN_RATE_MAX) {
+    return res.status(429).json({ message: 'Too many packout scans. Wait a few minutes and try again.' });
+  }
   return next();
 };
 
@@ -494,6 +551,54 @@ router.patch('/events/:id', requireBarManager, async (req, res) => {
     });
   }
 });
+
+router.post(
+  '/events/:id/packout/recognize',
+  requireBarOperator,
+  limitPackoutRecognition,
+  packoutScanUpload.array('files', MAX_SCAN_FILES),
+  async (req, res) => {
+    try {
+      const event = await loadEvent(req, res);
+      if (!event) return undefined;
+      const manager = isBarManager(req.auth);
+      if (!manager && event.items.length > 0) {
+        return res.status(409).json({ message: 'A packout already exists. Ask a bar admin to replace it.' });
+      }
+      const files = Array.isArray(req.files) ? req.files : [];
+      if (!files.length) return res.status(400).json({ message: 'Add at least one packout photo or PDF' });
+      const totalBytes = files.reduce((sum, file) => sum + Number(file?.size || 0), 0);
+      if (totalBytes > MAX_SCAN_TOTAL_BYTES) {
+        return res.status(413).json({ message: 'Packout scan files are too large in total' });
+      }
+      const documents = await recognizeDocuments(files);
+      const parsed = parseRecognizedPackout({
+        text: documents.map((document) => document.text).join('\n'),
+        tables: documents.flatMap((document) => document.tables),
+      });
+      if (!parsed.items.length) {
+        return res.status(422).json({ message: 'No packout rows were recognized. Retake the photo straight-on in brighter light.' });
+      }
+      const catalog = await BeverageItem.find({ active: { $ne: false } })
+        .select('name aliases')
+        .lean();
+      const items = matchRecognizedItemsToCatalog(parsed.items, catalog);
+      return res.json({
+        ...parsed,
+        items,
+        provider: 'google_document_ai',
+        matchedCount: items.filter((item) => item.beverageItemId).length,
+        suggestedCount: items.filter((item) => item.catalogMatch?.status === 'suggested').length,
+      });
+    } catch (error) {
+      return sendApiError(res, error, {
+        context: 'Document AI packout recognition failed',
+        defaultStatus: 502,
+        fallbackMessage: 'Document AI could not recognize this packout',
+      });
+    }
+  }
+);
 
 router.post('/events/:id/packout', async (req, res) => {
   try {

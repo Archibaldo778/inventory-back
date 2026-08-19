@@ -155,6 +155,7 @@ test('bar event accounting uses included items and final client charge', () => {
     items: [
       {
         included: true,
+        scope: 'alcohol',
         sentQty: 10,
         returnedFullQty: 4,
         unitCostSnapshot: 20,
@@ -162,6 +163,7 @@ test('bar event accounting uses included items and final client charge', () => {
       },
       {
         included: false,
+        scope: 'alcohol',
         sentQty: 100,
         returnedFullQty: 0,
         unitCostSnapshot: 50,
@@ -193,6 +195,20 @@ test('bar event accounting uses included items and final client charge', () => {
     includedItemCount: 1,
     confirmedItemCount: 1,
   });
+});
+
+test('old non-bar rows do not affect event totals', () => {
+  const totals = calculateBarEventAccounting({
+    clientCharge: 100,
+    items: [
+      { included: true, scope: 'alcohol', sentQty: 2, unitCostSnapshot: 10 },
+      { included: true, scope: 'bar_support', section: 'WATER', name: 'Panna Water', sentQty: 50, unitCostSnapshot: 5 },
+      { included: true, scope: 'non_bar', section: 'STAFF ITEMS', name: 'Paper cups', sentQty: 100, unitCostSnapshot: 2 },
+    ],
+  });
+
+  assert.equal(totals.inventoryCost, 20);
+  assert.equal(totals.includedItemCount, 1);
 });
 
 test('bar roles are valid user roles', () => {

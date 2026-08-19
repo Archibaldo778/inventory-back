@@ -1,6 +1,7 @@
 import {
   getPreparedBeverageRate,
   getPreparedBeverageType,
+  isBarAccountingItem,
   requiresBarReturn,
 } from './barPackoutScope.js';
 
@@ -110,7 +111,7 @@ export const calculateBarPackageCharge = (event = {}) => {
 };
 
 export const calculateBarEventAccounting = (event = {}) => {
-  const sourceItems = Array.isArray(event.items) ? event.items : [];
+  const sourceItems = (Array.isArray(event.items) ? event.items : []).filter(isBarAccountingItem);
   const lines = sourceItems.map((item) => ({
     item,
     accounting: calculateBarItemAccounting(item),

@@ -22,6 +22,7 @@ import {
 import {
   getPreparedBeverageRate,
   getPreparedBeverageType,
+  isBarAccountingItem,
   requiresBarReturn,
 } from '../utils/barPackoutScope.js';
 
@@ -827,7 +828,10 @@ router.post('/events/:id/submit', async (req, res) => {
     }
     if (event.status === 'closed') return res.status(409).json({ message: 'This event bar report is closed' });
     const unconfirmed = event.items.filter((item) => (
-      item.included !== false && requiresBarReturn(item) && item.returnConfirmed !== true
+      item.included !== false
+      && isBarAccountingItem(item)
+      && requiresBarReturn(item)
+      && item.returnConfirmed !== true
     ));
     if (unconfirmed.length) {
       return res.status(400).json({

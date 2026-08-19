@@ -63,7 +63,16 @@ export const guestEventNameSimilarity = (leftValue, rightValue) => {
   const rightTokens = new Set(right.split(' ').filter(Boolean));
   const sharedTokens = [...leftTokens].filter((token) => rightTokens.has(token)).length;
   const tokenScore = (2 * sharedTokens) / (leftTokens.size + rightTokens.size);
-  return Math.max(characterScore, tokenScore);
+  const queryCoverageScore = [...leftTokens].reduce((sum, queryToken) => {
+    const bestTokenScore = [...rightTokens].reduce((best, candidateToken) => {
+      const tokenScoreValue = 1 - (
+        levenshteinDistance(queryToken, candidateToken) / Math.max(queryToken.length, candidateToken.length)
+      );
+      return Math.max(best, tokenScoreValue);
+    }, 0);
+    return sum + bestTokenScore;
+  }, 0) / leftTokens.size;
+  return Math.max(characterScore, tokenScore, queryCoverageScore);
 };
 
 export const selectGuestEventNameMatch = (query, candidates, getName = (candidate) => candidate?.name) => {

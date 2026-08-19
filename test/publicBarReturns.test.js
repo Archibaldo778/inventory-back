@@ -16,6 +16,8 @@ test('guest returns PIN comparison accepts only an exact PIN', () => {
 
 test('guest event names match at sixty percent without exposing a list', () => {
   assert.equal(guestEventNameSimilarity('Valentino Soho', 'Valentino Soho Cocktail') >= 0.6, true);
+  assert.equal(guestEventNameSimilarity('Valentino', 'Valentino Soho Cocktail') >= 0.6, true);
+  assert.equal(guestEventNameSimilarity('Valentno', 'Valentino Soho Cocktail') >= 0.6, true);
   assert.equal(guestEventNameSimilarity('Van Clef Arpels', 'Van Cleef & Arpels') >= 0.6, true);
   assert.equal(guestEventNameSimilarity('Birthday', 'Valentino Soho Cocktail') >= 0.6, false);
   const result = selectGuestEventNameMatch('Valentino Soho', [
@@ -23,6 +25,20 @@ test('guest event names match at sixty percent without exposing a list', () => {
     { id: 'other', name: 'Van Cleef Dinner' },
   ]);
   assert.equal(result.match?.id, 'expected');
+});
+
+test('a unique first word can select an event but a shared first word stays ambiguous', () => {
+  const unique = selectGuestEventNameMatch('Valentino', [
+    { id: 'expected', name: 'Valentino Soho Cocktail' },
+    { id: 'other', name: 'Van Cleef Dinner' },
+  ]);
+  assert.equal(unique.match?.id, 'expected');
+  const ambiguous = selectGuestEventNameMatch('Valentino', [
+    { id: 'one', name: 'Valentino Soho Cocktail' },
+    { id: 'two', name: 'Valentino Madison Dinner' },
+  ]);
+  assert.equal(ambiguous.match, null);
+  assert.equal(ambiguous.ambiguous, true);
 });
 
 test('guest event lookup rejects ambiguous fuzzy matches', () => {

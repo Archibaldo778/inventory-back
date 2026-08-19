@@ -13,6 +13,7 @@ import {
 } from '../utils/barEventAccounting.js';
 import { normalizeBarEventDate } from '../utils/barEventDates.js';
 import { sendApiError } from '../utils/apiErrors.js';
+import { clearApiCacheGroups } from '../utils/apiCache.js';
 import { recognizeDocuments } from '../utils/googleDocumentAi.js';
 import {
   keepBarAccountingItems,
@@ -472,6 +473,147 @@ router.get('/events', async (req, res) => {
     return sendApiError(res, error, {
       context: 'Event bar reports list failed',
       fallbackMessage: 'Failed to list event bar reports',
+    });
+  }
+});
+
+router.get('/events/:id/link-candidates', requireBarManager, async (req, res) => {
+  try {
+    const event = await loadEvent(req, res);
+    if (!event) return undefined;
+    if (event.guestIntake?.pendingReview !== true) {
+      return res.status(409).json({ message: 'This report is not pending office review' });
+    }
+    const dashboardEvents = await Event.find({ status: { $not: /^deleted$/i } })
+      .select('title date client meta')
+      .sort({ createdAt: -1 })
+      .limit(500)
+      .lean();
+    const candidates = dashboardEvents
+      .filter((candidate) => normalizeBarEventDate(candidate.date) === event.eventDate)
+      .slice(0, 50)
+      .map((candidate) => ({
+        id: String(candidate._id),
+        title: cleanString(candidate.title, 240),
+        date: normalizeBarEventDate(candidate.date) || cleanString(candidate.date, 80),
+        client: cleanString(candidate.client, 180),
+        venue: eventVenue(candidate),
+      }));
+    return res.json({ candidates });
+  } catch (error) {
+    return sendApiError(res, error, {
+      context: 'Pending bar report candidates failed',
+      fallbackMessage: 'Failed to load matching dashboard events',
+    });
+  }
+});
+
+router.post('/events/:id/resolve-pending', requireBarManager, async (req, res) => {
+  try {
+    const event = await loadEvent(req, res);
+    if (!event) return undefined;
+    if (event.guestIntake?.pendingReview !== true) {
+      return res.status(409).json({ message: 'This report is not pending office review' });
+    }
+    const action = cleanString(req.body?.action, 40);
+    if (!['link', 'create', 'bar_only'].includes(action)) {
+      return res.status(400).json({ message: 'Choose how to resolve this pending report' });
+    }
+
+    let dashboardEvent = null;
+    if (action === 'link') {
+      if (!isObjectId(req.body?.eventId)) {
+        return res.status(400).json({ message: 'Choose a valid dashboard event' });
+      }
+      dashboardEvent = await Event.findById(req.body.eventId);
+      if (!dashboardEvent || /^deleted$/i.test(String(dashboardEvent.status || ''))) {
+        return res.status(404).json({ message: 'Dashboard event not found' });
+      }
+      if (normalizeBarEventDate(dashboardEvent.date) !== event.eventDate) {
+        return res.status(409).json({ message: 'The dashboard event date does not match this report' });
+      }
+    }
+
+    if (action === 'create') {
+      const existingDashboardEvents = await Event.find({ status: { $not: /^deleted$/i } })
+        .select('title date')
+        .limit(500)
+        .lean();
+      const duplicate = existingDashboardEvents.find((candidate) => (
+        normalizeBarEventDate(candidate.date) === event.eventDate
+        && normalizeCatalogName(candidate.title) === normalizeCatalogName(event.name)
+      ));
+      if (duplicate) {
+        return res.status(409).json({
+          message: 'A dashboard event with this name and date already exists. Link it instead.',
+          eventId: String(duplicate._id),
+        });
+      }
+      dashboardEvent = await Event.create({
+        title: event.name,
+        date: event.eventDate,
+        client: event.client || '',
+        status: 'draft',
+        meta: event.venue ? { venue: event.venue } : {},
+      });
+      clearApiCacheGroups('events');
+    }
+
+    if (action === 'bar_only') {
+      event.guestIntake.pendingReview = false;
+      event.revision += 1;
+      addAudit(event, req.auth, 'guest_report_approved_bar_only');
+      await event.save();
+      return res.json(serializeBarEvent(event, { includeFinancials: true }));
+    }
+
+    const linkedReport = await BarEvent.findOne({
+      linkedEventId: dashboardEvent._id,
+      _id: { $ne: event._id },
+    });
+    if (linkedReport) {
+      const linkedHasWork = linkedReport.items.length > 0
+        || Boolean(linkedReport.packout?.importedAt)
+        || Boolean(linkedReport.submittedAt);
+      if (linkedHasWork) {
+        return res.status(409).json({
+          message: 'The selected event already has a populated bar report. Review the two reports manually.',
+          barEventId: String(linkedReport._id),
+        });
+      }
+      linkedReport.items = event.items.map((item) => item.toObject());
+      linkedReport.packout = event.packout?.toObject ? event.packout.toObject() : event.packout;
+      linkedReport.status = event.status;
+      linkedReport.eventNumber = event.eventNumber || linkedReport.eventNumber;
+      linkedReport.submittedAt = event.submittedAt;
+      linkedReport.submittedBy = event.submittedBy;
+      linkedReport.guestIntake = {
+        ...(event.guestIntake?.toObject ? event.guestIntake.toObject() : event.guestIntake),
+        pendingReview: false,
+      };
+      linkedReport.audit = [...linkedReport.audit, ...event.audit].slice(-MAX_AUDIT_ENTRIES);
+      linkedReport.revision += 1;
+      addAudit(linkedReport, req.auth, 'guest_report_linked', {
+        sourceBarEventId: String(event._id),
+        linkedEventId: String(dashboardEvent._id),
+      });
+      await linkedReport.save();
+      await BarEvent.deleteOne({ _id: event._id });
+      return res.json(serializeBarEvent(linkedReport, { includeFinancials: true }));
+    }
+
+    event.linkedEventId = dashboardEvent._id;
+    event.guestIntake.pendingReview = false;
+    event.revision += 1;
+    addAudit(event, req.auth, action === 'create' ? 'guest_report_event_created' : 'guest_report_linked', {
+      linkedEventId: String(dashboardEvent._id),
+    });
+    await event.save();
+    return res.json(serializeBarEvent(event, { includeFinancials: true }));
+  } catch (error) {
+    return sendApiError(res, error, {
+      context: 'Pending bar report resolution failed',
+      fallbackMessage: 'Failed to resolve this pending report',
     });
   }
 });

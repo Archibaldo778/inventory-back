@@ -103,6 +103,13 @@ const canSeeBeverageCosts = (auth) => (
   isAdminAuth(auth) || normalizeRole(auth?.role) === 'bar admin'
 );
 
+const requireBeverageManager = (req, res, next) => {
+  if (!canSeeBeverageCosts(req.auth)) {
+    return res.status(403).json({ message: 'Beverage inventory manager access required' });
+  }
+  return next();
+};
+
 const buildInventoryFields = (body, { creating = false } = {}) => {
   const fields = {};
   const textFields = ['brand', 'sku', 'barcode', 'supplier', 'storageLocation'];
@@ -193,7 +200,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-router.post('/', upload.single('image'), async (req, res) => {
+router.post('/', requireBeverageManager, upload.single('image'), async (req, res) => {
   let uploadedImage = '';
   try {
     const body = req.body || {};
@@ -270,7 +277,7 @@ router.post('/', upload.single('image'), async (req, res) => {
   }
 });
 
-router.patch('/:id', upload.single('image'), async (req, res) => {
+router.patch('/:id', requireBeverageManager, upload.single('image'), async (req, res) => {
   let uploadedImage = '';
   try {
     const body = req.body || {};
@@ -408,7 +415,7 @@ router.get('/:id/movements', async (req, res) => {
   }
 });
 
-router.post('/:id/movements', async (req, res) => {
+router.post('/:id/movements', requireBeverageManager, async (req, res) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(String(req.params.id || ''))) {
       return res.status(400).json({ message: 'Invalid beverage item id' });
@@ -465,7 +472,7 @@ router.post('/:id/movements', async (req, res) => {
   }
 });
 
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireBeverageManager, async (req, res) => {
   try {
     const current = await BeverageItem.findById(req.params.id)
       .select('+stockOnHand +inventoryMovements');

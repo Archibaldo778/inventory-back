@@ -8,6 +8,7 @@ import { isAdminAuth, normalizeRole } from '../middleware/auth.js';
 import {
   calculateBarEventAccounting,
   calculateBarItemAccounting,
+  validateBarReturnQuantities,
 } from '../utils/barEventAccounting.js';
 import { normalizeBarEventDate } from '../utils/barEventDates.js';
 import { sendApiError } from '../utils/apiErrors.js';
@@ -297,6 +298,15 @@ const normalizeCatalogName = (value) => cleanString(value, 240)
   .replace(/[^a-z0-9]+/g, ' ')
   .trim();
 
+const resolveCatalogUnitCost = (item) => {
+  const purchaseCost = cleanNumber(item?.purchaseCost, { fallback: null });
+  const caseCost = cleanNumber(item?.caseCost, { fallback: null });
+  const caseSize = cleanNumber(item?.caseSize, { fallback: null, min: 1 });
+  if (purchaseCost !== null && purchaseCost > 0) return purchaseCost;
+  if (caseCost !== null && caseCost > 0 && caseSize) return caseCost / caseSize;
+  return purchaseCost ?? 0;
+};
+
 const resolveCatalog = async (items) => {
   const ids = [...new Set((Array.isArray(items) ? items : [])
     .map((item) => String(item?.beverageItemId || '').trim())
@@ -336,12 +346,7 @@ const normalizePackoutItems = async (items, { allowFinancials = false } = {}) =>
         || catalog.byName.get(normalizeCatalogName(item?.name))
         || null;
       const beverageItemId = catalogItem?._id || requestedCatalogId || null;
-      const catalogUnitCost = cleanNumber(catalogItem?.purchaseCost, {
-        fallback: (
-          cleanNumber(catalogItem?.caseCost, { fallback: 0 })
-          / (cleanNumber(catalogItem?.caseSize, { fallback: 1, min: 1 }) || 1)
-        ),
-      });
+      const catalogUnitCost = resolveCatalogUnitCost(catalogItem);
       const scope = BAR_ITEM_SCOPES.includes(cleanString(item?.scope, 30))
         ? cleanString(item.scope, 30)
         : 'review';
@@ -534,12 +539,17 @@ router.patch('/events/:id/items/:itemId', requireBarManager, async (req, res) =>
     if (!event) return undefined;
     const item = event.items.id(req.params.itemId);
     if (!item) return res.status(404).json({ message: 'Packout item not found' });
-    const catalogId = isObjectId(req.body?.beverageItemId) ? String(req.body.beverageItemId) : null;
+    const requestedCatalogValue = req.body?.beverageItemId;
+    const catalogId = isObjectId(requestedCatalogValue) ? String(requestedCatalogValue) : null;
     let catalogItem = null;
     if (catalogId) {
       catalogItem = await BeverageItem.findById(catalogId).select('+purchaseCost +caseCost');
       if (!catalogItem) return res.status(400).json({ message: 'Beverage catalog item not found' });
       item.beverageItemId = catalogItem._id;
+    } else if (requestedCatalogValue === null || requestedCatalogValue === '') {
+      item.beverageItemId = null;
+    } else if (requestedCatalogValue !== undefined) {
+      return res.status(400).json({ message: 'Invalid beverage catalog item id' });
     }
     if (req.body?.name !== undefined) item.name = cleanString(req.body.name, 240);
     if (!item.name) return res.status(400).json({ message: 'Item name is required' });
@@ -548,12 +558,15 @@ router.patch('/events/:id/items/:itemId', requireBarManager, async (req, res) =>
       item.scope = String(req.body.scope);
     }
     if (req.body?.included !== undefined) item.included = cleanBoolean(req.body.included, item.included);
-    if (req.body?.sentQty !== undefined) item.sentQty = cleanNumber(req.body.sentQty, { fallback: 0 });
+    if (req.body?.sentQty !== undefined) {
+      item.sentQty = cleanNumber(req.body.sentQty, { fallback: 0 });
+      if (req.body?.sentQtyText === undefined) item.sentQtyText = String(item.sentQty);
+    }
     if (req.body?.sentQtyText !== undefined) item.sentQtyText = cleanString(req.body.sentQtyText, 80);
     if (req.body?.deliveredQty !== undefined) item.deliveredQty = cleanNumber(req.body.deliveredQty, { fallback: null });
     if (req.body?.unitCostSnapshot !== undefined || catalogItem) {
       item.unitCostSnapshot = cleanNumber(req.body?.unitCostSnapshot, {
-        fallback: cleanNumber(catalogItem?.purchaseCost, { fallback: item.unitCostSnapshot }),
+        fallback: catalogItem ? resolveCatalogUnitCost(catalogItem) : item.unitCostSnapshot,
       });
     }
     if (req.body?.bottleSizeMl !== undefined || catalogItem) {
@@ -593,11 +606,33 @@ router.patch('/events/:id/items/:itemId/return', async (req, res) => {
     if (!isBarManager(req.auth) && item.returnConfirmed === true) {
       return res.status(409).json({ message: 'Returns for this item were already entered' });
     }
-    ['returnedFullQty', 'returnedOpenQty', 'lostDamagedQty'].forEach((field) => {
-      if (req.body?.[field] !== undefined) {
-        item[field] = cleanNumber(req.body[field], { fallback: 0 });
+    const returnFields = ['returnedFullQty', 'returnedOpenQty', 'lostDamagedQty'];
+    const nextReturnValues = {};
+    for (const field of returnFields) {
+      if (req.body?.[field] === undefined) {
+        nextReturnValues[field] = Number(item[field] || 0);
+        continue;
       }
+      const numeric = Number(req.body[field]);
+      if (!Number.isFinite(numeric) || numeric < 0) {
+        return res.status(400).json({ message: `${field} must be zero or greater` });
+      }
+      if (field === 'returnedFullQty' && !Number.isInteger(numeric)) {
+        return res.status(400).json({ message: 'Full returned quantity must be a whole number' });
+      }
+      nextReturnValues[field] = numeric;
+    }
+    const returnValidation = validateBarReturnQuantities({
+      ...item.toObject(),
+      ...nextReturnValues,
     });
+    if (!returnValidation.valid) {
+      return res.status(400).json({
+        message: returnValidation.message,
+        accounting: returnValidation.accounting,
+      });
+    }
+    Object.assign(item, nextReturnValues);
     if (req.body?.captainNotes !== undefined) {
       item.captainNotes = cleanString(req.body.captainNotes, 1000);
     }

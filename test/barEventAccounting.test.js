@@ -5,6 +5,7 @@ import User from '../models/Users.js';
 import {
   calculateBarEventAccounting,
   calculateBarItemAccounting,
+  validateBarReturnQuantities,
 } from '../utils/barEventAccounting.js';
 
 test('bar item accounting subtracts full and partial returned bottles', () => {
@@ -17,15 +18,61 @@ test('bar item accounting subtracts full and partial returned bottles', () => {
     }),
     {
       sentQty: 10,
+      deliveredQty: null,
+      outboundQty: 10,
       returnedFullQty: 3,
       returnedOpenQty: 0.5,
       returnedQty: 3.5,
+      lostDamagedQty: 0,
+      consumedQty: 6.5,
       usedQty: 6.5,
       overReturnedQty: 0,
+      overAccountedQty: 0,
       unitCost: 24,
       actualCost: 156,
     }
   );
+});
+
+test('bar item accounting uses delivered quantity and separates loss from consumption', () => {
+  assert.deepEqual(
+    calculateBarItemAccounting({
+      sentQty: 12,
+      deliveredQty: 10,
+      returnedFullQty: 6,
+      returnedOpenQty: 0.5,
+      lostDamagedQty: 1,
+      unitCostSnapshot: 20,
+    }),
+    {
+      sentQty: 12,
+      deliveredQty: 10,
+      outboundQty: 10,
+      returnedFullQty: 6,
+      returnedOpenQty: 0.5,
+      returnedQty: 6.5,
+      lostDamagedQty: 1,
+      consumedQty: 2.5,
+      usedQty: 3.5,
+      overReturnedQty: 0,
+      overAccountedQty: 0,
+      unitCost: 20,
+      actualCost: 70,
+    }
+  );
+});
+
+test('bar return validation rejects quantities that exceed the delivered amount', () => {
+  const result = validateBarReturnQuantities({
+    sentQty: 12,
+    deliveredQty: 10,
+    returnedFullQty: 9,
+    returnedOpenQty: 0.5,
+    lostDamagedQty: 1,
+  });
+  assert.equal(result.valid, false);
+  assert.equal(result.accounting.overAccountedQty, 0.5);
+  assert.match(result.message, /cannot exceed 10 sent/i);
 });
 
 test('bar event accounting uses included items and final client charge', () => {

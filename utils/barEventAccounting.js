@@ -3,6 +3,12 @@ const toNonNegativeNumber = (value, fallback = 0) => {
   return Number.isFinite(numeric) && numeric >= 0 ? numeric : fallback;
 };
 
+const toOptionalNonNegativeNumber = (value) => {
+  if (value === undefined || value === null || value === '') return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric >= 0 ? numeric : null;
+};
+
 const round = (value, precision = 4) => {
   const factor = 10 ** precision;
   return Math.round((Number(value) + Number.EPSILON) * factor) / factor;
@@ -10,23 +16,45 @@ const round = (value, precision = 4) => {
 
 export const calculateBarItemAccounting = (item = {}) => {
   const sentQty = toNonNegativeNumber(item.sentQty);
+  const deliveredQty = toOptionalNonNegativeNumber(item.deliveredQty);
+  const outboundQty = deliveredQty ?? sentQty;
   const returnedFullQty = toNonNegativeNumber(item.returnedFullQty);
   const returnedOpenQty = toNonNegativeNumber(item.returnedOpenQty);
+  const lostDamagedQty = toNonNegativeNumber(item.lostDamagedQty);
   const returnedQty = round(returnedFullQty + returnedOpenQty);
-  const usedQty = round(Math.max(0, sentQty - returnedQty));
-  const overReturnedQty = round(Math.max(0, returnedQty - sentQty));
+  const usedQty = round(Math.max(0, outboundQty - returnedQty));
+  const consumedQty = round(Math.max(0, outboundQty - returnedQty - lostDamagedQty));
+  const overReturnedQty = round(Math.max(0, returnedQty - outboundQty));
+  const overAccountedQty = round(Math.max(0, returnedQty + lostDamagedQty - outboundQty));
   const unitCost = toNonNegativeNumber(item.unitCostSnapshot);
   const actualCost = round(usedQty * unitCost, 2);
   return {
     sentQty,
+    deliveredQty,
+    outboundQty,
     returnedFullQty,
     returnedOpenQty,
     returnedQty,
+    lostDamagedQty,
+    consumedQty,
     usedQty,
     overReturnedQty,
+    overAccountedQty,
     unitCost,
     actualCost,
   };
+};
+
+export const validateBarReturnQuantities = (item = {}) => {
+  const accounting = calculateBarItemAccounting(item);
+  if (accounting.overAccountedQty > 0) {
+    return {
+      valid: false,
+      message: `Returns plus lost/damaged cannot exceed ${accounting.outboundQty} sent to the event`,
+      accounting,
+    };
+  }
+  return { valid: true, message: '', accounting };
 };
 
 export const calculateBarEventAccounting = (event = {}) => {

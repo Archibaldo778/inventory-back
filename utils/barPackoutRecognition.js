@@ -1,3 +1,9 @@
+import {
+  getPreparedBeverageRate,
+  getPreparedBeverageType,
+  isBarAccountingItem,
+} from './barPackoutScope.js';
+
 const cleanText = (value, maxLength = 500) => String(value ?? '')
   .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
   .replace(/[ \t\u00A0]+/g, ' ')
@@ -189,11 +195,21 @@ export const parseRecognizedPackout = ({ tables = [], text = '' } = {}) => {
     items.push(...fallback.items);
     sections.push(...fallback.sections);
   }
+  const accountingItems = items.filter(isBarAccountingItem).map((item) => {
+    const preparedBeverageType = getPreparedBeverageType(item);
+    return {
+      ...item,
+      includedByDefault: true,
+      preparedBeverageType,
+      returnRequired: !preparedBeverageType,
+      unitCostSnapshot: getPreparedBeverageRate(item) ?? undefined,
+    };
+  });
   return {
     metadata: parseMetadata(text),
     sections,
-    items,
-    packoutType: items.length ? inferPackoutType(items) : 'unknown',
+    items: accountingItems,
+    packoutType: accountingItems.length ? inferPackoutType(accountingItems) : 'unknown',
   };
 };
 
@@ -261,3 +277,16 @@ export const matchRecognizedItemsToCatalog = (items, catalog) => {
     };
   });
 };
+
+export const keepBarAccountingItems = (items) => (Array.isArray(items) ? items : [])
+  .filter(isBarAccountingItem)
+  .map((item) => {
+    const preparedBeverageType = getPreparedBeverageType(item);
+    return {
+      ...item,
+      includedByDefault: true,
+      preparedBeverageType,
+      returnRequired: !preparedBeverageType,
+      unitCostSnapshot: getPreparedBeverageRate(item) ?? item?.unitCostSnapshot,
+    };
+  });

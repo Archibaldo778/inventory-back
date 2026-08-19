@@ -15,9 +15,15 @@ import { normalizeBarEventDate } from '../utils/barEventDates.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import { recognizeDocuments } from '../utils/googleDocumentAi.js';
 import {
+  keepBarAccountingItems,
   matchRecognizedItemsToCatalog,
   parseRecognizedPackout,
 } from '../utils/barPackoutRecognition.js';
+import {
+  getPreparedBeverageRate,
+  getPreparedBeverageType,
+  requiresBarReturn,
+} from '../utils/barPackoutScope.js';
 
 const router = Router();
 const BAR_MANAGER_ROLES = new Set(['bar admin']);
@@ -399,8 +405,8 @@ const resolveCatalog = async (items) => {
   return { byId, byName };
 };
 
-const normalizePackoutItems = async (items, { allowFinancials = false } = {}) => {
-  const source = Array.isArray(items) ? items.slice(0, MAX_PACKOUT_ITEMS) : [];
+const normalizePackoutItems = async (items, { allowFinancials = false, guestCount = null } = {}) => {
+  const source = keepBarAccountingItems(Array.isArray(items) ? items.slice(0, MAX_PACKOUT_ITEMS) : []);
   const catalog = await resolveCatalog(source);
   return source
     .map((item) => {
@@ -413,7 +419,11 @@ const normalizePackoutItems = async (items, { allowFinancials = false } = {}) =>
       const scope = BAR_ITEM_SCOPES.includes(cleanString(item?.scope, 30))
         ? cleanString(item.scope, 30)
         : 'review';
-      const sentQty = cleanNumber(item?.sentQty ?? item?.quantity, { fallback: 0 });
+      const preparedBeverageType = getPreparedBeverageType(item);
+      const preparedRate = getPreparedBeverageRate(item);
+      const sentQty = cleanNumber(item?.sentQty ?? item?.quantity, {
+        fallback: preparedBeverageType ? cleanNumber(guestCount, { fallback: 0 }) : 0,
+      });
       return {
         beverageItemId,
         name: cleanString(item?.name || catalogItem?.name, 240),
@@ -426,12 +436,12 @@ const normalizePackoutItems = async (items, { allowFinancials = false } = {}) =>
         returnedFullQty: cleanNumber(item?.returnedFullQty, { fallback: 0 }),
         returnedOpenQty: cleanNumber(item?.returnedOpenQty, { fallback: 0 }),
         lostDamagedQty: cleanNumber(item?.lostDamagedQty, { fallback: 0 }),
-        returnConfirmed: cleanBoolean(item?.returnConfirmed, false),
-        unitCostSnapshot: allowFinancials
+        returnConfirmed: preparedBeverageType ? true : cleanBoolean(item?.returnConfirmed, false),
+        unitCostSnapshot: preparedRate ?? (allowFinancials
           ? cleanNumber(item?.unitCostSnapshot, {
             fallback: catalogUnitCost,
           })
-          : catalogUnitCost,
+          : catalogUnitCost),
         bottleSizeMl: cleanNumber(item?.bottleSizeMl, {
           fallback: cleanNumber(catalogItem?.bottleSizeMl, { fallback: null }),
         }),
@@ -560,8 +570,12 @@ router.post('/events/:id/packout/match', requireBarOperator, async (req, res) =>
     if (!manager && event.items.length > 0) {
       return res.status(409).json({ message: 'A packout already exists. Ask a bar admin to replace it.' });
     }
-    const sourceItems = Array.isArray(req.body?.items) ? req.body.items.slice(0, MAX_PACKOUT_ITEMS) : [];
-    if (!sourceItems.length) return res.status(400).json({ message: 'Packout items are required' });
+    const sourceItems = keepBarAccountingItems(
+      Array.isArray(req.body?.items) ? req.body.items.slice(0, MAX_PACKOUT_ITEMS) : []
+    );
+    if (!sourceItems.length) {
+      return res.status(422).json({ message: 'No alcohol, cocktails or mocktails were found in this packout' });
+    }
     const catalog = await BeverageItem.find({ active: { $ne: false } })
       .select('name aliases')
       .lean();
@@ -644,7 +658,13 @@ router.post('/events/:id/packout', async (req, res) => {
     if (sourceItems.length > MAX_PACKOUT_ITEMS) {
       return res.status(413).json({ message: `Packout is limited to ${MAX_PACKOUT_ITEMS} items` });
     }
-    event.items = await normalizePackoutItems(sourceItems, { allowFinancials: manager });
+    event.items = await normalizePackoutItems(sourceItems, {
+      allowFinancials: manager,
+      guestCount: event.guestCount,
+    });
+    if (!event.items.length) {
+      return res.status(422).json({ message: 'No alcohol, cocktails or mocktails were selected for this event' });
+    }
     const packoutType = ['general', 'bar_only', 'alcohol_only'].includes(String(req.body?.packoutType))
       ? String(req.body.packoutType)
       : 'unknown';
@@ -742,6 +762,9 @@ router.patch('/events/:id/items/:itemId/return', async (req, res) => {
     if (!item || item.included === false) {
       return res.status(404).json({ message: 'Packout item not found' });
     }
+    if (!requiresBarReturn(item)) {
+      return res.status(409).json({ message: 'Cocktails and mocktails are fixed event expenses and do not require returns' });
+    }
     if (!isBarManager(req.auth) && item.returnConfirmed === true) {
       return res.status(409).json({ message: 'Returns for this item were already entered' });
     }
@@ -803,7 +826,9 @@ router.post('/events/:id/submit', async (req, res) => {
       return res.status(403).json({ message: 'Bar operation access required' });
     }
     if (event.status === 'closed') return res.status(409).json({ message: 'This event bar report is closed' });
-    const unconfirmed = event.items.filter((item) => item.included !== false && item.returnConfirmed !== true);
+    const unconfirmed = event.items.filter((item) => (
+      item.included !== false && requiresBarReturn(item) && item.returnConfirmed !== true
+    ));
     if (unconfirmed.length) {
       return res.status(400).json({
         message: `Confirm returns for all items (${unconfirmed.length} remaining)`,

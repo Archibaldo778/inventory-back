@@ -54,7 +54,7 @@ const rows = [
   { name: 'Bench Sonoma Coast Pinot Noir', brand: 'Bench', category: 'Wine', subCategory: 'Red Wine', tiers: [tier2], aliases: ['Pinot Noir, Bench Sonoma Coast (Red)'] },
   { name: 'Vieux Château Saint André Bordeaux', brand: 'Vieux Château Saint André', category: 'Wine', subCategory: 'Red Wine', tiers: [tier2], aliases: ['Bordeaux, Vieux Chateau St Andre (Red)'] },
   { name: 'Domaines Ott By.Ott Rosé', brand: 'Domaines Ott', category: 'Wine', subCategory: 'Rosé Wine', tiers: [tier2], aliases: ['By Ott (Rosé)'] },
-  { name: 'Laurent-Perrier Champagne', brand: 'Laurent-Perrier', category: 'Wine', subCategory: 'Champagne', tiers: [tier2], aliases: ['Laurent Perrier'] },
+  { name: 'Laurent-Perrier Champagne', brand: 'Laurent-Perrier', category: 'Wine', subCategory: 'Champagne', tiers: [tier2], aliases: ['Laurent Perrier', 'Champagne, Laurent Perrier'] },
 ];
 
 const normalize = (value) => String(value || '')

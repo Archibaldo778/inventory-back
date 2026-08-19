@@ -31,6 +31,8 @@ test('bar item accounting subtracts full and partial returned bottles', () => {
       overAccountedQty: 0,
       unitCost: 24,
       actualCost: 156,
+      returnRequired: true,
+      preparedBeverageType: '',
     }
   );
 });
@@ -59,6 +61,8 @@ test('bar item accounting uses delivered quantity and separates loss from consum
       overAccountedQty: 0,
       unitCost: 20,
       actualCost: 70,
+      returnRequired: true,
+      preparedBeverageType: '',
     }
   );
 });
@@ -74,6 +78,48 @@ test('bar return validation rejects quantities that exceed the delivered amount'
   assert.equal(result.valid, false);
   assert.equal(result.accounting.overAccountedQty, 0.5);
   assert.match(result.message, /cannot exceed 10 sent/i);
+});
+
+test('cocktails and mocktails are fixed expenses that never require returns', () => {
+  const cocktail = calculateBarItemAccounting({
+    name: 'ARM IN ARM',
+    section: 'SPECIALTY COCKTAIL',
+    sentQty: 30,
+    returnedFullQty: 30,
+    unitCostSnapshot: 99,
+  });
+  const mocktail = calculateBarItemAccounting({
+    name: 'Garden Spritz',
+    section: 'MOCKTAIL',
+    sentQty: 20,
+  });
+
+  assert.equal(cocktail.returnRequired, false);
+  assert.equal(cocktail.returnedQty, 0);
+  assert.equal(cocktail.consumedQty, 30);
+  assert.equal(cocktail.unitCost, 3);
+  assert.equal(cocktail.actualCost, 90);
+  assert.equal(mocktail.returnRequired, false);
+  assert.equal(mocktail.unitCost, 1.5);
+  assert.equal(mocktail.actualCost, 30);
+});
+
+test('prepared beverages count toward event cost without blocking return submission', () => {
+  const totals = calculateBarEventAccounting({
+    clientCharge: 500,
+    items: [{
+      included: true,
+      name: 'ARM IN ARM',
+      section: 'SPECIALTY COCKTAIL',
+      sentQty: 30,
+      returnConfirmed: false,
+    }],
+  });
+
+  assert.equal(totals.inventoryCost, 90);
+  assert.equal(totals.grossProfit, 410);
+  assert.equal(totals.includedItemCount, 1);
+  assert.equal(totals.confirmedItemCount, 1);
 });
 
 test('bar package accounting applies event override, guests and overtime', () => {

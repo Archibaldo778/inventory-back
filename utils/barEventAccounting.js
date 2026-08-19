@@ -1,3 +1,9 @@
+import {
+  getPreparedBeverageRate,
+  getPreparedBeverageType,
+  requiresBarReturn,
+} from './barPackoutScope.js';
+
 const toNonNegativeNumber = (value, fallback = 0) => {
   const numeric = Number(value);
   return Number.isFinite(numeric) && numeric >= 0 ? numeric : fallback;
@@ -18,15 +24,17 @@ export const calculateBarItemAccounting = (item = {}) => {
   const sentQty = toNonNegativeNumber(item.sentQty);
   const deliveredQty = toOptionalNonNegativeNumber(item.deliveredQty);
   const outboundQty = deliveredQty ?? sentQty;
-  const returnedFullQty = toNonNegativeNumber(item.returnedFullQty);
-  const returnedOpenQty = toNonNegativeNumber(item.returnedOpenQty);
-  const lostDamagedQty = toNonNegativeNumber(item.lostDamagedQty);
+  const returnRequired = requiresBarReturn(item);
+  const preparedBeverageType = getPreparedBeverageType(item);
+  const returnedFullQty = returnRequired ? toNonNegativeNumber(item.returnedFullQty) : 0;
+  const returnedOpenQty = returnRequired ? toNonNegativeNumber(item.returnedOpenQty) : 0;
+  const lostDamagedQty = returnRequired ? toNonNegativeNumber(item.lostDamagedQty) : 0;
   const returnedQty = round(returnedFullQty + returnedOpenQty);
   const usedQty = round(Math.max(0, outboundQty - returnedQty));
   const consumedQty = round(Math.max(0, outboundQty - returnedQty - lostDamagedQty));
   const overReturnedQty = round(Math.max(0, returnedQty - outboundQty));
   const overAccountedQty = round(Math.max(0, returnedQty + lostDamagedQty - outboundQty));
-  const unitCost = toNonNegativeNumber(item.unitCostSnapshot);
+  const unitCost = getPreparedBeverageRate(item) ?? toNonNegativeNumber(item.unitCostSnapshot);
   const actualCost = round(usedQty * unitCost, 2);
   return {
     sentQty,
@@ -42,6 +50,8 @@ export const calculateBarItemAccounting = (item = {}) => {
     overAccountedQty,
     unitCost,
     actualCost,
+    returnRequired,
+    preparedBeverageType,
   };
 };
 
@@ -124,6 +134,8 @@ export const calculateBarEventAccounting = (event = {}) => {
     packageCharge: packageAccounting.totalCharge,
     packageAccounting,
     includedItemCount: includedLines.length,
-    confirmedItemCount: includedLines.filter(({ item }) => item?.returnConfirmed === true).length,
+    confirmedItemCount: includedLines.filter(({ item, accounting }) => (
+      !accounting.returnRequired || item?.returnConfirmed === true
+    )).length,
   };
 };

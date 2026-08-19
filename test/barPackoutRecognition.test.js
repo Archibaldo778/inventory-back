@@ -14,8 +14,14 @@ test('recognized Form Parser rows preserve sections and quantities', () => {
       bodyRows: [
         ['ALCOHOL', '', '', '', ''],
         ['Titos Vodka (1 L)', '4', '', '', ''],
+        ['COCKTAIL WINES', '', '', '', ''],
+        ['Sancerre, Romain Reverdy (White)', '16', '', '', ''],
         ['WATER', '', '', '', ''],
         ['Panna Water', '12', '', '', ''],
+        ['SPECIALTY COCKTAIL', '', '', '', ''],
+        ['ARM IN ARM', '30', '', '', ''],
+        ['GARNISH: Edible Flower', '30', '', '', ''],
+        ['Cocktail napkins', '200', '', '', ''],
         ['STAFF ITEMS', '', '', '', ''],
         ['Paper plates', '6', '', '', ''],
       ],
@@ -24,10 +30,12 @@ test('recognized Form Parser rows preserve sections and quantities', () => {
   assert.equal(result.items.length, 3);
   assert.deepEqual(result.items.map((item) => [item.name, item.quantity, item.scope]), [
     ['Titos Vodka (1 L)', 4, 'alcohol'],
-    ['Panna Water', 12, 'bar_support'],
-    ['Paper plates', 6, 'non_bar'],
+    ['Sancerre, Romain Reverdy (White)', 16, 'alcohol'],
+    ['ARM IN ARM', 30, 'bar_support'],
   ]);
-  assert.equal(result.packoutType, 'general');
+  assert.equal(result.items[2].returnRequired, false);
+  assert.equal(result.items[2].unitCostSnapshot, 3);
+  assert.equal(result.packoutType, 'bar_only');
   assert.equal(result.metadata.eventName, 'Sample Event');
 });
 

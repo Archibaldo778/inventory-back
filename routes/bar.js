@@ -552,6 +552,34 @@ router.patch('/events/:id', requireBarManager, async (req, res) => {
   }
 });
 
+router.post('/events/:id/packout/match', requireBarOperator, async (req, res) => {
+  try {
+    const event = await loadEvent(req, res);
+    if (!event) return undefined;
+    const manager = isBarManager(req.auth);
+    if (!manager && event.items.length > 0) {
+      return res.status(409).json({ message: 'A packout already exists. Ask a bar admin to replace it.' });
+    }
+    const sourceItems = Array.isArray(req.body?.items) ? req.body.items.slice(0, MAX_PACKOUT_ITEMS) : [];
+    if (!sourceItems.length) return res.status(400).json({ message: 'Packout items are required' });
+    const catalog = await BeverageItem.find({ active: { $ne: false } })
+      .select('name aliases')
+      .lean();
+    const items = matchRecognizedItemsToCatalog(sourceItems, catalog);
+    return res.json({
+      items,
+      matchedCount: items.filter((item) => item.beverageItemId).length,
+      suggestedCount: items.filter((item) => item.catalogMatch?.status === 'suggested').length,
+      unmatchedCount: items.filter((item) => item.catalogMatch?.status === 'unmatched').length,
+    });
+  } catch (error) {
+    return sendApiError(res, error, {
+      context: 'Bar packout inventory matching failed',
+      fallbackMessage: 'Packout inventory matching failed',
+    });
+  }
+});
+
 router.post(
   '/events/:id/packout/recognize',
   requireBarOperator,

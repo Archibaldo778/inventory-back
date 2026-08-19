@@ -202,7 +202,7 @@ test('old non-bar rows do not affect event totals', () => {
     clientCharge: 100,
     items: [
       { included: true, scope: 'alcohol', sentQty: 2, unitCostSnapshot: 10 },
-      { included: true, scope: 'bar_support', section: 'WATER', name: 'Panna Water', sentQty: 50, unitCostSnapshot: 5 },
+      { included: true, scope: 'bar_support', section: 'WATER', name: 'Generic Water', sentQty: 50, unitCostSnapshot: 5 },
       { included: true, scope: 'non_bar', section: 'STAFF ITEMS', name: 'Paper cups', sentQty: 100, unitCostSnapshot: 2 },
     ],
   });

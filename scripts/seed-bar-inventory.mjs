@@ -34,8 +34,8 @@ const rows = [
   { sku: 'BAR-WIN-001', name: 'Pinot Blanc Schlumberger', brand: 'Schlumberger', category: 'Wine', subCategory: 'White Wine', size: null, cost: 12.67, aliases: ['PINOT BLANC SCHLUMBERGER'] },
   { sku: 'BAR-WIN-002', name: 'Côtes du Rhône, Delas', brand: 'Delas', category: 'Wine', subCategory: 'Red Wine', size: null, cost: 9.67, aliases: ['COTES DU RHONE, DELAS', 'Cotes du Rhone Delas'] },
   { sku: 'BAR-SPK-001', name: 'FIOL Prosecco', brand: 'FIOL', category: 'Wine', subCategory: 'Sparkling Wine', size: null, cost: 14.00, aliases: ['PROSSECO FIOL', 'Prosecco Fiol'] },
-  { sku: 'BAR-WAT-001', name: 'Acqua Panna Water', brand: 'Acqua Panna', category: 'Water', subCategory: 'Still Water', size: null, cost: 2.55, aliases: ['PANNA WATER', 'Panna Water'] },
-  { sku: 'BAR-WAT-002', name: 'S.Pellegrino Sparkling Water', brand: 'S.Pellegrino', category: 'Water', subCategory: 'Sparkling Water', size: null, cost: 2.55, aliases: ['PELLIGRINO SPARKLING', 'Pellegrino Sparkling'] },
+  { sku: 'BAR-WAT-001', name: 'Acqua Panna Water', brand: 'Acqua Panna', category: 'Water', subCategory: 'Still Water', size: null, cost: 2.55, aliases: ['PANNA WATER', 'Panna Water', 'Panna'] },
+  { sku: 'BAR-WAT-002', name: 'S.Pellegrino Sparkling Water', brand: 'S.Pellegrino', category: 'Water', subCategory: 'Sparkling Water', size: null, cost: 2.55, aliases: ['PELLIGRINO SPARKLING', 'Pellegrino Sparkling', 'Pellegrino'] },
   { sku: 'BAR-SPC-001', name: 'Specialty Cocktail', brand: '', category: 'Specialty', subCategory: 'Cocktail', size: null, cost: 3.00, unitType: 'unit', aliases: ['COCKTAIL'] },
   { sku: 'BAR-SPC-002', name: 'Specialty Mocktail', brand: '', category: 'Specialty', subCategory: 'Mocktail', size: null, cost: 1.50, unitType: 'unit', aliases: ['MOCKTAIL'] },
 ];

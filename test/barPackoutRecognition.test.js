@@ -18,6 +18,8 @@ test('recognized Form Parser rows preserve sections and quantities', () => {
         ['Sancerre, Romain Reverdy (White)', '16', '', '', ''],
         ['WATER', '', '', '', ''],
         ['Panna Water', '12', '', '', ''],
+        ['Pellegrino', '18', '', '', ''],
+        ['Generic Water', '10', '', '', ''],
         ['SPECIALTY COCKTAIL', '', '', '', ''],
         ['ARM IN ARM', '30', '', '', ''],
         ['GARNISH: Edible Flower', '30', '', '', ''],
@@ -27,14 +29,16 @@ test('recognized Form Parser rows preserve sections and quantities', () => {
       ],
     }],
   });
-  assert.equal(result.items.length, 3);
+  assert.equal(result.items.length, 5);
   assert.deepEqual(result.items.map((item) => [item.name, item.quantity, item.scope]), [
     ['Titos Vodka (1 L)', 4, 'alcohol'],
     ['Sancerre, Romain Reverdy (White)', 16, 'alcohol'],
+    ['Panna Water', 12, 'bar_support'],
+    ['Pellegrino', 18, 'bar_support'],
     ['ARM IN ARM', 30, 'bar_support'],
   ]);
-  assert.equal(result.items[2].returnRequired, false);
-  assert.equal(result.items[2].unitCostSnapshot, 3);
+  assert.equal(result.items[4].returnRequired, false);
+  assert.equal(result.items[4].unitCostSnapshot, 3);
   assert.equal(result.packoutType, 'bar_only');
   assert.equal(result.metadata.eventName, 'Sample Event');
 });

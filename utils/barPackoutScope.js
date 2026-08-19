@@ -22,8 +22,14 @@ export const getPreparedBeverageRate = (item = {}) => (
   PREPARED_BEVERAGE_RATES[getPreparedBeverageType(item)] || null
 );
 
+export const isTrackedBarWater = (item = {}) => (
+  /\b(?:acqua\s+)?panna\b|\b(?:s\.?\s*)?pellegrino\b/i.test(String(item?.name || '').trim())
+);
+
 export const isBarAccountingItem = (item = {}) => (
-  String(item?.scope || '') === 'alcohol' || Boolean(getPreparedBeverageType(item))
+  String(item?.scope || '') === 'alcohol'
+  || isTrackedBarWater(item)
+  || Boolean(getPreparedBeverageType(item))
 );
 
 export const requiresBarReturn = (item = {}) => !getPreparedBeverageType(item);

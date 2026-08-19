@@ -80,6 +80,8 @@ const barEventSchema = new mongoose.Schema(
       priceUnit: { type: String, enum: BAR_PRICE_UNITS, default: 'flat' },
       additionalHourRate: { type: Number, default: 0, min: 0 },
       serviceHours: { type: Number, default: null, min: 0 },
+      includedHours: { type: Number, default: null, min: 0 },
+      pricingQuantity: { type: Number, default: null, min: 0 },
     },
     clientCharge: { type: Number, default: 0, min: 0 },
     currency: { type: String, default: 'USD', trim: true },

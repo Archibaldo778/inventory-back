@@ -5,6 +5,7 @@ import User from '../models/Users.js';
 import {
   calculateBarEventAccounting,
   calculateBarItemAccounting,
+  calculateBarPackageCharge,
   validateBarReturnQuantities,
 } from '../utils/barEventAccounting.js';
 
@@ -75,6 +76,33 @@ test('bar return validation rejects quantities that exceed the delivered amount'
   assert.match(result.message, /cannot exceed 10 sent/i);
 });
 
+test('bar package accounting applies event override, guests and overtime', () => {
+  assert.deepEqual(calculateBarPackageCharge({
+    guestCount: 100,
+    packageSnapshot: {
+      baseRate: 18,
+      overrideRate: 20,
+      priceUnit: 'per_person',
+      serviceHours: 7,
+      includedHours: 5,
+      additionalHourRate: 250,
+    },
+  }), {
+    priceUnit: 'per_person',
+    baseRate: 18,
+    overrideRate: 20,
+    effectiveRate: 20,
+    multiplier: 100,
+    baseCharge: 2000,
+    serviceHours: 7,
+    includedHours: 5,
+    additionalHours: 2,
+    additionalHourRate: 250,
+    overtimeCharge: 500,
+    totalCharge: 2500,
+  });
+});
+
 test('bar event accounting uses included items and final client charge', () => {
   const totals = calculateBarEventAccounting({
     clientCharge: 1000,
@@ -101,6 +129,21 @@ test('bar event accounting uses included items and final client charge', () => {
     clientCharge: 1000,
     grossProfit: 880,
     marginPercent: 88,
+    packageCharge: 0,
+    packageAccounting: {
+      priceUnit: 'flat',
+      baseRate: 0,
+      overrideRate: null,
+      effectiveRate: 0,
+      multiplier: 1,
+      baseCharge: 0,
+      serviceHours: 0,
+      includedHours: null,
+      additionalHours: 0,
+      additionalHourRate: 0,
+      overtimeCharge: 0,
+      totalCharge: 0,
+    },
     includedItemCount: 1,
     confirmedItemCount: 1,
   });

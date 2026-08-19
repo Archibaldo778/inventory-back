@@ -188,21 +188,27 @@ const normalizePackage = (value = {}, fallback = {}) => {
   const source = value && typeof value === 'object' ? value : {};
   const previous = fallback && typeof fallback === 'object' ? fallback : {};
   const priceUnitCandidate = cleanString(source.priceUnit ?? previous.priceUnit, 30);
+  const optionalNumber = (field) => {
+    if (Object.prototype.hasOwnProperty.call(source, field) && (source[field] === null || source[field] === '')) {
+      return null;
+    }
+    return cleanNumber(source[field], {
+      fallback: cleanNumber(previous[field], { fallback: null }),
+    });
+  };
   return {
     name: cleanString(source.name ?? previous.name, 160),
     baseRate: cleanNumber(source.baseRate, {
       fallback: cleanNumber(previous.baseRate, { fallback: 0 }),
     }),
-    overrideRate: cleanNumber(source.overrideRate, {
-      fallback: cleanNumber(previous.overrideRate, { fallback: null }),
-    }),
+    overrideRate: optionalNumber('overrideRate'),
     priceUnit: BAR_PRICE_UNITS.includes(priceUnitCandidate) ? priceUnitCandidate : 'flat',
     additionalHourRate: cleanNumber(source.additionalHourRate, {
       fallback: cleanNumber(previous.additionalHourRate, { fallback: 0 }),
     }),
-    serviceHours: cleanNumber(source.serviceHours, {
-      fallback: cleanNumber(previous.serviceHours, { fallback: null }),
-    }),
+    serviceHours: optionalNumber('serviceHours'),
+    includedHours: optionalNumber('includedHours'),
+    pricingQuantity: optionalNumber('pricingQuantity'),
   };
 };
 

@@ -32,6 +32,54 @@ const normalizedName = (value) => clean(value, 240).toLowerCase().normalize('NFK
   .replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
 const dedupeKey = (name, date) => `${normalizeBarEventDate(date)}:${normalizedName(name)}`;
 const ipKey = (req) => clean(req.ip || req.socket?.remoteAddress || 'unknown', 120);
+const MIN_EVENT_NAME_SIMILARITY = 0.6;
+const AMBIGUOUS_SCORE_GAP = 0.05;
+
+const levenshteinDistance = (left, right) => {
+  if (!left) return right.length;
+  if (!right) return left.length;
+  let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    const current = [leftIndex];
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      current[rightIndex] = Math.min(
+        current[rightIndex - 1] + 1,
+        previous[rightIndex] + 1,
+        previous[rightIndex - 1] + (left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1)
+      );
+    }
+    previous = current;
+  }
+  return previous[right.length];
+};
+
+export const guestEventNameSimilarity = (leftValue, rightValue) => {
+  const left = normalizedName(leftValue);
+  const right = normalizedName(rightValue);
+  if (!left || !right) return 0;
+  if (left === right) return 1;
+  const characterScore = 1 - (levenshteinDistance(left, right) / Math.max(left.length, right.length));
+  const leftTokens = new Set(left.split(' ').filter(Boolean));
+  const rightTokens = new Set(right.split(' ').filter(Boolean));
+  const sharedTokens = [...leftTokens].filter((token) => rightTokens.has(token)).length;
+  const tokenScore = (2 * sharedTokens) / (leftTokens.size + rightTokens.size);
+  return Math.max(characterScore, tokenScore);
+};
+
+export const selectGuestEventNameMatch = (query, candidates, getName = (candidate) => candidate?.name) => {
+  const unique = new Map();
+  (Array.isArray(candidates) ? candidates : []).forEach((candidate) => {
+    const key = normalizedName(getName(candidate));
+    if (key && !unique.has(key)) unique.set(key, candidate);
+  });
+  const ranked = [...unique.values()]
+    .map((candidate) => ({ candidate, score: guestEventNameSimilarity(query, getName(candidate)) }))
+    .filter((entry) => entry.score >= MIN_EVENT_NAME_SIMILARITY)
+    .sort((left, right) => right.score - left.score);
+  if (!ranked.length) return { match: null, ambiguous: false, score: 0 };
+  const ambiguous = ranked.length > 1 && (ranked[0].score - ranked[1].score) < AMBIGUOUS_SCORE_GAP;
+  return { match: ambiguous ? null : ranked[0].candidate, ambiguous, score: ranked[0].score };
+};
 
 const increment = (map, key) => {
   const now = Date.now();
@@ -151,22 +199,27 @@ const syncDashboardEvent = (event) => BarEvent.findOneAndUpdate(
 router.use(requirePin);
 router.post('/verify-pin', (_req, res) => res.json({ ok: true }));
 
-// Deliberately requires an exact normalized name and exact date; no public event listing.
+// The date must be exact. Names may fuzzy-match, but only one unambiguous event is returned.
 router.post('/find-event', async (req, res) => {
   try {
     const name = clean(req.body?.name, 240);
     const eventDate = normalizeBarEventDate(req.body?.eventDate);
-    if (name.length < 2 || !eventDate) return res.status(400).json({ message: 'Event name and date are required' });
-    const nameKey = normalizedName(name);
+    if (name.length < 3 || !eventDate) return res.status(400).json({ message: 'Enter at least 3 characters and an exact event date' });
     const reports = await BarEvent.find({ eventDate }).limit(100);
-    let event = reports.find((candidate) => normalizedName(candidate.name) === nameKey) || null;
+    const reportMatch = selectGuestEventNameMatch(name, reports);
+    if (reportMatch.ambiguous) {
+      return res.status(409).json({ message: 'More than one event has a similar name on this date. Enter more of the event name.' });
+    }
+    let event = reportMatch.match;
     if (!event) {
       const dashboardCandidates = await Event.find({ status: { $not: /^deleted$/i } })
         .select('title date client meta').limit(500).lean();
-      const dashboardEvent = dashboardCandidates.find((candidate) => (
-        normalizeBarEventDate(candidate.date) === eventDate && normalizedName(candidate.title) === nameKey
-      ));
-      if (dashboardEvent) event = await syncDashboardEvent(dashboardEvent);
+      const sameDate = dashboardCandidates.filter((candidate) => normalizeBarEventDate(candidate.date) === eventDate);
+      const dashboardMatch = selectGuestEventNameMatch(name, sameDate, (candidate) => candidate?.title);
+      if (dashboardMatch.ambiguous) {
+        return res.status(409).json({ message: 'More than one event has a similar name on this date. Enter more of the event name.' });
+      }
+      if (dashboardMatch.match) event = await syncDashboardEvent(dashboardMatch.match);
     }
     return res.json({ event: event ? publicEvent(event) : null });
   } catch (error) {

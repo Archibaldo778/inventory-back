@@ -51,11 +51,26 @@ const resolveSeeProposals = (source) => {
   return undefined;
 };
 
+const resolveSeeBarFinancials = (source) => {
+  if (!source || typeof source !== 'object') return undefined;
+  const candidates = [
+    source?.seeBarFinancials,
+    source?.canSeeBarFinancials,
+    source?.permissions?.seeBarFinancials,
+    source?.permissions?.barFinancials,
+  ];
+  for (const candidate of candidates) {
+    const parsed = toBool(candidate);
+    if (typeof parsed === 'boolean') return parsed;
+  }
+  return undefined;
+};
+
 const normalizeEmail = (value) => String(value || '').trim().toLowerCase();
 const isSuperAdminRole = (value) => normalizeRole(value) === 'super admin';
 const isSuperAdminAuth = (auth) => isSuperAdminRole(auth?.role);
 
-const buildPermissionsPayload = (sourcePermissions, seeProposals) => {
+const buildPermissionsPayload = (sourcePermissions, seeProposals, seeBarFinancials) => {
   const base =
     sourcePermissions && typeof sourcePermissions === 'object' && !Array.isArray(sourcePermissions)
       ? sourcePermissions
@@ -63,6 +78,7 @@ const buildPermissionsPayload = (sourcePermissions, seeProposals) => {
   return {
     ...base,
     seeProposals: Boolean(seeProposals),
+    seeBarFinancials: Boolean(seeBarFinancials),
   };
 };
 
@@ -71,6 +87,8 @@ const serializeUser = (source) => {
   const user = typeof source.toObject === 'function' ? source.toObject() : source;
   const seeProposals =
     typeof resolveSeeProposals(user) === 'boolean' ? resolveSeeProposals(user) : false;
+  const seeBarFinancials =
+    typeof resolveSeeBarFinancials(user) === 'boolean' ? resolveSeeBarFinancials(user) : false;
 
   return {
     id: user?._id || user?.id,
@@ -83,7 +101,9 @@ const serializeUser = (source) => {
     canSeeProposals: seeProposals,
     see_proposals: seeProposals,
     can_see_proposals: seeProposals,
-    permissions: buildPermissionsPayload(user?.permissions, seeProposals),
+    seeBarFinancials,
+    canSeeBarFinancials: seeBarFinancials,
+    permissions: buildPermissionsPayload(user?.permissions, seeProposals, seeBarFinancials),
     isActive: user?.isActive !== false,
     createdAt: user?.createdAt,
     updatedAt: user?.updatedAt,
@@ -118,7 +138,24 @@ const applyUserPayload = async (user, body, { allowPassword = false } = {}) => {
       ? user.permissions.toObject()
       : (user.permissions || {});
     user.seeProposals = nextSeeProposals;
-    user.permissions = buildPermissionsPayload(rawPermissions, nextSeeProposals);
+    user.permissions = buildPermissionsPayload(
+      rawPermissions,
+      nextSeeProposals,
+      typeof resolveSeeBarFinancials(user) === 'boolean' ? resolveSeeBarFinancials(user) : false
+    );
+  }
+
+  const nextSeeBarFinancials = resolveSeeBarFinancials(payload);
+  if (typeof nextSeeBarFinancials === 'boolean') {
+    const rawPermissions = user.permissions && typeof user.permissions.toObject === 'function'
+      ? user.permissions.toObject()
+      : (user.permissions || {});
+    user.seeBarFinancials = nextSeeBarFinancials;
+    user.permissions = buildPermissionsPayload(
+      rawPermissions,
+      typeof resolveSeeProposals(user) === 'boolean' ? resolveSeeProposals(user) : false,
+      nextSeeBarFinancials
+    );
   }
 
   if (allowPassword && typeof payload.password === 'string' && payload.password.trim()) {
@@ -269,13 +306,16 @@ router.post('/', async (req, res) => {
     const hash = await bcrypt.hash(password, 10);
     const nextSeeProposals =
       typeof resolveSeeProposals(body) === 'boolean' ? resolveSeeProposals(body) : false;
+    const nextSeeBarFinancials =
+      typeof resolveSeeBarFinancials(body) === 'boolean' ? resolveSeeBarFinancials(body) : false;
 
     const user = await User.create({
       username,
       email,
       role,
       seeProposals: nextSeeProposals,
-      permissions: buildPermissionsPayload(body?.permissions, nextSeeProposals),
+      seeBarFinancials: nextSeeBarFinancials,
+      permissions: buildPermissionsPayload(body?.permissions, nextSeeProposals, nextSeeBarFinancials),
       password: hash,
       isActive: typeof isActive === 'boolean' ? isActive : true,
     });
@@ -309,6 +349,8 @@ router.put('/:id/proposals', handleUpdateByPathId);
 router.patch('/:id/proposals', handleUpdateByPathId);
 router.put('/:id/see-proposals', handleUpdateByPathId);
 router.patch('/:id/see-proposals', handleUpdateByPathId);
+router.put('/:id/see-bar-financials', handleUpdateByPathId);
+router.patch('/:id/see-bar-financials', handleUpdateByPathId);
 
 // Смена пароля
 router.put('/:id/password', async (req, res) => {

@@ -27,8 +27,10 @@ const userSchema = new mongoose.Schema(
       default: 'user',
     },
     seeProposals: { type: Boolean, default: false },
+    seeBarFinancials: { type: Boolean, default: false },
     permissions: {
       seeProposals: { type: Boolean, default: false },
+      seeBarFinancials: { type: Boolean, default: false },
     },
     // Важно: именно "password", и скрываем по умолчанию при выборке
     password: { type: String, required: true, select: false },
@@ -38,7 +40,7 @@ const userSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-userSchema.pre('validate', function syncProposalVisibility(next) {
+userSchema.pre('validate', function syncPermissions(next) {
   const role = normalizeRole(this.role);
   this.role = role;
 
@@ -48,6 +50,8 @@ userSchema.pre('validate', function syncProposalVisibility(next) {
 
   const permissionsSeeProposals =
     typeof rawPermissions?.seeProposals === 'boolean' ? rawPermissions.seeProposals : undefined;
+  const permissionsSeeBarFinancials =
+    typeof rawPermissions?.seeBarFinancials === 'boolean' ? rawPermissions.seeBarFinancials : undefined;
 
   const nextSeeProposals =
     typeof this.seeProposals === 'boolean'
@@ -55,9 +59,15 @@ userSchema.pre('validate', function syncProposalVisibility(next) {
       : (typeof permissionsSeeProposals === 'boolean' ? permissionsSeeProposals : false);
 
   this.seeProposals = nextSeeProposals;
+  const nextSeeBarFinancials =
+    typeof this.seeBarFinancials === 'boolean'
+      ? this.seeBarFinancials
+      : (typeof permissionsSeeBarFinancials === 'boolean' ? permissionsSeeBarFinancials : false);
+  this.seeBarFinancials = nextSeeBarFinancials;
   this.permissions = {
     ...rawPermissions,
     seeProposals: nextSeeProposals,
+    seeBarFinancials: nextSeeBarFinancials,
   };
 
   next();

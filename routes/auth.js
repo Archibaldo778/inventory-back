@@ -67,18 +67,36 @@ function resolveSeeProposals(source) {
   return false;
 }
 
+function resolveSeeBarFinancials(source) {
+  if (!source || typeof source !== 'object') return false;
+  const candidates = [
+    source?.seeBarFinancials,
+    source?.canSeeBarFinancials,
+    source?.permissions?.seeBarFinancials,
+    source?.permissions?.barFinancials,
+  ];
+  for (const candidate of candidates) {
+    const parsed = toBool(candidate);
+    if (typeof parsed === 'boolean') return parsed;
+  }
+  return false;
+}
+
 function buildUserResponse(source) {
   const user = typeof source?.toObject === 'function' ? source.toObject() : (source || {});
   const seeProposals = resolveSeeProposals(user);
+  const seeBarFinancials = resolveSeeBarFinancials(user);
   return {
     id: String(user?._id || user?.id || ''),
     username: user?.username || '',
     email: user?.email || '',
     role: String(user?.role || '').trim().toLowerCase(),
     seeProposals,
+    seeBarFinancials,
     permissions: {
       ...(user?.permissions && typeof user.permissions === 'object' ? user.permissions : {}),
       seeProposals,
+      seeBarFinancials,
     },
     isActive: user?.isActive !== false,
   };
@@ -92,6 +110,8 @@ function buildTokenPayload(source) {
     username: user.username,
     email: user.email,
     seeProposals: user.seeProposals,
+    seeBarFinancials: user.seeBarFinancials,
+    permissions: user.permissions,
     tokenVersion: Number(source?.tokenVersion || 0),
   };
 }
@@ -206,7 +226,7 @@ router.post('/refresh', async (req, res) => {
 
   try {
     const user = await User.findById(data?.sub)
-      .select('_id username email role seeProposals permissions isActive +tokenVersion');
+      .select('_id username email role seeProposals seeBarFinancials permissions isActive +tokenVersion');
     if (!user) return res.status(401).json({ message: 'User not found' });
     if (user.isActive === false) return res.status(403).json({ message: 'User account is inactive' });
     if (Number(data?.tokenVersion || 0) !== Number(user.tokenVersion || 0)) {

@@ -61,11 +61,13 @@ test('requireAuth rejects refresh tokens and uses current database permissions',
       email: 'current@example.com',
       role: 'user',
       seeProposals: false,
-      permissions: { seeProposals: false },
+      seeBarFinancials: true,
+      permissions: { seeProposals: false, seeBarFinancials: true },
       isActive: true,
     });
     assert.equal(accepted.next, true);
     assert.equal(accepted.auth.role, 'user');
+    assert.equal(accepted.auth.permissions.seeBarFinancials, true);
 
     const revokedToken = jwt.sign(
       { sub: userId, role: 'user', tokenType: 'access', tokenVersion: 0 },

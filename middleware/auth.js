@@ -45,6 +45,21 @@ export const resolveSeeProposals = (source) => {
   return false;
 };
 
+export const resolveSeeBarFinancials = (source) => {
+  if (!source || typeof source !== 'object') return false;
+  const candidates = [
+    source?.seeBarFinancials,
+    source?.canSeeBarFinancials,
+    source?.permissions?.seeBarFinancials,
+    source?.permissions?.barFinancials,
+  ];
+  for (const candidate of candidates) {
+    const parsed = parseBoolean(candidate);
+    if (typeof parsed === 'boolean') return parsed;
+  }
+  return false;
+};
+
 export const getJwtSecret = () => {
   const secret = String(process.env.JWT_SECRET || '').trim();
   if (!secret) {
@@ -69,15 +84,18 @@ const getRequestToken = (req) => {
 
 const buildAuthContext = (payload) => {
   const seeProposals = resolveSeeProposals(payload);
+  const seeBarFinancials = resolveSeeBarFinancials(payload);
   return {
     userId: String(payload?.sub || payload?.userId || payload?.id || '').trim(),
     username: String(payload?.username || '').trim(),
     email: String(payload?.email || '').trim().toLowerCase(),
     role: normalizeRole(payload?.role),
     seeProposals,
+    seeBarFinancials,
     permissions: {
       ...(payload?.permissions && typeof payload.permissions === 'object' ? payload.permissions : {}),
       seeProposals,
+      seeBarFinancials,
     },
     tokenPayload: payload,
   };
@@ -86,6 +104,9 @@ const buildAuthContext = (payload) => {
 export const isAdminAuth = (auth) => ADMIN_ROLE_SET.has(normalizeRole(auth?.role));
 
 export const canAccessProposals = (auth) => isAdminAuth(auth) || resolveSeeProposals(auth);
+export const canSeeBarFinancials = (auth) => (
+  normalizeRole(auth?.role) === 'super admin' || resolveSeeBarFinancials(auth)
+);
 
 export const requireAuth = async (req, res, next) => {
   const token = getRequestToken(req);
@@ -110,7 +131,7 @@ export const requireAuth = async (req, res, next) => {
 
   try {
     const persistedUser = await User.findById(tokenAuth.userId)
-      .select('_id username email role seeProposals permissions isActive +tokenVersion')
+      .select('_id username email role seeProposals seeBarFinancials permissions isActive +tokenVersion')
       .lean();
     if (!persistedUser) {
       return res.status(401).json({ message: 'User not found' });
@@ -129,6 +150,7 @@ export const requireAuth = async (req, res, next) => {
       email: persistedUser.email,
       role: persistedUser.role,
       seeProposals: persistedUser.seeProposals,
+      seeBarFinancials: persistedUser.seeBarFinancials,
       permissions: persistedUser.permissions,
     });
     req.auth = auth;

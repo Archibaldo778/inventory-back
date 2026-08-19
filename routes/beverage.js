@@ -15,19 +15,22 @@ import {
 } from '../utils/beverageInventory.js';
 import { INVALID_IMAGE_UPLOAD_RESPONSE, isAllowedImageUpload } from '../utils/imageSignature.js';
 import { sendApiError } from '../utils/apiErrors.js';
-import { isAdminAuth, normalizeRole } from '../middleware/auth.js';
+import { canSeeBarFinancials, isAdminAuth, normalizeRole } from '../middleware/auth.js';
 
 const router = Router();
 const INVENTORY_MOVEMENT_TYPES = new Set(BEVERAGE_INVENTORY_MOVEMENT_TYPES);
 const INVENTORY_UNIT_TYPES = new Set(['bottle', 'can', 'keg', 'case', 'unit']);
 const INVENTORY_HISTORY_LIMIT = 200;
-const INVENTORY_MANAGER_SELECT = [
-  '+purchaseCost',
-  '+caseCost',
+const INVENTORY_OPERATION_SELECT = [
   '+supplier',
   '+stockOnHand',
   '+reorderLevel',
   '+lastInventoryAt',
+].join(' ');
+const INVENTORY_FINANCIAL_SELECT = [
+  '+purchaseCost',
+  '+caseCost',
+  INVENTORY_OPERATION_SELECT,
 ].join(' ');
 
 const __filename = fileURLToPath(import.meta.url);
@@ -99,12 +102,12 @@ const parsePositiveNumber = (value, fallback = undefined) => {
 
 const cleanInventoryText = (value, maxLength = 240) => sanitizeStr(value).slice(0, maxLength);
 
-const canSeeBeverageCosts = (auth) => (
+const isBeverageManager = (auth) => (
   isAdminAuth(auth) || normalizeRole(auth?.role) === 'bar admin'
 );
 
 const requireBeverageManager = (req, res, next) => {
-  if (!canSeeBeverageCosts(req.auth)) {
+  if (!isBeverageManager(req.auth)) {
     return res.status(403).json({ message: 'Beverage inventory manager access required' });
   }
   return next();
@@ -189,7 +192,8 @@ const normalizeCategories = (category, categories) => {
 router.get('/', async (req, res) => {
   try {
     const query = BeverageItem.find().sort({ createdAt: -1 });
-    if (canSeeBeverageCosts(req.auth)) query.select(INVENTORY_MANAGER_SELECT);
+    if (isBeverageManager(req.auth)) query.select(INVENTORY_OPERATION_SELECT);
+    if (canSeeBarFinancials(req.auth)) query.select(INVENTORY_FINANCIAL_SELECT);
     const items = await query;
     res.json(items);
   } catch (err) {
@@ -222,9 +226,7 @@ router.post('/', requireBeverageManager, upload.single('image'), async (req, res
       categories,
       tags: parseStringArray(body.tags),
       isAlcohol: parseBoolean(body.isAlcohol ?? body.is_alcohol) ?? false,
-      purchaseCost: parseNonNegativeNumber(body.purchaseCost ?? body.purchase_cost, 0),
       bottleSizeMl: parseNonNegativeNumber(body.bottleSizeMl ?? body.bottle_size_ml, null),
-      caseCost: parseNonNegativeNumber(body.caseCost ?? body.case_cost, null),
       caseSize: parsePositiveNumber(body.caseSize ?? body.case_size, null),
       ...inventoryFields,
       stockOnHand: initialStock,
@@ -235,9 +237,15 @@ router.post('/', requireBeverageManager, upload.single('image'), async (req, res
         note: 'Opening inventory',
         actorUserId: String(req.auth?.userId || ''),
         actorName: String(req.auth?.username || req.auth?.email || ''),
-        unitCostSnapshot: parseNonNegativeNumber(body.purchaseCost ?? body.purchase_cost, 0),
+        unitCostSnapshot: canSeeBarFinancials(req.auth)
+          ? parseNonNegativeNumber(body.purchaseCost ?? body.purchase_cost, 0)
+          : 0,
       }] : [],
     };
+    if (canSeeBarFinancials(req.auth)) {
+      payload.purchaseCost = parseNonNegativeNumber(body.purchaseCost ?? body.purchase_cost, 0);
+      payload.caseCost = parseNonNegativeNumber(body.caseCost ?? body.case_cost, null);
+    }
 
     if (req.file) {
       try {
@@ -266,7 +274,8 @@ router.post('/', requireBeverageManager, upload.single('image'), async (req, res
     }
 
     const created = await BeverageItem.create(payload);
-    const responseItem = await BeverageItem.findById(created._id).select(INVENTORY_MANAGER_SELECT);
+    const responseSelect = canSeeBarFinancials(req.auth) ? INVENTORY_FINANCIAL_SELECT : INVENTORY_OPERATION_SELECT;
+    const responseItem = await BeverageItem.findById(created._id).select(responseSelect);
     res.status(201).json(responseItem || created);
   } catch (err) {
     if (uploadedImage) await cleanupManagedImageSafely(uploadedImage, 'orphaned beverage image');
@@ -281,6 +290,12 @@ router.patch('/:id', requireBeverageManager, upload.single('image'), async (req,
   let uploadedImage = '';
   try {
     const body = req.body || {};
+    if (
+      (body.purchaseCost !== undefined || body.purchase_cost !== undefined || body.caseCost !== undefined || body.case_cost !== undefined)
+      && !canSeeBarFinancials(req.auth)
+    ) {
+      return res.status(403).json({ message: 'Bar financial access required' });
+    }
     const updates = {};
     const current = await BeverageItem.findById(req.params.id);
     if (!current) return res.status(404).json({ error: 'Not found' });
@@ -357,7 +372,7 @@ router.patch('/:id', requireBeverageManager, upload.single('image'), async (req,
     const updated = await BeverageItem.findByIdAndUpdate(req.params.id, updates, {
       new: true,
       runValidators: true,
-    }).select(INVENTORY_MANAGER_SELECT);
+    }).select(canSeeBarFinancials(req.auth) ? INVENTORY_FINANCIAL_SELECT : INVENTORY_OPERATION_SELECT);
     if (!updated) {
       if (uploadedImage) {
         await cleanupManagedImageSafely(uploadedImage, 'orphaned beverage image');
@@ -384,14 +399,14 @@ router.patch('/:id', requireBeverageManager, upload.single('image'), async (req,
 
 router.get('/:id/movements', async (req, res) => {
   try {
-    if (!canSeeBeverageCosts(req.auth)) {
+    if (!isBeverageManager(req.auth)) {
       return res.status(403).json({ message: 'Beverage inventory manager access required' });
     }
     if (!mongoose.Types.ObjectId.isValid(String(req.params.id || ''))) {
       return res.status(400).json({ message: 'Invalid beverage item id' });
     }
     const item = await BeverageItem.findById(req.params.id)
-      .select(`${INVENTORY_MANAGER_SELECT} +inventoryMovements name unitType`);
+      .select(`${canSeeBarFinancials(req.auth) ? INVENTORY_FINANCIAL_SELECT : INVENTORY_OPERATION_SELECT} +inventoryMovements name unitType`);
     if (!item) return res.status(404).json({ message: 'Beverage item not found' });
     const requestedLimit = Number(req.query.limit);
     const limit = Number.isFinite(requestedLimit)
@@ -399,7 +414,12 @@ router.get('/:id/movements', async (req, res) => {
       : 100;
     const movements = [...(item.inventoryMovements || [])]
       .sort((left, right) => new Date(right.at) - new Date(left.at))
-      .slice(0, limit);
+      .slice(0, limit)
+      .map((movement) => {
+        const next = movement?.toObject ? movement.toObject() : { ...movement };
+        if (!canSeeBarFinancials(req.auth)) delete next.unitCostSnapshot;
+        return next;
+      });
     return res.json({
       itemId: item._id,
       name: item.name,
@@ -437,7 +457,9 @@ router.post('/:id/movements', requireBeverageManager, async (req, res) => {
       note: cleanInventoryText(req.body?.note, 1000),
       actorUserId: String(req.auth?.userId || ''),
       actorName: String(req.auth?.username || req.auth?.email || ''),
-      unitCostSnapshot: parseNonNegativeNumber(req.body?.unitCostSnapshot, 0),
+      unitCostSnapshot: canSeeBarFinancials(req.auth)
+        ? parseNonNegativeNumber(req.body?.unitCostSnapshot, 0)
+        : 0,
       at: new Date(),
     };
     const filter = {
@@ -457,7 +479,7 @@ router.post('/:id/movements', requireBeverageManager, async (req, res) => {
         },
       },
       { new: true, runValidators: true }
-    ).select(INVENTORY_MANAGER_SELECT);
+    ).select(canSeeBarFinancials(req.auth) ? INVENTORY_FINANCIAL_SELECT : INVENTORY_OPERATION_SELECT);
     if (!updated) {
       const exists = await BeverageItem.exists({ _id: req.params.id });
       if (!exists) return res.status(404).json({ message: 'Beverage item not found' });

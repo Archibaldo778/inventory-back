@@ -5,7 +5,7 @@ import BarEvent, { BAR_EVENT_STATUSES, BAR_ITEM_SCOPES, BAR_PRICE_UNITS } from '
 import BarPackage from '../models/BarPackage.js';
 import BeverageItem from '../models/BeverageItem.js';
 import Event from '../models/Event.js';
-import { isAdminAuth, normalizeRole } from '../middleware/auth.js';
+import { canSeeBarFinancials, isAdminAuth, normalizeRole } from '../middleware/auth.js';
 import {
   calculateBarEventAccounting,
   calculateBarItemAccounting,
@@ -141,6 +141,13 @@ const serializeBarEvent = (source, { includeFinancials = false } = {}) => {
 
 const requireBarManager = (req, res, next) => {
   if (!isBarManager(req.auth)) return res.status(403).json({ message: 'Bar admin access required' });
+  return next();
+};
+
+const requireBarFinancials = (req, res, next) => {
+  if (!canSeeBarFinancials(req.auth)) {
+    return res.status(403).json({ message: 'Bar financial access required' });
+  }
   return next();
 };
 
@@ -300,7 +307,7 @@ const normalizePackageTemplate = (value = {}, fallback = {}) => {
   };
 };
 
-router.get('/packages', requireBarManager, async (_req, res) => {
+router.get('/packages', requireBarManager, requireBarFinancials, async (_req, res) => {
   try {
     const packages = await BarPackage.find().sort({ active: -1, name: 1 });
     return res.json(packages);
@@ -312,7 +319,7 @@ router.get('/packages', requireBarManager, async (_req, res) => {
   }
 });
 
-router.post('/packages', requireBarManager, async (req, res) => {
+router.post('/packages', requireBarManager, requireBarFinancials, async (req, res) => {
   try {
     const payload = normalizePackageTemplate(req.body);
     if (!payload.name) return res.status(400).json({ message: 'Package name is required' });
@@ -326,7 +333,7 @@ router.post('/packages', requireBarManager, async (req, res) => {
   }
 });
 
-router.patch('/packages/:packageId', requireBarManager, async (req, res) => {
+router.patch('/packages/:packageId', requireBarManager, requireBarFinancials, async (req, res) => {
   try {
     if (!isObjectId(req.params.packageId)) {
       return res.status(400).json({ message: 'Invalid bar package id' });
@@ -346,7 +353,7 @@ router.patch('/packages/:packageId', requireBarManager, async (req, res) => {
   }
 });
 
-router.delete('/packages/:packageId', requireBarManager, async (req, res) => {
+router.delete('/packages/:packageId', requireBarManager, requireBarFinancials, async (req, res) => {
   try {
     if (!isObjectId(req.params.packageId)) {
       return res.status(400).json({ message: 'Invalid bar package id' });
@@ -467,7 +474,7 @@ router.get('/events', async (req, res) => {
     }
     const events = await BarEvent.find(query).sort({ eventDate: -1, createdAt: -1 });
     return res.json(events.map((event) => serializeBarEvent(event, {
-      includeFinancials: isBarManager(req.auth),
+      includeFinancials: canSeeBarFinancials(req.auth),
     })));
   } catch (error) {
     return sendApiError(res, error, {
@@ -564,7 +571,7 @@ router.post('/events/:id/resolve-pending', requireBarManager, async (req, res) =
       event.revision += 1;
       addAudit(event, req.auth, 'guest_report_approved_bar_only');
       await event.save();
-      return res.json(serializeBarEvent(event, { includeFinancials: true }));
+      return res.json(serializeBarEvent(event, { includeFinancials: canSeeBarFinancials(req.auth) }));
     }
 
     const linkedReport = await BarEvent.findOne({
@@ -599,7 +606,7 @@ router.post('/events/:id/resolve-pending', requireBarManager, async (req, res) =
       });
       await linkedReport.save();
       await BarEvent.deleteOne({ _id: event._id });
-      return res.json(serializeBarEvent(linkedReport, { includeFinancials: true }));
+      return res.json(serializeBarEvent(linkedReport, { includeFinancials: canSeeBarFinancials(req.auth) }));
     }
 
     event.linkedEventId = dashboardEvent._id;
@@ -609,7 +616,7 @@ router.post('/events/:id/resolve-pending', requireBarManager, async (req, res) =
       linkedEventId: String(dashboardEvent._id),
     });
     await event.save();
-    return res.json(serializeBarEvent(event, { includeFinancials: true }));
+    return res.json(serializeBarEvent(event, { includeFinancials: canSeeBarFinancials(req.auth) }));
   } catch (error) {
     return sendApiError(res, error, {
       context: 'Pending bar report resolution failed',
@@ -630,7 +637,7 @@ router.get('/events/by-linked/:linkedEventId', async (req, res) => {
       return res.status(403).json({ message: 'Bar access required' });
     }
     return res.json(serializeBarEvent(event, {
-      includeFinancials: isBarManager(req.auth),
+      includeFinancials: canSeeBarFinancials(req.auth),
     }));
   } catch (error) {
     return sendApiError(res, error, {
@@ -648,7 +655,7 @@ router.get('/events/:id', async (req, res) => {
       return res.status(403).json({ message: 'Bar access required' });
     }
     return res.json(serializeBarEvent(event, {
-      includeFinancials: isBarManager(req.auth),
+      includeFinancials: canSeeBarFinancials(req.auth),
     }));
   } catch (error) {
     return sendApiError(res, error, {
@@ -660,6 +667,10 @@ router.get('/events/:id', async (req, res) => {
 
 router.patch('/events/:id', requireBarManager, async (req, res) => {
   try {
+    const financialFields = ['packageSnapshot', 'clientCharge', 'currency'];
+    if (financialFields.some((field) => req.body?.[field] !== undefined) && !canSeeBarFinancials(req.auth)) {
+      return res.status(403).json({ message: 'Bar financial access required' });
+    }
     const event = await loadEvent(req, res);
     if (!event) return undefined;
     const textFields = [
@@ -701,7 +712,7 @@ router.patch('/events/:id', requireBarManager, async (req, res) => {
     event.revision += 1;
     addAudit(event, req.auth, 'event_updated');
     await event.save();
-    return res.json(serializeBarEvent(event, { includeFinancials: true }));
+    return res.json(serializeBarEvent(event, { includeFinancials: canSeeBarFinancials(req.auth) }));
   } catch (error) {
     return sendApiError(res, error, {
       context: 'Event bar report update failed',
@@ -831,7 +842,7 @@ router.post('/events/:id/packout', async (req, res) => {
       packoutType,
     });
     await event.save();
-    return res.json(serializeBarEvent(event, { includeFinancials: manager }));
+    return res.json(serializeBarEvent(event, { includeFinancials: canSeeBarFinancials(req.auth) }));
   } catch (error) {
     return sendApiError(res, error, {
       context: 'Bar packout import failed',
@@ -842,6 +853,9 @@ router.post('/events/:id/packout', async (req, res) => {
 
 router.patch('/events/:id/items/:itemId', requireBarManager, async (req, res) => {
   try {
+    if (req.body?.unitCostSnapshot !== undefined && !canSeeBarFinancials(req.auth)) {
+      return res.status(403).json({ message: 'Bar financial access required' });
+    }
     const event = await loadEvent(req, res);
     if (!event) return undefined;
     const item = event.items.id(req.params.itemId);
@@ -887,7 +901,7 @@ router.patch('/events/:id/items/:itemId', requireBarManager, async (req, res) =>
     event.revision += 1;
     addAudit(event, req.auth, 'packout_item_updated', { itemId: String(item._id) });
     await event.save();
-    return res.json(serializeBarEvent(event, { includeFinancials: true }));
+    return res.json(serializeBarEvent(event, { includeFinancials: canSeeBarFinancials(req.auth) }));
   } catch (error) {
     return sendApiError(res, error, {
       context: 'Bar packout item update failed',
@@ -956,7 +970,7 @@ router.patch('/events/:id/items/:itemId/return', async (req, res) => {
     addAudit(event, req.auth, 'return_updated', { itemId: String(item._id) });
     await event.save();
     return res.json(serializeBarEvent(event, {
-      includeFinancials: isBarManager(req.auth),
+      includeFinancials: canSeeBarFinancials(req.auth),
     }));
   } catch (error) {
     return sendApiError(res, error, {
@@ -1035,7 +1049,7 @@ router.patch('/events/:id/returns', async (req, res) => {
     event.revision += 1;
     addAudit(event, req.auth, 'returns_batch_updated', { count: updates.length });
     await event.save();
-    return res.json(serializeBarEvent(event, { includeFinancials: manager }));
+    return res.json(serializeBarEvent(event, { includeFinancials: canSeeBarFinancials(req.auth) }));
   } catch (error) {
     return sendApiError(res, error, {
       context: 'Bar returns batch update failed',
@@ -1071,7 +1085,7 @@ router.post('/events/:id/submit', async (req, res) => {
     addAudit(event, req.auth, 'returns_submitted');
     await event.save();
     return res.json(serializeBarEvent(event, {
-      includeFinancials: isBarManager(req.auth),
+      includeFinancials: canSeeBarFinancials(req.auth),
     }));
   } catch (error) {
     return sendApiError(res, error, {
@@ -1091,7 +1105,7 @@ router.post('/events/:id/review', requireBarManager, async (req, res) => {
     event.revision += 1;
     addAudit(event, req.auth, event.status === 'closed' ? 'event_closed' : 'returns_reviewed');
     await event.save();
-    return res.json(serializeBarEvent(event, { includeFinancials: true }));
+    return res.json(serializeBarEvent(event, { includeFinancials: canSeeBarFinancials(req.auth) }));
   } catch (error) {
     return sendApiError(res, error, {
       context: 'Event bar report review failed',
@@ -1110,7 +1124,7 @@ router.post('/events/:id/reopen', requireBarManager, async (req, res) => {
     event.revision += 1;
     addAudit(event, req.auth, 'event_reopened');
     await event.save();
-    return res.json(serializeBarEvent(event, { includeFinancials: true }));
+    return res.json(serializeBarEvent(event, { includeFinancials: canSeeBarFinancials(req.auth) }));
   } catch (error) {
     return sendApiError(res, error, {
       context: 'Event bar report reopen failed',

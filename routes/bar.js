@@ -206,6 +206,19 @@ const eventGuestCount = (event) => cleanNumber(
   { fallback: null }
 );
 
+const eventSalesRep = (event) => cleanString(
+  event?.managerName
+  || event?.salesRepName
+  || event?.sales_rep_name
+  || event?.manager_name
+  || event?.salesRep
+  || event?.sales_rep
+  || event?.sales
+  || event?.manager
+  || event?.managerId,
+  180
+);
+
 const syncDashboardEventsToBar = async ({ eventId = null } = {}) => {
   const query = {
     status: { $not: /^deleted$/i },
@@ -215,7 +228,7 @@ const syncDashboardEventsToBar = async ({ eventId = null } = {}) => {
   if (!dashboardEvents.length) return [];
   const linkedIds = dashboardEvents.map((event) => event._id);
   const existingReports = await BarEvent.find({ linkedEventId: { $in: linkedIds } })
-    .select('linkedEventId name eventDate client venue guestCount guestCountSource')
+    .select('linkedEventId name eventDate client venue salesRep guestCount guestCountSource')
     .lean();
   const existingByEventId = new Map(
     existingReports.map((report) => [String(report.linkedEventId), report])
@@ -226,6 +239,7 @@ const syncDashboardEventsToBar = async ({ eventId = null } = {}) => {
       eventDate: normalizeBarEventDate(event.date) || cleanString(event.date, 80),
       client: cleanString(event.client, 180),
       venue: eventVenue(event),
+      salesRep: eventSalesRep(event),
     };
     const current = existingByEventId.get(String(event._id));
     const preserveBarGuestCount = ['manual', 'packout'].includes(String(current?.guestCountSource || ''));
@@ -238,6 +252,7 @@ const syncDashboardEventsToBar = async ({ eventId = null } = {}) => {
       && String(current.eventDate || '') === next.eventDate
       && String(current.client || '') === next.client
       && String(current.venue || '') === next.venue
+      && String(current.salesRep || '') === next.salesRep
       && (preserveBarGuestCount || (
         (current.guestCount ?? null) === next.guestCount
         && String(current.guestCountSource || 'dashboard') === next.guestCountSource

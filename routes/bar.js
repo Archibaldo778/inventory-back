@@ -14,6 +14,7 @@ import {
 import { normalizeBarEventDate } from '../utils/barEventDates.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import { clearApiCacheGroups } from '../utils/apiCache.js';
+import { cocktailServingsForGuests, resolveCocktailRecipeKey } from '../utils/cocktailRecipes.js';
 import { recognizeDocuments } from '../utils/googleDocumentAi.js';
 import {
   keepBarAccountingItems,
@@ -453,7 +454,13 @@ export const normalizePackoutItems = async (items, { allowFinancials = false, gu
         : 'review';
       const preparedBeverageType = getPreparedBeverageType(item);
       const preparedRate = getPreparedBeverageRate(item);
-      const sentQty = cleanNumber(item?.sentQty ?? item?.quantity, {
+      const cocktailServingsAuto = preparedBeverageType === 'cocktail'
+        ? cleanBoolean(item?.cocktailServingsAuto, true)
+        : false;
+      const automaticCocktailServings = cocktailServingsAuto
+        ? cocktailServingsForGuests(guestCount)
+        : null;
+      const sentQty = cleanNumber(automaticCocktailServings ?? item?.sentQty ?? item?.quantity, {
         fallback: preparedBeverageType ? cleanNumber(guestCount, { fallback: 0 }) : 0,
       });
       return {
@@ -480,6 +487,14 @@ export const normalizePackoutItems = async (items, { allowFinancials = false, gu
         }),
         notes: cleanString(item?.notes, 1000),
         captainNotes: cleanString(item?.captainNotes, 1000),
+        cocktailRecipeKey: cleanString(item?.cocktailRecipeKey, 80)
+          || (preparedBeverageType === 'cocktail' ? resolveCocktailRecipeKey(item?.name) : ''),
+        cocktailServingsAuto,
+        clientProvidedIngredients: (Array.isArray(item?.clientProvidedIngredients) ? item.clientProvidedIngredients : [])
+          .slice(0, 30)
+          .map((value) => cleanString(value, 120))
+          .filter(Boolean),
+        batchInstructions: cleanString(item?.batchInstructions, 2000),
       };
     })
     .filter((item) => item.name);
@@ -721,6 +736,12 @@ router.patch('/events/:id', requireBarManager, async (req, res) => {
     if (req.body?.guestCount !== undefined) {
       event.guestCount = cleanNumber(req.body.guestCount, { fallback: null });
       event.guestCountSource = 'manual';
+      event.items.forEach((item) => {
+        if (getPreparedBeverageType(item) === 'cocktail' && item.cocktailServingsAuto !== false) {
+          item.sentQty = cocktailServingsForGuests(event.guestCount);
+          item.sentQtyText = String(item.sentQty);
+        }
+      });
     }
     if (req.body?.packageSnapshot !== undefined) {
       event.packageSnapshot = normalizePackage(req.body.packageSnapshot, event.packageSnapshot);
@@ -919,6 +940,9 @@ router.patch('/events/:id/items/:itemId', requireBarManager, async (req, res) =>
     if (req.body?.sentQty !== undefined) {
       item.sentQty = cleanNumber(req.body.sentQty, { fallback: 0 });
       if (req.body?.sentQtyText === undefined) item.sentQtyText = String(item.sentQty);
+      if (getPreparedBeverageType(item) === 'cocktail' && req.body?.cocktailServingsAuto === undefined) {
+        item.cocktailServingsAuto = false;
+      }
     }
     if (req.body?.sentQtyText !== undefined) item.sentQtyText = cleanString(req.body.sentQtyText, 80);
     if (req.body?.deliveredQty !== undefined) item.deliveredQty = cleanNumber(req.body.deliveredQty, { fallback: null });
@@ -933,6 +957,21 @@ router.patch('/events/:id/items/:itemId', requireBarManager, async (req, res) =>
       });
     }
     if (req.body?.notes !== undefined) item.notes = cleanString(req.body.notes, 1000);
+    if (req.body?.cocktailRecipeKey !== undefined) item.cocktailRecipeKey = cleanString(req.body.cocktailRecipeKey, 80);
+    if (req.body?.cocktailServingsAuto !== undefined) {
+      item.cocktailServingsAuto = cleanBoolean(req.body.cocktailServingsAuto, item.cocktailServingsAuto);
+      if (item.cocktailServingsAuto && getPreparedBeverageType(item) === 'cocktail') {
+        item.sentQty = cocktailServingsForGuests(event.guestCount);
+        item.sentQtyText = String(item.sentQty);
+      }
+    }
+    if (req.body?.clientProvidedIngredients !== undefined) {
+      item.clientProvidedIngredients = (Array.isArray(req.body.clientProvidedIngredients) ? req.body.clientProvidedIngredients : [])
+        .slice(0, 30)
+        .map((value) => cleanString(value, 120))
+        .filter(Boolean);
+    }
+    if (req.body?.batchInstructions !== undefined) item.batchInstructions = cleanString(req.body.batchInstructions, 2000);
     item.updatedBy = String(req.auth?.username || req.auth?.email || '');
     item.updatedAt = new Date();
     event.revision += 1;

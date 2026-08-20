@@ -69,6 +69,11 @@ const barEventSchema = new mongoose.Schema(
     eventTiming: { type: String, default: '', trim: true },
     deliveryTime: { type: String, default: '', trim: true },
     guestCount: { type: Number, default: null, min: 0 },
+    guestCountSource: {
+      type: String,
+      enum: ['dashboard', 'packout', 'manual'],
+      default: 'dashboard',
+    },
     status: { type: String, enum: BAR_EVENT_STATUSES, default: 'draft', index: true },
     assignedUserIds: [{
       type: mongoose.Schema.Types.ObjectId,

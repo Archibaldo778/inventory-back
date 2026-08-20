@@ -215,7 +215,7 @@ const syncDashboardEventsToBar = async ({ eventId = null } = {}) => {
   if (!dashboardEvents.length) return;
   const linkedIds = dashboardEvents.map((event) => event._id);
   const existingReports = await BarEvent.find({ linkedEventId: { $in: linkedIds } })
-    .select('linkedEventId name eventDate client venue guestCount')
+    .select('linkedEventId name eventDate client venue guestCount guestCountSource')
     .lean();
   const existingByEventId = new Map(
     existingReports.map((report) => [String(report.linkedEventId), report])
@@ -226,15 +226,22 @@ const syncDashboardEventsToBar = async ({ eventId = null } = {}) => {
       eventDate: normalizeBarEventDate(event.date) || cleanString(event.date, 80),
       client: cleanString(event.client, 180),
       venue: eventVenue(event),
-      guestCount: eventGuestCount(event),
     };
     const current = existingByEventId.get(String(event._id));
+    const preserveBarGuestCount = ['manual', 'packout'].includes(String(current?.guestCountSource || ''));
+    if (!preserveBarGuestCount) {
+      next.guestCount = eventGuestCount(event);
+      next.guestCountSource = 'dashboard';
+    }
     const unchanged = current
       && String(current.name || '') === next.name
       && String(current.eventDate || '') === next.eventDate
       && String(current.client || '') === next.client
       && String(current.venue || '') === next.venue
-      && (current.guestCount ?? null) === next.guestCount;
+      && (preserveBarGuestCount || (
+        (current.guestCount ?? null) === next.guestCount
+        && String(current.guestCountSource || 'dashboard') === next.guestCountSource
+      ));
     if (unchanged) return [];
     return [{
     updateOne: {
@@ -692,6 +699,7 @@ router.patch('/events/:id', requireBarManager, async (req, res) => {
     if (!event.name) return res.status(400).json({ message: 'Event name is required' });
     if (req.body?.guestCount !== undefined) {
       event.guestCount = cleanNumber(req.body.guestCount, { fallback: null });
+      event.guestCountSource = 'manual';
     }
     if (req.body?.packageSnapshot !== undefined) {
       event.packageSnapshot = normalizePackage(req.body.packageSnapshot, event.packageSnapshot);
@@ -823,6 +831,7 @@ router.post('/events/:id/packout', async (req, res) => {
         return res.status(400).json({ message: 'Guest count must be a whole number of zero or greater' });
       }
       event.guestCount = guestCount;
+      event.guestCountSource = 'packout';
     }
     event.items = await normalizePackoutItems(sourceItems, {
       allowFinancials: manager,

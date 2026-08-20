@@ -319,6 +319,7 @@ router.post('/:eventId/packout', async (req, res) => {
         return res.status(400).json({ message: 'Guest count must be a whole number of zero or greater' });
       }
       event.guestCount = guestCount;
+      event.guestCountSource = 'packout';
     }
     event.items = await normalizePackoutItems(rows.map((row) => ({
       ...row,

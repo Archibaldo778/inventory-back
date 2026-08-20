@@ -4,6 +4,7 @@ import multer from 'multer';
 import BarEvent, { BAR_EVENT_STATUSES, BAR_ITEM_SCOPES, BAR_PRICE_UNITS } from '../models/BarEvent.js';
 import BarPackage from '../models/BarPackage.js';
 import BeverageItem from '../models/BeverageItem.js';
+import CocktailRecipe from '../models/CocktailRecipe.js';
 import Event from '../models/Event.js';
 import { canSeeBarFinancials, isAdminAuth, normalizeRole } from '../middleware/auth.js';
 import {
@@ -440,7 +441,10 @@ const resolveCatalog = async (items) => {
 
 export const normalizePackoutItems = async (items, { allowFinancials = false, guestCount = null } = {}) => {
   const source = keepBarAccountingItems(Array.isArray(items) ? items.slice(0, MAX_PACKOUT_ITEMS) : []);
-  const catalog = await resolveCatalog(source);
+  const [catalog, cocktailRecipes] = await Promise.all([
+    resolveCatalog(source),
+    CocktailRecipe.find({ active: { $ne: false } }).select('key name aliases').lean(),
+  ]);
   return source
     .map((item) => {
       const requestedCatalogId = isObjectId(item?.beverageItemId) ? String(item.beverageItemId) : null;
@@ -488,7 +492,7 @@ export const normalizePackoutItems = async (items, { allowFinancials = false, gu
         notes: cleanString(item?.notes, 1000),
         captainNotes: cleanString(item?.captainNotes, 1000),
         cocktailRecipeKey: cleanString(item?.cocktailRecipeKey, 80)
-          || (preparedBeverageType === 'cocktail' ? resolveCocktailRecipeKey(item?.name) : ''),
+          || (preparedBeverageType === 'cocktail' ? resolveCocktailRecipeKey(item?.name, cocktailRecipes) : ''),
         cocktailServingsAuto,
         clientProvidedIngredients: (Array.isArray(item?.clientProvidedIngredients) ? item.clientProvidedIngredients : [])
           .slice(0, 30)

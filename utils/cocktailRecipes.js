@@ -21,9 +21,16 @@ const normalize = (value) => String(value || '')
   .replace(/\s+/g, ' ')
   .trim();
 
-export const resolveCocktailRecipeKey = (value) => {
+export const resolveCocktailRecipeKey = (value, recipes = []) => {
   const source = normalize(value);
   if (!source) return '';
+  for (const recipe of recipes) {
+    const names = [recipe?.name, ...(Array.isArray(recipe?.aliases) ? recipe.aliases : [])];
+    if (names.some((name) => {
+      const candidate = normalize(name);
+      return candidate && (source === candidate || source.includes(candidate) || candidate.includes(source));
+    })) return String(recipe?.key || '');
+  }
   for (const [name, key] of COCKTAIL_RECIPE_NAMES) {
     if (source === name || source.includes(name)) return key;
   }
@@ -34,4 +41,3 @@ export const cocktailServingsForGuests = (guestCount) => {
   const guests = Number(guestCount);
   return Number.isFinite(guests) && guests > 0 ? Math.ceil(guests * 1.3) : 0;
 };
-

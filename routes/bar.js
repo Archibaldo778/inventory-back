@@ -212,7 +212,7 @@ const syncDashboardEventsToBar = async ({ eventId = null } = {}) => {
     ...(eventId && isObjectId(eventId) ? { _id: eventId } : {}),
   };
   const dashboardEvents = await Event.find(query).lean();
-  if (!dashboardEvents.length) return;
+  if (!dashboardEvents.length) return [];
   const linkedIds = dashboardEvents.map((event) => event._id);
   const existingReports = await BarEvent.find({ linkedEventId: { $in: linkedIds } })
     .select('linkedEventId name eventDate client venue guestCount guestCountSource')
@@ -261,6 +261,7 @@ const syncDashboardEventsToBar = async ({ eventId = null } = {}) => {
   if (operations.length) {
     await BarEvent.bulkWrite(operations, { ordered: false });
   }
+  return linkedIds;
 };
 
 const normalizePackage = (value = {}, fallback = {}) => {
@@ -474,8 +475,13 @@ router.get('/events', async (req, res) => {
     if (!isBarManager(req.auth) && !isBarWorker(req.auth) && !BAR_VIEWER_ROLES.has(normalizeRole(req.auth?.role))) {
       return res.status(403).json({ message: 'Bar access required' });
     }
-    await syncDashboardEventsToBar();
-    const query = {};
+    const activeDashboardEventIds = await syncDashboardEventsToBar();
+    const query = {
+      $or: [
+        { linkedEventId: { $in: activeDashboardEventIds } },
+        { linkedEventId: null },
+      ],
+    };
     if (req.query.status && BAR_EVENT_STATUSES.includes(String(req.query.status))) {
       query.status = String(req.query.status);
     }

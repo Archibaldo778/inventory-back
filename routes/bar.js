@@ -817,6 +817,13 @@ router.post('/events/:id/packout', async (req, res) => {
     if (sourceItems.length > MAX_PACKOUT_ITEMS) {
       return res.status(413).json({ message: `Packout is limited to ${MAX_PACKOUT_ITEMS} items` });
     }
+    if (req.body?.guestCount !== undefined && req.body.guestCount !== null) {
+      const guestCount = Number(req.body.guestCount);
+      if (!Number.isInteger(guestCount) || guestCount < 0) {
+        return res.status(400).json({ message: 'Guest count must be a whole number of zero or greater' });
+      }
+      event.guestCount = guestCount;
+    }
     event.items = await normalizePackoutItems(sourceItems, {
       allowFinancials: manager,
       guestCount: event.guestCount,

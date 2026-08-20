@@ -152,6 +152,9 @@ const publicItem = (item) => ({
   sentQty: Number(item?.sentQty || 0),
   sentQtyText: clean(item?.sentQtyText, 80),
   sentQtyPending: item?.sentQtyPending === true,
+  deliveredQty: item?.deliveredQty === null || item?.deliveredQty === undefined
+    ? null
+    : Number(item.deliveredQty),
   returnedQty: Number(item?.returnedFullQty || 0) + Number(item?.returnedOpenQty || 0),
   returnConfirmed: item?.returnConfirmed === true,
   returnRequired: item?.included !== false && requiresBarReturn(item),
@@ -163,6 +166,7 @@ const publicEvent = (event) => ({
   eventDate: clean(event?.eventDate, 80),
   venue: clean(event?.venue, 240),
   eventNumber: clean(event?.eventNumber, 80),
+  guestCount: Number.isFinite(Number(event?.guestCount)) ? Number(event.guestCount) : null,
   status: clean(event?.status, 40),
   pendingReview: event?.guestIntake?.pendingReview === true,
   hasPackout: Array.isArray(event?.items) && event.items.length > 0,
@@ -213,7 +217,7 @@ router.post('/find-event', async (req, res) => {
   try {
     const name = clean(req.body?.name, 240);
     const eventDate = normalizeBarEventDate(req.body?.eventDate);
-    if (name.length < 3 || !eventDate) return res.status(400).json({ message: 'Enter at least 3 characters and an exact event date' });
+    if (name.length < 2 || !eventDate) return res.status(400).json({ message: 'Enter at least 2 characters and an exact event date' });
     const reports = await BarEvent.find({ eventDate }).limit(100);
     const reportMatch = selectGuestEventNameMatch(name, reports);
     if (reportMatch.ambiguous) {
@@ -309,6 +313,13 @@ router.post('/:eventId/packout', async (req, res) => {
     if (event.items.length) return res.status(409).json({ message: 'This event already has a packout' });
     const rows = Array.isArray(req.body?.items) ? req.body.items.slice(0, MAX_ITEMS) : [];
     if (!rows.length) return res.status(400).json({ message: 'Add at least one item' });
+    if (req.body?.guestCount !== undefined && req.body.guestCount !== null) {
+      const guestCount = Number(req.body.guestCount);
+      if (!Number.isInteger(guestCount) || guestCount < 0) {
+        return res.status(400).json({ message: 'Guest count must be a whole number of zero or greater' });
+      }
+      event.guestCount = guestCount;
+    }
     event.items = await normalizePackoutItems(rows.map((row) => ({
       ...row,
       sentQty: Number(row?.sentQty ?? row?.quantity ?? row?.returnedQty ?? 0),
@@ -350,24 +361,32 @@ router.patch('/:eventId/returns', async (req, res) => {
     const updates = [];
     for (const item of required) {
       const row = byId.get(String(item._id));
+      const deliveredQty = Number(row?.deliveredQty);
       const returnedQty = Number(row?.returnedQty);
+      if (!row || !Number.isFinite(deliveredQty) || deliveredQty < 0) {
+        return res.status(400).json({ message: `Enter a valid received quantity for ${item.name}` });
+      }
       if (!row || !Number.isFinite(returnedQty) || returnedQty < 0) {
         return res.status(400).json({ message: `Enter a valid returned quantity for ${item.name}` });
       }
-      const pendingSentQty = item.sentQtyPending === true ? Math.max(Number(item.sentQty || 0), returnedQty) : Number(item.sentQty || 0);
+      const pendingSentQty = item.sentQtyPending === true
+        ? Math.max(Number(item.sentQty || 0), deliveredQty, returnedQty)
+        : Number(item.sentQty || 0);
       const validation = validateBarReturnQuantities({
         ...item.toObject(),
         sentQty: pendingSentQty,
+        deliveredQty,
         returnedFullQty: 0,
         returnedOpenQty: returnedQty,
         lostDamagedQty: 0,
       });
       if (!validation.valid) return res.status(400).json({ message: `${item.name}: ${validation.message}` });
-      updates.push({ item, returnedQty, pendingSentQty });
+      updates.push({ item, deliveredQty, returnedQty, pendingSentQty });
     }
     const now = new Date();
-    updates.forEach(({ item, returnedQty, pendingSentQty }) => {
+    updates.forEach(({ item, deliveredQty, returnedQty, pendingSentQty }) => {
       if (item.sentQtyPending === true) item.sentQty = pendingSentQty;
+      item.deliveredQty = deliveredQty;
       item.returnedFullQty = 0; item.returnedOpenQty = returnedQty; item.lostDamagedQty = 0;
       item.returnConfirmed = true; item.updatedBy = reporterName; item.updatedAt = now;
     });

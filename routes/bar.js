@@ -16,6 +16,7 @@ import { normalizeBarEventDate } from '../utils/barEventDates.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import { clearApiCacheGroups } from '../utils/apiCache.js';
 import { cocktailServingsForGuests, resolveCocktailRecipeKey } from '../utils/cocktailRecipes.js';
+import { barItemIdentityKey, mergeManualItemsWithPackout } from '../utils/barManualItems.js';
 import { recognizeDocuments } from '../utils/googleDocumentAi.js';
 import {
   keepBarAccountingItems,
@@ -499,6 +500,7 @@ export const normalizePackoutItems = async (items, { allowFinancials = false, gu
           .map((value) => cleanString(value, 120))
           .filter(Boolean),
         batchInstructions: cleanString(item?.batchInstructions, 2000),
+        entrySource: cleanString(item?.entrySource, 20) === 'manual' ? 'manual' : 'packout',
       };
     })
     .filter((item) => item.name);
@@ -780,7 +782,7 @@ router.post('/events/:id/packout/match', requireBarOperator, async (req, res) =>
     const event = await loadEvent(req, res);
     if (!event) return undefined;
     const manager = isBarManager(req.auth);
-    if (!manager && event.items.length > 0) {
+    if (!manager && event.items.some((item) => item.entrySource !== 'manual')) {
       return res.status(409).json({ message: 'A packout already exists. Ask a bar admin to replace it.' });
     }
     const sourceItems = keepBarAccountingItems(
@@ -817,7 +819,7 @@ router.post(
       const event = await loadEvent(req, res);
       if (!event) return undefined;
       const manager = isBarManager(req.auth);
-      if (!manager && event.items.length > 0) {
+      if (!manager && event.items.some((item) => item.entrySource !== 'manual')) {
         return res.status(409).json({ message: 'A packout already exists. Ask a bar admin to replace it.' });
       }
       const files = Array.isArray(req.files) ? req.files : [];
@@ -863,7 +865,7 @@ router.post('/events/:id/packout', async (req, res) => {
     if (!manager && !isBarWorker(req.auth)) {
       return res.status(403).json({ message: 'Bar operation access required' });
     }
-    if (!manager && event.items.length > 0) {
+    if (!manager && event.items.some((item) => item.entrySource !== 'manual')) {
       return res.status(409).json({ message: 'A packout already exists. Ask a bar admin to replace it.' });
     }
     const sourceItems = Array.isArray(req.body?.items) ? req.body.items : [];
@@ -879,10 +881,11 @@ router.post('/events/:id/packout', async (req, res) => {
       event.guestCount = guestCount;
       event.guestCountSource = 'packout';
     }
-    event.items = await normalizePackoutItems(sourceItems, {
+    const importedItems = await normalizePackoutItems(sourceItems.map((item) => ({ ...item, entrySource: 'packout' })), {
       allowFinancials: manager,
       guestCount: event.guestCount,
     });
+    event.items = mergeManualItemsWithPackout(event.items, importedItems);
     if (!event.items.length) {
       return res.status(422).json({ message: 'No alcohol, cocktails or mocktails were selected for this event' });
     }
@@ -909,6 +912,81 @@ router.post('/events/:id/packout', async (req, res) => {
     return sendApiError(res, error, {
       context: 'Bar packout import failed',
       fallbackMessage: 'Failed to import bar packout',
+    });
+  }
+});
+
+router.post('/events/:id/items', requireBarManager, async (req, res) => {
+  try {
+    const event = await loadEvent(req, res);
+    if (!event) return undefined;
+    if (event.status === 'closed') return res.status(409).json({ message: 'This event bar report is closed' });
+    const type = cleanString(req.body?.type, 30).toLowerCase();
+    const sentQty = cleanNumber(req.body?.sentQty, { fallback: null });
+    if (!['liquor', 'cocktail'].includes(type)) return res.status(400).json({ message: 'Choose liquor or specialty cocktail' });
+    if (sentQty === null) return res.status(400).json({ message: 'Quantity must be zero or greater' });
+    let item;
+    if (type === 'liquor') {
+      if (!canSeeBarFinancials(req.auth)) return res.status(403).json({ message: 'Bar financial access is required to add liquor' });
+      const beverageItemId = cleanString(req.body?.beverageItemId, 80);
+      if (!isObjectId(beverageItemId)) return res.status(400).json({ message: 'Choose a liquor inventory item' });
+      const catalogItem = await BeverageItem.findById(beverageItemId).select('+purchaseCost +caseCost');
+      if (!catalogItem || catalogItem.active === false) return res.status(400).json({ message: 'Liquor inventory item not found' });
+      const unitCostSnapshot = cleanNumber(req.body?.unitCostSnapshot, { fallback: null });
+      if (unitCostSnapshot === null) return res.status(400).json({ message: 'Enter the liquor cost per unit' });
+      item = {
+        beverageItemId: catalogItem._id,
+        name: catalogItem.name,
+        section: 'Manual Liquor',
+        scope: 'alcohol',
+        included: true,
+        sentQty,
+        sentQtyText: String(sentQty),
+        sentQtyPending: false,
+        deliveredQty: null,
+        returnConfirmed: false,
+        unitCostSnapshot,
+        bottleSizeMl: cleanNumber(catalogItem.bottleSizeMl, { fallback: null }),
+        cocktailServingsAuto: false,
+        entrySource: 'manual',
+      };
+    } else {
+      const cocktailRecipeKey = cleanString(req.body?.cocktailRecipeKey, 80);
+      const recipe = await CocktailRecipe.findOne({ key: cocktailRecipeKey, active: { $ne: false } });
+      if (!recipe) return res.status(400).json({ message: 'Choose a specialty cocktail recipe' });
+      item = {
+        name: recipe.name,
+        section: 'Cocktails',
+        scope: 'review',
+        included: true,
+        sentQty,
+        sentQtyText: String(sentQty),
+        sentQtyPending: false,
+        deliveredQty: null,
+        returnConfirmed: true,
+        unitCostSnapshot: 3,
+        cocktailRecipeKey: recipe.key,
+        cocktailServingsAuto: cleanBoolean(req.body?.cocktailServingsAuto, false),
+        batchInstructions: cleanString(req.body?.batchInstructions ?? recipe.instructions, 2000),
+        entrySource: 'manual',
+      };
+    }
+    const identity = barItemIdentityKey(item);
+    if (event.items.some((existing) => barItemIdentityKey(existing) === identity)) {
+      return res.status(409).json({ message: 'This product is already part of the event' });
+    }
+    item.updatedBy = String(req.auth?.username || req.auth?.email || '');
+    item.updatedAt = new Date();
+    event.items.push(item);
+    if (event.status === 'draft') event.status = 'ready';
+    event.revision += 1;
+    addAudit(event, req.auth, 'manual_item_added', { type, name: item.name });
+    await event.save();
+    return res.status(201).json(serializeBarEvent(event, { includeFinancials: canSeeBarFinancials(req.auth) }));
+  } catch (error) {
+    return sendApiError(res, error, {
+      context: 'Manual bar item creation failed',
+      fallbackMessage: 'Failed to add product to the event',
     });
   }
 });

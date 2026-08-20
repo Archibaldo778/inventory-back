@@ -40,6 +40,7 @@ const barPackoutItemSchema = new mongoose.Schema(
     cocktailServingsAuto: { type: Boolean, default: true },
     clientProvidedIngredients: [{ type: String, trim: true }],
     batchInstructions: { type: String, default: '', trim: true },
+    entrySource: { type: String, enum: ['packout', 'manual'], default: 'packout' },
     updatedBy: { type: String, default: '', trim: true },
     updatedAt: { type: Date, default: null },
   },

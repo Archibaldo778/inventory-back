@@ -12,6 +12,11 @@ const BAR_EVENT_STATUSES = [
 const BAR_ITEM_SCOPES = ['alcohol', 'bar_support', 'non_bar', 'review'];
 const BAR_PRICE_UNITS = ['per_person', 'per_hour', 'flat', 'per_unit'];
 
+const clientProvidedBottleSizeSchema = new mongoose.Schema({
+  ingredient: { type: String, required: true, trim: true },
+  bottleSizeMl: { type: Number, enum: [750, 1000], required: true },
+}, { _id: false });
+
 const barPackoutItemSchema = new mongoose.Schema(
   {
     beverageItemId: {
@@ -39,6 +44,7 @@ const barPackoutItemSchema = new mongoose.Schema(
     cocktailRecipeKey: { type: String, default: '', trim: true },
     cocktailServingsAuto: { type: Boolean, default: true },
     clientProvidedIngredients: [{ type: String, trim: true }],
+    clientProvidedBottleSizes: { type: [clientProvidedBottleSizeSchema], default: [] },
     batchInstructions: { type: String, default: '', trim: true },
     entrySource: { type: String, enum: ['packout', 'manual'], default: 'packout' },
     updatedBy: { type: String, default: '', trim: true },

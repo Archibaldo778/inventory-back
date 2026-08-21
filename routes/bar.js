@@ -13,7 +13,11 @@ import {
   validateBarReturnQuantities,
 } from '../utils/barEventAccounting.js';
 import { normalizeBarEventDate } from '../utils/barEventDates.js';
-import { normalizeBarEventNumber, prepareBarChargeImport } from '../utils/barChargeImport.js';
+import {
+  inferBarChargeDateRange,
+  normalizeBarEventNumber,
+  prepareBarChargeImport,
+} from '../utils/barChargeImport.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import { clearApiCacheGroups } from '../utils/apiCache.js';
 import { cocktailServingsForGuests, resolveCocktailRecipeKey } from '../utils/cocktailRecipes.js';
@@ -543,15 +547,18 @@ router.post('/events/charges/import', requireBarManager, async (req, res) => {
     if (!canSeeBarFinancials(req.auth)) {
       return res.status(403).json({ message: 'Bar financial access required' });
     }
-    const from = cleanString(req.body?.from, 10);
-    const to = cleanString(req.body?.to, 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) {
-      return res.status(400).json({ message: 'Choose a valid charge import date range' });
-    }
     const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
     if (!rows.length) return res.status(400).json({ message: 'No Caterease charge rows were provided' });
     if (rows.length > MAX_CHARGE_IMPORT_ROWS) {
       return res.status(413).json({ message: `Charge import is limited to ${MAX_CHARGE_IMPORT_ROWS} rows` });
+    }
+    const requestedFrom = cleanString(req.body?.from, 10);
+    const requestedTo = cleanString(req.body?.to, 10);
+    const inferredRange = inferBarChargeDateRange(rows);
+    const from = requestedFrom || inferredRange?.from || '';
+    const to = requestedTo || inferredRange?.to || '';
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) {
+      return res.status(400).json({ message: 'No valid Event Date range was found in the Caterease report' });
     }
 
     await syncDashboardEventsToBar();
@@ -561,7 +568,7 @@ router.post('/events/charges/import', requireBarManager, async (req, res) => {
     const preview = prepareBarChargeImport({ rows, events, from, to });
     const apply = cleanBoolean(req.body?.apply, false);
     if (!apply || !preview.importableRows.length) {
-      return res.json({ ...preview, importableRows: undefined, applied: 0 });
+      return res.json({ ...preview, importableRows: undefined, range: { from, to }, applied: 0 });
     }
 
     const sourceFileName = cleanString(req.body?.fileName, 240);
@@ -609,6 +616,7 @@ router.post('/events/charges/import', requireBarManager, async (req, res) => {
     return res.json({
       ...preview,
       importableRows: undefined,
+      range: { from, to },
       applied: result.modifiedCount || 0,
       summary: { ...preview.summary, applied: result.modifiedCount || 0 },
     });

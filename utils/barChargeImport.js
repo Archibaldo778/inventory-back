@@ -35,6 +35,14 @@ const normalizeRow = (row, index) => {
   };
 };
 
+export const inferBarChargeDateRange = (rows) => {
+  const dates = (Array.isArray(rows) ? rows : [])
+    .map((row) => String(row?.eventDate || '').trim())
+    .filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date))
+    .sort();
+  return dates.length ? { from: dates[0], to: dates[dates.length - 1] } : null;
+};
+
 const publicEvent = (event) => ({
   eventId: String(event?._id || event?.id || ''),
   eventNumber: String(event?.eventNumber || ''),

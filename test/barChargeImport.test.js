@@ -1,6 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { prepareBarChargeImport } from '../utils/barChargeImport.js';
+import { inferBarChargeDateRange, prepareBarChargeImport } from '../utils/barChargeImport.js';
+
+test('charge import date range is inferred from the workbook rows', () => {
+  assert.deepEqual(inferBarChargeDateRange([
+    { eventDate: '2026-08-09' },
+    { eventDate: 'invalid' },
+    { eventDate: '2026-08-04' },
+  ]), { from: '2026-08-04', to: '2026-08-09' });
+});
 
 test('charge preview matches by event number and ignores rows outside the selected dates', () => {
   const preview = prepareBarChargeImport({

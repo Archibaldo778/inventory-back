@@ -13,6 +13,7 @@ import {
   validateBarReturnQuantities,
 } from '../utils/barEventAccounting.js';
 import { normalizeBarEventDate } from '../utils/barEventDates.js';
+import { prepareBarChargeImport } from '../utils/barChargeImport.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import { clearApiCacheGroups } from '../utils/apiCache.js';
 import { cocktailServingsForGuests, resolveCocktailRecipeKey } from '../utils/cocktailRecipes.js';
@@ -35,6 +36,7 @@ const BAR_MANAGER_ROLES = new Set(['bar admin']);
 const BAR_WORKER_ROLES = new Set(['bar captain', 'bartender']);
 const BAR_VIEWER_ROLES = new Set(['user', 'manager', 'sales rep']);
 const MAX_PACKOUT_ITEMS = 500;
+const MAX_CHARGE_IMPORT_ROWS = 2_000;
 const MAX_AUDIT_ENTRIES = 200;
 const MAX_SCAN_FILES = 6;
 const MAX_SCAN_FILE_BYTES = 12 * 1024 * 1024;
@@ -131,6 +133,7 @@ const serializeBarEvent = (source, { includeFinancials = false } = {}) => {
       ? { name: event.packageSnapshot.name }
       : {};
     delete event.clientCharge;
+    delete event.clientChargeDetails;
     delete event.currency;
     delete event.audit;
     event.progress = {
@@ -231,20 +234,21 @@ const syncDashboardEventsToBar = async ({ eventId = null } = {}) => {
   if (!dashboardEvents.length) return [];
   const linkedIds = dashboardEvents.map((event) => event._id);
   const existingReports = await BarEvent.find({ linkedEventId: { $in: linkedIds } })
-    .select('linkedEventId name eventDate client venue salesRep guestCount guestCountSource')
+    .select('linkedEventId eventNumber name eventDate client venue salesRep guestCount guestCountSource')
     .lean();
   const existingByEventId = new Map(
     existingReports.map((report) => [String(report.linkedEventId), report])
   );
   const operations = dashboardEvents.flatMap((event) => {
+    const current = existingByEventId.get(String(event._id));
     const next = {
+      eventNumber: cleanString(event.externalId, 120) || cleanString(current?.eventNumber, 120),
       name: cleanString(event.title, 240) || 'Untitled event',
       eventDate: normalizeBarEventDate(event.date) || cleanString(event.date, 80),
       client: cleanString(event.client, 180),
       venue: eventVenue(event),
       salesRep: eventSalesRep(event),
     };
-    const current = existingByEventId.get(String(event._id));
     const preserveBarGuestCount = ['manual', 'packout'].includes(String(current?.guestCountSource || ''));
     if (!preserveBarGuestCount) {
       next.guestCount = eventGuestCount(event);
@@ -252,6 +256,7 @@ const syncDashboardEventsToBar = async ({ eventId = null } = {}) => {
     }
     const unchanged = current
       && String(current.name || '') === next.name
+      && String(current.eventNumber || '') === next.eventNumber
       && String(current.eventDate || '') === next.eventDate
       && String(current.client || '') === next.client
       && String(current.venue || '') === next.venue
@@ -533,6 +538,87 @@ router.get('/events', async (req, res) => {
   }
 });
 
+router.post('/events/charges/import', requireBarManager, async (req, res) => {
+  try {
+    if (!canSeeBarFinancials(req.auth)) {
+      return res.status(403).json({ message: 'Bar financial access required' });
+    }
+    const from = cleanString(req.body?.from, 10);
+    const to = cleanString(req.body?.to, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) {
+      return res.status(400).json({ message: 'Choose a valid charge import date range' });
+    }
+    const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
+    if (!rows.length) return res.status(400).json({ message: 'No Caterease charge rows were provided' });
+    if (rows.length > MAX_CHARGE_IMPORT_ROWS) {
+      return res.status(413).json({ message: `Charge import is limited to ${MAX_CHARGE_IMPORT_ROWS} rows` });
+    }
+
+    await syncDashboardEventsToBar();
+    const events = await BarEvent.find({ eventDate: { $gte: from, $lte: to } })
+      .select('_id eventNumber eventDate name client clientCharge')
+      .lean();
+    const preview = prepareBarChargeImport({ rows, events, from, to });
+    const apply = cleanBoolean(req.body?.apply, false);
+    if (!apply || !preview.importableRows.length) {
+      return res.json({ ...preview, importableRows: undefined, applied: 0 });
+    }
+
+    const sourceFileName = cleanString(req.body?.fileName, 240);
+    const importedAt = new Date();
+    const importedBy = cleanString(req.auth?.username || req.auth?.email, 180);
+    const operations = preview.importableRows.map((row) => ({
+      updateOne: {
+        filter: { _id: row.eventId, eventNumber: row.eventNumber, eventDate: row.eventDate },
+        update: {
+          $set: {
+            clientCharge: row.clientCharge,
+            currency: 'USD',
+            clientChargeDetails: {
+              beverageSubtotal: row.beverageSubtotal,
+              liquorSubtotal: row.liquorSubtotal,
+              source: 'caterease',
+              sourceFileName,
+              importedAt,
+              importedBy,
+            },
+          },
+          $inc: { revision: 1 },
+          $push: {
+            audit: {
+              $each: [{
+                action: 'caterease_charge_imported',
+                userId: String(req.auth?.userId || ''),
+                username: importedBy,
+                at: importedAt,
+                details: {
+                  beverageSubtotal: row.beverageSubtotal,
+                  liquorSubtotal: row.liquorSubtotal,
+                  clientCharge: row.clientCharge,
+                  sourceFileName,
+                },
+              }],
+              $slice: -MAX_AUDIT_ENTRIES,
+            },
+          },
+        },
+      },
+    }));
+    const result = await BarEvent.bulkWrite(operations, { ordered: false });
+    return res.json({
+      ...preview,
+      importableRows: undefined,
+      applied: result.modifiedCount || 0,
+      summary: { ...preview.summary, applied: result.modifiedCount || 0 },
+    });
+  } catch (error) {
+    return sendApiError(res, error, {
+      context: 'Caterease bar charge import failed',
+      fallbackMessage: 'Failed to import Caterease client charges',
+    });
+  }
+});
+
 router.get('/events/:id/link-candidates', requireBarManager, async (req, res) => {
   try {
     const event = await loadEvent(req, res);
@@ -758,6 +844,14 @@ router.patch('/events/:id', requireBarManager, async (req, res) => {
         return res.status(400).json({ message: 'Final client charge must be zero or greater' });
       }
       event.clientCharge = clientCharge;
+      event.clientChargeDetails = {
+        beverageSubtotal: null,
+        liquorSubtotal: null,
+        source: 'manual',
+        sourceFileName: '',
+        importedAt: null,
+        importedBy: '',
+      };
     }
     if (req.body?.currency !== undefined) {
       event.currency = cleanString(req.body.currency, 10) || 'USD';

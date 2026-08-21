@@ -95,6 +95,14 @@ const barEventSchema = new mongoose.Schema(
       pricingQuantity: { type: Number, default: null, min: 0 },
     },
     clientCharge: { type: Number, default: 0, min: 0 },
+    clientChargeDetails: {
+      beverageSubtotal: { type: Number, default: null, min: 0 },
+      liquorSubtotal: { type: Number, default: null, min: 0 },
+      source: { type: String, enum: ['manual', 'caterease'], default: 'manual' },
+      sourceFileName: { type: String, default: '', trim: true },
+      importedAt: { type: Date, default: null },
+      importedBy: { type: String, default: '', trim: true },
+    },
     currency: { type: String, default: 'USD', trim: true },
     packout: {
       fileName: { type: String, default: '', trim: true },

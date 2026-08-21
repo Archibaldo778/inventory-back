@@ -14,6 +14,9 @@ test('default cocktail recipes include bucket finalization instructions from ope
   const yuzuDream = DEFAULT_COCKTAIL_RECIPES.find((recipe) => recipe.key === 'yuzu-dream');
   assert.match(goldenNegroni.instructions, /20–30 seconds/);
   assert.match(yuzuDream.instructions, /Club Soda/);
+  for (const recipe of DEFAULT_COCKTAIL_RECIPES) {
+    assert.ok(recipe.instructions.trim(), `${recipe.name} is missing final instructions`);
+  }
 });
 
 test('cocktail production defaults to 1.3 portions per guest', () => {

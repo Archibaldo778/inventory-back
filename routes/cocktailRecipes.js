@@ -43,10 +43,26 @@ const cleanIngredients = (value) => parseArray(value).slice(0, 50).map((ingredie
 const cleanAliases = (value) => parseArray(value).slice(0, 50).map((alias) => clean(alias, 160)).filter(Boolean);
 const cleanKey = (value) => clean(value, 80).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 
+let defaultsEnsured = false;
 const ensureDefaults = async () => {
-  if (await CocktailRecipe.estimatedDocumentCount()) return;
-  try { await CocktailRecipe.insertMany(DEFAULT_COCKTAIL_RECIPES, { ordered: false }); }
-  catch (error) { if (error?.code !== 11000 && !error?.writeErrors?.every((entry) => entry?.code === 11000)) throw error; }
+  if (defaultsEnsured) return;
+  const operations = DEFAULT_COCKTAIL_RECIPES.flatMap((recipe) => [
+    {
+      updateOne: {
+        filter: { key: recipe.key },
+        update: { $setOnInsert: recipe },
+        upsert: true,
+      },
+    },
+    ...(recipe.instructions ? [{
+      updateOne: {
+        filter: { key: recipe.key, $or: [{ instructions: '' }, { instructions: null }, { instructions: { $exists: false } }] },
+        update: { $set: { instructions: recipe.instructions } },
+      },
+    }] : []),
+  ]);
+  await CocktailRecipe.bulkWrite(operations, { ordered: false });
+  defaultsEnsured = true;
 };
 const localUpload = async (file) => {
   const directory = path.join(__dirname, '..', 'uploads', 'cocktails');

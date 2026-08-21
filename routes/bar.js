@@ -83,15 +83,6 @@ const cleanBoolean = (value, fallback = false) => {
   if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
   return fallback;
 };
-const cleanClientBottleSizes = (value) => {
-  const sizes = new Map();
-  (Array.isArray(value) ? value : []).slice(0, 30).forEach((entry) => {
-    const ingredient = cleanString(entry?.ingredient, 120);
-    const bottleSizeMl = Number(entry?.bottleSizeMl);
-    if (ingredient && [750, 1000].includes(bottleSizeMl)) sizes.set(ingredient, bottleSizeMl);
-  });
-  return [...sizes].map(([ingredient, bottleSizeMl]) => ({ ingredient, bottleSizeMl }));
-};
 
 const isBarManager = (auth) => (
   isAdminAuth(auth) || BAR_MANAGER_ROLES.has(normalizeRole(auth?.role))
@@ -517,7 +508,6 @@ export const normalizePackoutItems = async (items, { allowFinancials = false, gu
           .slice(0, 30)
           .map((value) => cleanString(value, 120))
           .filter(Boolean),
-        clientProvidedBottleSizes: cleanClientBottleSizes(item?.clientProvidedBottleSizes),
         batchInstructions: cleanString(item?.batchInstructions, 2000),
         entrySource: cleanString(item?.entrySource, 20) === 'manual' ? 'manual' : 'packout',
       };
@@ -1204,9 +1194,6 @@ router.patch('/events/:id/items/:itemId', requireBarManager, async (req, res) =>
         .slice(0, 30)
         .map((value) => cleanString(value, 120))
         .filter(Boolean);
-    }
-    if (req.body?.clientProvidedBottleSizes !== undefined) {
-      item.clientProvidedBottleSizes = cleanClientBottleSizes(req.body.clientProvidedBottleSizes);
     }
     if (req.body?.batchInstructions !== undefined) item.batchInstructions = cleanString(req.body.batchInstructions, 2000);
     item.updatedBy = String(req.auth?.username || req.auth?.email || '');

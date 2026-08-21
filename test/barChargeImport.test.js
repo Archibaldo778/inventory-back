@@ -32,3 +32,23 @@ test('conflicting duplicate charges are never importable', () => {
   assert.equal(preview.summary.changes, 0);
   assert.equal(preview.rows[0].status, 'conflict');
 });
+
+test('an unnumbered event matches by exact normalized name and date and receives the source number', () => {
+  const preview = prepareBarChargeImport({
+    from: '2026-08-01',
+    to: '2026-08-31',
+    events: [{ _id: 'bar-2', eventNumber: '', eventDate: '2026-08-09', name: 'House of Dragon Dinner', clientCharge: 4800 }],
+    rows: [{
+      eventNumber: 'E22577',
+      eventDate: '2026-08-09',
+      partyName: 'House of Dragon Dinner ',
+      beverageSubtotal: 4800,
+      liquorSubtotal: 0,
+    }],
+  });
+  assert.equal(preview.summary.changes, 1);
+  assert.equal(preview.importableRows[0].eventId, 'bar-2');
+  assert.equal(preview.importableRows[0].matchMethod, 'name_date');
+  assert.equal(preview.importableRows[0].assignEventNumber, true);
+  assert.equal(preview.importableRows[0].sourceEventNumber, 'E22577');
+});

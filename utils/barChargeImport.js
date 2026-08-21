@@ -5,6 +5,13 @@ export const normalizeBarEventNumber = (value) => String(value || '')
   .toUpperCase()
   .replace(/\s+/g, '');
 
+const normalizeEventName = (value) => String(value || '')
+  .toLowerCase()
+  .replace(/&/g, ' and ')
+  .replace(/[^a-z0-9]+/g, ' ')
+  .replace(/\s+/g, ' ')
+  .trim();
+
 const money = (value) => {
   if (value === undefined || value === null || value === '') return null;
   const numeric = Number(value);
@@ -56,11 +63,20 @@ export const prepareBarChargeImport = ({ rows, events, from, to }) => {
   });
 
   const eventsByNumber = new Map();
+  const unnumberedEventsByNameDate = new Map();
   (Array.isArray(events) ? events : []).forEach((event) => {
     const key = normalizeBarEventNumber(event?.eventNumber);
-    if (!key) return;
-    if (!eventsByNumber.has(key)) eventsByNumber.set(key, []);
-    eventsByNumber.get(key).push(event);
+    if (key) {
+      if (!eventsByNumber.has(key)) eventsByNumber.set(key, []);
+      eventsByNumber.get(key).push(event);
+      return;
+    }
+    const name = normalizeEventName(event?.name);
+    const date = String(event?.eventDate || '');
+    if (!name || !date) return;
+    const nameDateKey = `${date}|${name}`;
+    if (!unnumberedEventsByNameDate.has(nameDateKey)) unnumberedEventsByNameDate.set(nameDateKey, []);
+    unnumberedEventsByNameDate.get(nameDateKey).push(event);
   });
 
   grouped.forEach((duplicates, eventNumber) => {
@@ -76,13 +92,25 @@ export const prepareBarChargeImport = ({ rows, events, from, to }) => {
       return;
     }
     const row = duplicates[0];
-    const matches = eventsByNumber.get(eventNumber) || [];
+    let matches = eventsByNumber.get(eventNumber) || [];
+    let matchMethod = 'event_number';
     if (!matches.length) {
-      resultRows.push({ ...row, status: 'unmatched', message: 'Event number was not found in Bar Events.' });
-      return;
+      const nameDateKey = `${row.eventDate}|${normalizeEventName(row.partyName)}`;
+      matches = unnumberedEventsByNameDate.get(nameDateKey) || [];
+      matchMethod = 'name_date';
+      if (!matches.length) {
+        resultRows.push({ ...row, status: 'unmatched', message: 'No Bar Event matched this Event # or exact name and date.' });
+        return;
+      }
     }
     if (matches.length > 1) {
-      resultRows.push({ ...row, status: 'conflict', message: 'More than one Bar Event has this event number.' });
+      resultRows.push({
+        ...row,
+        status: 'conflict',
+        message: matchMethod === 'event_number'
+          ? 'More than one Bar Event has this event number.'
+          : 'More than one unnumbered Bar Event has this name and date.',
+      });
       return;
     }
     const event = publicEvent(matches[0]);
@@ -96,13 +124,19 @@ export const prepareBarChargeImport = ({ rows, events, from, to }) => {
       });
       return;
     }
-    const status = event.currentCharge === row.clientCharge ? 'unchanged' : 'matched';
+    const assignEventNumber = !event.eventNumber && Boolean(row.eventNumber);
+    const status = event.currentCharge === row.clientCharge && !assignEventNumber ? 'unchanged' : 'matched';
     resultRows.push({
       ...row,
       ...event,
+      eventNumber: row.eventNumber,
       sourceEventNumber: row.eventNumber,
+      matchMethod,
+      assignEventNumber,
       status,
-      message: status === 'unchanged' ? 'Charge is already current.' : 'Ready to import.',
+      message: status === 'unchanged'
+        ? 'Charge is already current.'
+        : (assignEventNumber ? 'Matched by exact name and date; Event # will be assigned.' : 'Ready to import.'),
       duplicateCount: duplicates.length - 1,
     });
   });

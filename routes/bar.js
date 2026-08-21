@@ -13,7 +13,7 @@ import {
   validateBarReturnQuantities,
 } from '../utils/barEventAccounting.js';
 import { normalizeBarEventDate } from '../utils/barEventDates.js';
-import { prepareBarChargeImport } from '../utils/barChargeImport.js';
+import { normalizeBarEventNumber, prepareBarChargeImport } from '../utils/barChargeImport.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import { clearApiCacheGroups } from '../utils/apiCache.js';
 import { cocktailServingsForGuests, resolveCocktailRecipeKey } from '../utils/cocktailRecipes.js';
@@ -569,9 +569,10 @@ router.post('/events/charges/import', requireBarManager, async (req, res) => {
     const importedBy = cleanString(req.auth?.username || req.auth?.email, 180);
     const operations = preview.importableRows.map((row) => ({
       updateOne: {
-        filter: { _id: row.eventId, eventNumber: row.eventNumber, eventDate: row.eventDate },
+        filter: { _id: row.eventId, eventDate: row.eventDate },
         update: {
           $set: {
+            eventNumber: row.sourceEventNumber,
             clientCharge: row.clientCharge,
             currency: 'USD',
             clientChargeDetails: {
@@ -975,6 +976,8 @@ router.post('/events/:id/packout', async (req, res) => {
       event.guestCount = guestCount;
       event.guestCountSource = 'packout';
     }
+    const importedEventNumber = normalizeBarEventNumber(cleanString(req.body?.eventNumber, 120));
+    if (!event.eventNumber && importedEventNumber) event.eventNumber = importedEventNumber;
     const importedItems = await normalizePackoutItems(sourceItems.map((item) => ({ ...item, entrySource: 'packout' })), {
       allowFinancials: manager,
       guestCount: event.guestCount,

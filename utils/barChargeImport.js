@@ -45,6 +45,7 @@ export const inferBarChargeDateRange = (rows) => {
 
 const publicEvent = (event) => ({
   eventId: String(event?._id || event?.id || ''),
+  linkedEventId: String(event?.linkedEventId?._id || event?.linkedEventId || ''),
   eventNumber: String(event?.eventNumber || ''),
   eventDate: String(event?.eventDate || ''),
   eventName: String(event?.name || ''),

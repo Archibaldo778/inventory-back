@@ -45,7 +45,7 @@ test('an unnumbered event matches by exact normalized name and date and receives
   const preview = prepareBarChargeImport({
     from: '2026-08-01',
     to: '2026-08-31',
-    events: [{ _id: 'bar-2', eventNumber: '', eventDate: '2026-08-09', name: 'House of Dragon Dinner', clientCharge: 4800 }],
+    events: [{ _id: 'bar-2', linkedEventId: 'event-2', eventNumber: '', eventDate: '2026-08-09', name: 'House of Dragon Dinner', clientCharge: 4800 }],
     rows: [{
       eventNumber: 'E22577',
       eventDate: '2026-08-09',
@@ -56,6 +56,7 @@ test('an unnumbered event matches by exact normalized name and date and receives
   });
   assert.equal(preview.summary.changes, 1);
   assert.equal(preview.importableRows[0].eventId, 'bar-2');
+  assert.equal(preview.importableRows[0].linkedEventId, 'event-2');
   assert.equal(preview.importableRows[0].matchMethod, 'name_date');
   assert.equal(preview.importableRows[0].assignEventNumber, true);
   assert.equal(preview.importableRows[0].sourceEventNumber, 'E22577');

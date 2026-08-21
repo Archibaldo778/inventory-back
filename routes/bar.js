@@ -563,7 +563,7 @@ router.post('/events/charges/import', requireBarManager, async (req, res) => {
 
     await syncDashboardEventsToBar();
     const events = await BarEvent.find({ eventDate: { $gte: from, $lte: to } })
-      .select('_id eventNumber eventDate name client clientCharge')
+      .select('_id linkedEventId eventNumber eventDate name client clientCharge')
       .lean();
     const preview = prepareBarChargeImport({ rows, events, from, to });
     const apply = cleanBoolean(req.body?.apply, false);
@@ -613,6 +613,26 @@ router.post('/events/charges/import', requireBarManager, async (req, res) => {
       },
     }));
     const result = await BarEvent.bulkWrite(operations, { ordered: false });
+    const linkedEventOperations = preview.importableRows
+      .filter((row) => isObjectId(row.linkedEventId))
+      .map((row) => ({
+        updateOne: {
+          filter: {
+            _id: row.linkedEventId,
+            $or: [
+              { externalId: row.sourceEventNumber },
+              { externalId: '' },
+              { externalId: null },
+              { externalId: { $exists: false } },
+            ],
+          },
+          update: { $set: { externalId: row.sourceEventNumber } },
+        },
+      }));
+    if (linkedEventOperations.length) {
+      await Event.bulkWrite(linkedEventOperations, { ordered: false });
+      clearApiCacheGroups('events');
+    }
     return res.json({
       ...preview,
       importableRows: undefined,
@@ -985,7 +1005,19 @@ router.post('/events/:id/packout', async (req, res) => {
       event.guestCountSource = 'packout';
     }
     const importedEventNumber = normalizeBarEventNumber(cleanString(req.body?.eventNumber, 120));
-    if (!event.eventNumber && importedEventNumber) event.eventNumber = importedEventNumber;
+    const storedEventNumber = normalizeBarEventNumber(event.eventNumber);
+    if (importedEventNumber && storedEventNumber && importedEventNumber !== storedEventNumber) {
+      return res.status(409).json({ message: `PO Event # ${importedEventNumber} does not match this event (${storedEventNumber})` });
+    }
+    let linkedDashboardEvent = null;
+    if (importedEventNumber && isObjectId(event.linkedEventId)) {
+      linkedDashboardEvent = await Event.findById(event.linkedEventId).select('externalId');
+      const canonicalEventNumber = normalizeBarEventNumber(linkedDashboardEvent?.externalId);
+      if (canonicalEventNumber && canonicalEventNumber !== importedEventNumber) {
+        return res.status(409).json({ message: `PO Event # ${importedEventNumber} does not match the linked event (${canonicalEventNumber})` });
+      }
+    }
+    if (!storedEventNumber && importedEventNumber) event.eventNumber = importedEventNumber;
     const importedItems = await normalizePackoutItems(sourceItems.map((item) => ({ ...item, entrySource: 'packout' })), {
       allowFinancials: manager,
       guestCount: event.guestCount,
@@ -1012,6 +1044,11 @@ router.post('/events/:id/packout', async (req, res) => {
       packoutType,
     });
     await event.save();
+    if (linkedDashboardEvent && !normalizeBarEventNumber(linkedDashboardEvent.externalId) && importedEventNumber) {
+      linkedDashboardEvent.externalId = importedEventNumber;
+      await linkedDashboardEvent.save();
+      clearApiCacheGroups('events');
+    }
     return res.json(serializeBarEvent(event, { includeFinancials: canSeeBarFinancials(req.auth) }));
   } catch (error) {
     return sendApiError(res, error, {

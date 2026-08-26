@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildGuestEventDedupeKey,
+  buildGuestEventChoices,
   guestEventNameSimilarity,
   safeGuestReturnsPinEqual,
   selectGuestEventNameMatch,
@@ -14,7 +15,7 @@ test('guest returns PIN comparison accepts only an exact PIN', () => {
   assert.equal(safeGuestReturnsPinEqual('', '2468'), false);
 });
 
-test('guest event names match at sixty percent without exposing a list', () => {
+test('guest event names match at sixty percent', () => {
   assert.equal(guestEventNameSimilarity('Valentino Soho', 'Valentino Soho Cocktail') >= 0.6, true);
   assert.equal(guestEventNameSimilarity('Valentino', 'Valentino Soho Cocktail') >= 0.6, true);
   assert.equal(guestEventNameSimilarity('Valentno', 'Valentino Soho Cocktail') >= 0.6, true);
@@ -25,6 +26,18 @@ test('guest event names match at sixty percent without exposing a list', () => {
     { id: 'other', name: 'Van Cleef Dinner' },
   ]);
   assert.equal(result.match?.id, 'expected');
+});
+
+test('ambiguous guest lookup can show every event on the date without duplicating linked events', () => {
+  const choices = buildGuestEventChoices([
+    { _id: 'bar-one', linkedEventId: 'dashboard-one', name: 'Acme Dinner East', eventDate: '2026-08-26', venue: 'East Room' },
+    { _id: 'bar-two', name: 'Other Event', eventDate: '2026-08-26', venue: 'West Room' },
+  ], [
+    { _id: 'dashboard-one', title: 'Acme Dinner East', date: '2026-08-26', meta: { venue: 'East Room' } },
+    { _id: 'dashboard-two', title: 'Acme Dinner West', date: '2026-08-26', meta: { venue: 'West Room' } },
+  ]);
+  assert.deepEqual(choices.map((choice) => choice.name), ['Acme Dinner East', 'Acme Dinner West', 'Other Event']);
+  assert.equal(choices.filter((choice) => choice.name === 'Acme Dinner East').length, 1);
 });
 
 test('a unique first word can select an event but a shared first word stays ambiguous', () => {

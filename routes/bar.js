@@ -1058,10 +1058,13 @@ router.post('/events/:id/packout', async (req, res) => {
   }
 });
 
-router.post('/events/:id/items', requireBarManager, async (req, res) => {
+router.post('/events/:id/items', requireBarOperator, async (req, res) => {
   try {
     const event = await loadEvent(req, res);
     if (!event) return undefined;
+    if (!canOperateEvent(event, req.auth)) {
+      return res.status(403).json({ message: 'Bar operation access required' });
+    }
     if (event.status === 'closed') return res.status(409).json({ message: 'This event bar report is closed' });
     const type = cleanString(req.body?.type, 30).toLowerCase();
     const sentQty = cleanNumber(req.body?.sentQty, { fallback: null });
@@ -1069,16 +1072,25 @@ router.post('/events/:id/items', requireBarManager, async (req, res) => {
     if (sentQty === null) return res.status(400).json({ message: 'Quantity must be zero or greater' });
     let item;
     if (type === 'liquor') {
-      if (!canSeeBarFinancials(req.auth)) return res.status(403).json({ message: 'Bar financial access is required to add liquor' });
       const beverageItemId = cleanString(req.body?.beverageItemId, 80);
-      if (!isObjectId(beverageItemId)) return res.status(400).json({ message: 'Choose a liquor inventory item' });
-      const catalogItem = await BeverageItem.findById(beverageItemId).select('+purchaseCost +caseCost');
-      if (!catalogItem || catalogItem.active === false) return res.status(400).json({ message: 'Liquor inventory item not found' });
-      const unitCostSnapshot = cleanNumber(req.body?.unitCostSnapshot, { fallback: null });
-      if (unitCostSnapshot === null) return res.status(400).json({ message: 'Enter the liquor cost per unit' });
+      if (beverageItemId && !isObjectId(beverageItemId)) return res.status(400).json({ message: 'Invalid liquor inventory item' });
+      const catalogItem = beverageItemId
+        ? await BeverageItem.findById(beverageItemId).select('+purchaseCost +caseCost')
+        : null;
+      if (beverageItemId && (!catalogItem || catalogItem.active === false)) {
+        return res.status(400).json({ message: 'Liquor inventory item not found' });
+      }
+      const manualName = cleanString(req.body?.name, 240);
+      if (!catalogItem && manualName.length < 2) {
+        return res.status(400).json({ message: 'Choose an inventory item or enter the alcohol name' });
+      }
+      const requestedCost = canSeeBarFinancials(req.auth)
+        ? cleanNumber(req.body?.unitCostSnapshot, { fallback: null })
+        : null;
+      const unitCostSnapshot = requestedCost ?? (catalogItem ? resolveCatalogUnitCost(catalogItem) : 0);
       item = {
-        beverageItemId: catalogItem._id,
-        name: catalogItem.name,
+        beverageItemId: catalogItem?._id || null,
+        name: catalogItem?.name || manualName,
         section: 'Manual Liquor',
         scope: 'alcohol',
         included: true,
@@ -1088,11 +1100,14 @@ router.post('/events/:id/items', requireBarManager, async (req, res) => {
         deliveredQty: null,
         returnConfirmed: false,
         unitCostSnapshot,
-        bottleSizeMl: cleanNumber(catalogItem.bottleSizeMl, { fallback: null }),
+        bottleSizeMl: cleanNumber(catalogItem?.bottleSizeMl, { fallback: null }),
         cocktailServingsAuto: false,
         entrySource: 'manual',
       };
     } else {
+      if (!isBarManager(req.auth)) {
+        return res.status(403).json({ message: 'Bar admin access is required to add specialty cocktails' });
+      }
       const cocktailRecipeKey = cleanString(req.body?.cocktailRecipeKey, 80);
       const recipe = await CocktailRecipe.findOne({ key: cocktailRecipeKey, active: { $ne: false } });
       if (!recipe) return res.status(400).json({ message: 'Choose a specialty cocktail recipe' });
@@ -1196,10 +1211,36 @@ router.patch('/events/:id/items/:itemId', requireBarManager, async (req, res) =>
         .filter(Boolean);
     }
     if (req.body?.batchInstructions !== undefined) item.batchInstructions = cleanString(req.body.batchInstructions, 2000);
+    if (req.body?.prepTask !== undefined) {
+      const requestedTask = req.body.prepTask && typeof req.body.prepTask === 'object'
+        ? req.body.prepTask
+        : {};
+      const scheduledDate = cleanString(requestedTask.scheduledDate, 10);
+      if (scheduledDate && !/^\d{4}-\d{2}-\d{2}$/.test(scheduledDate)) {
+        return res.status(400).json({ message: 'Prep date must use YYYY-MM-DD format' });
+      }
+      const username = String(req.auth?.username || req.auth?.email || '');
+      const previousDate = String(item.prepTask?.scheduledDate || '');
+      item.prepTask.scheduledDate = scheduledDate;
+      if (!scheduledDate) {
+        item.prepTask.scheduledAt = null;
+        item.prepTask.scheduledBy = '';
+        item.prepTask.completedAt = null;
+        item.prepTask.completedBy = '';
+      } else {
+        if (scheduledDate !== previousDate || !item.prepTask.scheduledAt) {
+          item.prepTask.scheduledAt = new Date();
+          item.prepTask.scheduledBy = username;
+        }
+        const completed = cleanBoolean(requestedTask.completed, Boolean(item.prepTask.completedAt));
+        item.prepTask.completedAt = completed ? (item.prepTask.completedAt || new Date()) : null;
+        item.prepTask.completedBy = completed ? (item.prepTask.completedBy || username) : '';
+      }
+    }
     item.updatedBy = String(req.auth?.username || req.auth?.email || '');
     item.updatedAt = new Date();
     event.revision += 1;
-    addAudit(event, req.auth, 'packout_item_updated', { itemId: String(item._id) });
+    addAudit(event, req.auth, req.body?.prepTask !== undefined ? 'cocktail_prep_task_updated' : 'packout_item_updated', { itemId: String(item._id) });
     await event.save();
     return res.json(serializeBarEvent(event, { includeFinancials: canSeeBarFinancials(req.auth) }));
   } catch (error) {

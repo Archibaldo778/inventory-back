@@ -195,6 +195,27 @@ const dashboardVenue = (event) => clean(
   240
 );
 
+const guestEventChoice = (event, source) => ({
+  id: String(event?._id || ''),
+  source,
+  name: clean(source === 'dashboard' ? event?.title : event?.name, 240),
+  eventDate: normalizeBarEventDate(source === 'dashboard' ? event?.date : event?.eventDate),
+  venue: source === 'dashboard' ? dashboardVenue(event) : clean(event?.venue, 240),
+  client: clean(event?.client, 180),
+});
+
+const dateChoices = (reports, dashboardEvents) => {
+  const linkedIds = new Set((reports || []).map((event) => String(event?.linkedEventId || '')).filter(Boolean));
+  return [
+    ...(reports || []).map((event) => guestEventChoice(event, 'bar')),
+    ...(dashboardEvents || [])
+      .filter((event) => !linkedIds.has(String(event?._id || '')))
+      .map((event) => guestEventChoice(event, 'dashboard')),
+  ].sort((left, right) => left.name.localeCompare(right.name) || left.venue.localeCompare(right.venue));
+};
+
+export const buildGuestEventChoices = dateChoices;
+
 const syncDashboardEvent = (event) => BarEvent.findOneAndUpdate(
   { linkedEventId: event._id },
   {
@@ -212,31 +233,55 @@ const syncDashboardEvent = (event) => BarEvent.findOneAndUpdate(
 router.use(requirePin);
 router.post('/verify-pin', (_req, res) => res.json({ ok: true }));
 
-// The date must be exact. Names may fuzzy-match, but only one unambiguous event is returned.
+// The date must be exact. An ambiguous name returns the day's choices after PIN verification.
 router.post('/find-event', async (req, res) => {
   try {
     const name = clean(req.body?.name, 240);
     const eventDate = normalizeBarEventDate(req.body?.eventDate);
     if (name.length < 2 || !eventDate) return res.status(400).json({ message: 'Enter at least 2 characters and an exact event date' });
-    const reports = await BarEvent.find({ eventDate }).limit(100);
-    const reportMatch = selectGuestEventNameMatch(name, reports);
-    if (reportMatch.ambiguous) {
-      return res.status(409).json({ message: 'More than one event has a similar name on this date. Enter more of the event name.' });
-    }
-    let event = reportMatch.match;
-    if (!event) {
-      const dashboardCandidates = await Event.find({ status: { $not: /^deleted$/i } })
-        .select('title date client meta').limit(500).lean();
-      const sameDate = dashboardCandidates.filter((candidate) => normalizeBarEventDate(candidate.date) === eventDate);
-      const dashboardMatch = selectGuestEventNameMatch(name, sameDate, (candidate) => candidate?.title);
-      if (dashboardMatch.ambiguous) {
-        return res.status(409).json({ message: 'More than one event has a similar name on this date. Enter more of the event name.' });
-      }
-      if (dashboardMatch.match) event = await syncDashboardEvent(dashboardMatch.match);
+    const [reports, dashboardCandidates] = await Promise.all([
+      BarEvent.find({ eventDate }).limit(100),
+      Event.find({ status: { $not: /^deleted$/i } }).select('title date client meta').limit(500).lean(),
+    ]);
+    const sameDate = dashboardCandidates.filter((candidate) => normalizeBarEventDate(candidate.date) === eventDate);
+    const choices = dateChoices(reports, sameDate);
+    const choiceMatch = selectGuestEventNameMatch(name, choices);
+    if (choiceMatch.ambiguous) return res.json({ event: null, events: choices });
+    let event = null;
+    if (choiceMatch.match?.source === 'bar') {
+      event = reports.find((candidate) => String(candidate._id) === choiceMatch.match.id) || null;
+    } else if (choiceMatch.match?.source === 'dashboard') {
+      const dashboardEvent = sameDate.find((candidate) => String(candidate._id) === choiceMatch.match.id);
+      if (dashboardEvent) event = await syncDashboardEvent(dashboardEvent);
     }
     return res.json({ event: event ? publicEvent(event) : null });
   } catch (error) {
     return sendApiError(res, error, { context: 'Guest event lookup failed', fallbackMessage: 'Could not find this event' });
+  }
+});
+
+router.post('/select-event', async (req, res) => {
+  try {
+    const id = clean(req.body?.id, 80);
+    const source = clean(req.body?.source, 20);
+    const eventDate = normalizeBarEventDate(req.body?.eventDate);
+    if (!isObjectId(id) || !eventDate || !['bar', 'dashboard'].includes(source)) {
+      return res.status(400).json({ message: 'Choose a valid event' });
+    }
+    let event;
+    if (source === 'bar') {
+      event = await BarEvent.findOne({ _id: id, eventDate });
+    } else {
+      const dashboardEvent = await Event.findOne({ _id: id, status: { $not: /^deleted$/i } })
+        .select('title date client meta');
+      if (dashboardEvent && normalizeBarEventDate(dashboardEvent.date) === eventDate) {
+        event = await syncDashboardEvent(dashboardEvent);
+      }
+    }
+    if (!event) return res.status(404).json({ message: 'Event was not found on this date' });
+    return res.json({ event: publicEvent(event) });
+  } catch (error) {
+    return sendApiError(res, error, { context: 'Guest event selection failed', fallbackMessage: 'Could not open this event' });
   }
 });
 

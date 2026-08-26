@@ -1,3 +1,5 @@
+import { getPreparedBeverageType } from './barPackoutScope.js';
+
 const normalizedName = (value) => String(value || '')
   .toLowerCase()
   .replace(/\b(?:signature|cocktails?)\b/g, ' ')
@@ -30,4 +32,19 @@ export const mergeManualItemsWithPackout = (existingItems, importedItems) => {
     })
     .map((item) => ({ ...item, entrySource: 'packout' }));
   return [...manualItems, ...newPackoutItems];
+};
+
+export const schedulePreparedItemsForEvent = (items, eventDate, { at = new Date(), by = '' } = {}) => {
+  const scheduledDate = String(eventDate || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(scheduledDate)) return items;
+  (Array.isArray(items) ? items : []).forEach((item) => {
+    if (!getPreparedBeverageType(item) || String(item?.prepTask?.scheduledDate || '').trim()) return;
+    if (!item.prepTask) item.prepTask = {};
+    item.prepTask.scheduledDate = scheduledDate;
+    item.prepTask.scheduledAt = at;
+    item.prepTask.scheduledBy = String(by || '');
+    item.prepTask.completedAt = null;
+    item.prepTask.completedBy = '';
+  });
+  return items;
 };

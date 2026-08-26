@@ -23,7 +23,7 @@ import {
 import { sendApiError } from '../utils/apiErrors.js';
 import { clearApiCacheGroups } from '../utils/apiCache.js';
 import { cocktailServingsForGuests, resolveCocktailRecipeKey } from '../utils/cocktailRecipes.js';
-import { barItemIdentityKey, mergeManualItemsWithPackout } from '../utils/barManualItems.js';
+import { barItemIdentityKey, mergeManualItemsWithPackout, schedulePreparedItemsForEvent } from '../utils/barManualItems.js';
 import { recognizeDocuments } from '../utils/googleDocumentAi.js';
 import {
   keepBarAccountingItems,
@@ -514,7 +514,7 @@ export const normalizePackoutItems = async (items, { allowFinancials = false, gu
         notes: cleanString(item?.notes, 1000),
         captainNotes: cleanString(item?.captainNotes, 1000),
         cocktailRecipeKey: cleanString(item?.cocktailRecipeKey, 80)
-          || (preparedBeverageType === 'cocktail' ? resolveCocktailRecipeKey(item?.name, cocktailRecipes) : ''),
+          || (preparedBeverageType ? resolveCocktailRecipeKey(item?.name, cocktailRecipes) : ''),
         cocktailServingsAuto,
         clientProvidedIngredients: (Array.isArray(item?.clientProvidedIngredients) ? item.clientProvidedIngredients : [])
           .slice(0, 30)
@@ -1141,6 +1141,10 @@ router.post('/events/:id/packout', async (req, res) => {
       guestCount: event.guestCount,
     });
     event.items = mergeManualItemsWithPackout(event.items, importedItems);
+    schedulePreparedItemsForEvent(event.items, event.eventDate, {
+      at: new Date(),
+      by: String(req.auth?.username || req.auth?.email || ''),
+    });
     if (!event.items.length) {
       return res.status(422).json({ message: 'No alcohol, cocktails or mocktails were selected for this event' });
     }

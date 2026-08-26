@@ -182,10 +182,10 @@ const deleteEventWithoutTransaction = async (eventId) => {
 // Create
 router.post('/', async (req, res) => {
   try {
-    const { title, date, client, managerId, status, meta } = req.body || {};
+    const { externalId, title, date, client, managerId, status, meta } = req.body || {};
     if (!title || !String(title).trim()) return res.status(400).json({ error: 'title is required' });
     await ensureClientRecord(client);
-    const doc = await Event.create({ title: String(title).trim(), date, client, managerId, status, meta });
+    const doc = await Event.create({ externalId, title: String(title).trim(), date, client, managerId, status, meta });
     res.status(201).json(doc);
     clearCache();
   } catch (e) {
@@ -219,9 +219,15 @@ router.post('/import', requireAdmin, async (req, res) => {
     const clientNames = [...new Set(uniqueRows.map((event) => event.client).filter(Boolean))];
     for (const client of clientNames) await ensureClientRecord(client);
 
-    const stats = { processed: 0, created: 0, updated: 0, skipped: sourceRows.length - normalizedRows.length };
+    const stats = {
+      processed: 0,
+      created: 0,
+      updated: 0,
+      eventIdsAssigned: 0,
+      skipped: sourceRows.length - normalizedRows.length,
+    };
     for (const { identity: _identity, meta, ...event } of uniqueRows) {
-      const filter = event.externalId
+      let filter = event.externalId
         ? { externalId: event.externalId }
         : {
             title: event.title,
@@ -229,6 +235,27 @@ router.post('/import', requireAdmin, async (req, res) => {
             client: event.client,
             managerId: event.managerId,
           };
+      let assigningEventId = false;
+      if (event.externalId) {
+        const existingById = await Event.findOne({ externalId: event.externalId }).select('_id').lean();
+        if (existingById?._id) {
+          filter = { _id: existingById._id };
+        } else {
+          const exactManualMatches = await Event.find({
+            title: event.title,
+            date: event.date,
+            $or: [
+              { externalId: '' },
+              { externalId: null },
+              { externalId: { $exists: false } },
+            ],
+          }).select('_id').limit(2).lean();
+          if (exactManualMatches.length === 1) {
+            filter = { _id: exactManualMatches[0]._id };
+            assigningEventId = true;
+          }
+        }
+      }
       const setFields = { ...event };
       if (meta?.nowsta) {
         setFields['meta.nowsta'] = meta.nowsta;
@@ -246,7 +273,10 @@ router.post('/import', requireAdmin, async (req, res) => {
       );
       stats.processed += 1;
       if (result.upsertedCount) stats.created += 1;
-      else if (result.matchedCount) stats.updated += 1;
+      else if (result.matchedCount) {
+        stats.updated += 1;
+        if (assigningEventId) stats.eventIdsAssigned += 1;
+      }
     }
     stats.skipped += normalizedRows.length - uniqueRows.length;
 
@@ -297,7 +327,7 @@ router.get('/:id', cacheWithGroup('5 minutes', CACHE_GROUP), async (req, res) =>
 router.patch('/:id', async (req, res) => {
   try {
     const updates = {};
-    ['title','date','client','managerId','status','meta'].forEach(k => {
+    ['externalId','title','date','client','managerId','status','meta'].forEach(k => {
       if (typeof req.body[k] !== 'undefined') updates[k] = req.body[k];
     });
     if (updates.title) updates.title = String(updates.title).trim();

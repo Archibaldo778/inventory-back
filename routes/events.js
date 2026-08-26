@@ -23,7 +23,65 @@ const createHttpError = (statusCode, message) => Object.assign(new Error(message
 const MAX_IMPORT_ROWS = 2_000;
 const trimImportValue = (value, maxLength = 500) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, maxLength);
 
-const normalizeImportedEvent = (source) => {
+const normalizeNowstaWorker = (source) => {
+  if (!source || typeof source !== 'object' || Array.isArray(source)) return null;
+  const name = trimImportValue(source.name, 240);
+  if (!name) return null;
+  return {
+    name,
+    status: trimImportValue(source.status, 40).toLowerCase(),
+    agency: Boolean(source.agency),
+  };
+};
+
+const normalizeNowstaShift = (source) => {
+  if (!source || typeof source !== 'object' || Array.isArray(source)) return null;
+  const position = trimImportValue(source.position, 160);
+  if (!position) return null;
+  return {
+    position,
+    startTime: trimImportValue(source.startTime, 40),
+    endTime: trimImportValue(source.endTime, 40),
+    workers: (Array.isArray(source.workers) ? source.workers : [])
+      .slice(0, 500)
+      .map(normalizeNowstaWorker)
+      .filter(Boolean),
+    unfilled: Math.max(0, Math.min(500, Math.round(Number(source.unfilled) || 0))),
+  };
+};
+
+export const normalizeImportedMeta = (source) => {
+  if (!source || typeof source !== 'object' || Array.isArray(source)) return null;
+  const nowstaSource = source.nowsta;
+  const nowsta = nowstaSource && typeof nowstaSource === 'object' && !Array.isArray(nowstaSource)
+    ? {
+        department: trimImportValue(nowstaSource.department, 160),
+        venue: trimImportValue(nowstaSource.venue, 300),
+        address: trimImportValue(nowstaSource.address, 600),
+        eventTime: trimImportValue(nowstaSource.eventTime, 100),
+        uniform: trimImportValue(nowstaSource.uniform, 300),
+        adminNotes: trimImportValue(nowstaSource.adminNotes, 2_000),
+        staffTotals: trimImportValue(nowstaSource.staffTotals, 100),
+        shifts: (Array.isArray(nowstaSource.shifts) ? nowstaSource.shifts : [])
+          .slice(0, 500)
+          .map(normalizeNowstaShift)
+          .filter(Boolean),
+      }
+    : null;
+  const rawGuestCount = source.guestCount;
+  const guestCount = rawGuestCount === '' || rawGuestCount === null || rawGuestCount === undefined
+    ? null
+    : Number(rawGuestCount);
+  return {
+    venue: trimImportValue(source.venue ?? nowsta?.venue, 300),
+    address: trimImportValue(source.address ?? nowsta?.address, 600),
+    eventTime: trimImportValue(source.eventTime ?? nowsta?.eventTime, 100),
+    guestCount: Number.isFinite(guestCount) && guestCount >= 0 ? Math.round(guestCount) : null,
+    nowsta,
+  };
+};
+
+export const normalizeImportedEvent = (source) => {
   if (!source || typeof source !== 'object' || Array.isArray(source)) return null;
   const title = trimImportValue(source.title, 300);
   if (!title) return null;
@@ -34,6 +92,8 @@ const normalizeImportedEvent = (source) => {
     client: trimImportValue(source.client, 300),
     managerId: trimImportValue(source.managerId, 300),
     status: trimImportValue(source.status, 100).toLowerCase() || 'draft',
+    importSource: trimImportValue(source.importSource, 40).toLowerCase() === 'nowsta' ? 'nowsta' : 'caterease',
+    meta: normalizeImportedMeta(source.meta),
   };
 };
 
@@ -160,7 +220,7 @@ router.post('/import', requireAdmin, async (req, res) => {
     for (const client of clientNames) await ensureClientRecord(client);
 
     const stats = { processed: 0, created: 0, updated: 0, skipped: sourceRows.length - normalizedRows.length };
-    for (const { identity: _identity, ...event } of uniqueRows) {
+    for (const { identity: _identity, meta, ...event } of uniqueRows) {
       const filter = event.externalId
         ? { externalId: event.externalId }
         : {
@@ -169,11 +229,18 @@ router.post('/import', requireAdmin, async (req, res) => {
             client: event.client,
             managerId: event.managerId,
           };
+      const setFields = { ...event };
+      if (meta?.nowsta) {
+        setFields['meta.nowsta'] = meta.nowsta;
+        setFields['meta.venue'] = meta.venue;
+        setFields['meta.address'] = meta.address;
+        setFields['meta.eventTime'] = meta.eventTime;
+        if (meta.guestCount !== null) setFields['meta.guestCount'] = meta.guestCount;
+      }
       const result = await Event.updateOne(
         filter,
         {
-          $set: { ...event, importSource: 'caterease' },
-          $setOnInsert: { meta: {} },
+          $set: setFields,
         },
         { upsert: true, runValidators: true }
       );

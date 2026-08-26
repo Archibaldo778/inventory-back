@@ -5,6 +5,9 @@ import Page from '../models/Page.js';
 import Proposal from '../models/Proposal.js';
 import Client from '../models/Client.js';
 import DecorPackout from '../models/DecorPackout.js';
+import BarEvent from '../models/BarEvent.js';
+import BarTask from '../models/BarTask.js';
+import BeverageItem from '../models/BeverageItem.js';
 import { requireAdmin } from '../middleware/auth.js';
 import { clearApiCacheGroups, createGroupedApiCache } from '../utils/apiCache.js';
 import { sendApiError } from '../utils/apiErrors.js';
@@ -16,12 +19,159 @@ const cacheWithGroup = createGroupedApiCache;
 
 const clearCache = () => clearApiCacheGroups(CACHE_GROUP);
 const clearRelatedCaches = () => {
-  clearApiCacheGroups(CACHE_GROUP, 'decks', 'pages');
+  clearApiCacheGroups(CACHE_GROUP, 'decks', 'pages', 'proposals', 'bar');
 };
 
 const createHttpError = (statusCode, message) => Object.assign(new Error(message), { statusCode });
 const MAX_IMPORT_ROWS = 2_000;
 const trimImportValue = (value, maxLength = 500) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, maxLength);
+
+export const normalizeImportedEventMatchTitle = (value) => trimImportValue(value, 300)
+  .replace(/\s*[-–—]\s*staffing(?:\s+set\s*up|_?\s*\d+\s*pax)?\s*$/i, '')
+  .normalize('NFKD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .toLowerCase()
+  .replace(/&/g, ' and ')
+  .replace(/[^a-z0-9]+/g, ' ')
+  .trim()
+  .replace(/\s+/g, ' ');
+
+const findEventTitleDateMatches = async (event, session = null) => {
+  const query = Event.find({
+    date: event.date,
+    status: { $not: /^deleted$/i },
+  }).select('_id externalId importSource title date createdAt').sort({ createdAt: 1, _id: 1 });
+  if (session) query.session(session);
+  const candidates = await query.lean();
+  const expectedTitle = normalizeImportedEventMatchTitle(event.title);
+  return candidates.filter((candidate) => normalizeImportedEventMatchTitle(candidate.title) === expectedTitle);
+};
+
+const findManualEventMatches = async (event, excludeId = null, session = null) => {
+  const matches = await findEventTitleDateMatches(event, session);
+  return matches.filter((candidate) => (
+    !String(candidate.externalId || '').trim()
+    && String(candidate.importSource || '').toLowerCase() !== 'nowsta'
+    && (!excludeId || String(candidate._id) !== String(excludeId))
+  ));
+};
+
+const findImportedNowstaDuplicates = async (event, targetEventId) => {
+  const matches = await findEventTitleDateMatches(event);
+  return matches.filter((candidate) => (
+    String(candidate._id) !== String(targetEventId)
+    && String(candidate.importSource || '').toLowerCase() === 'nowsta'
+  ));
+};
+
+const barItemMergeKey = (item) => {
+  const inventoryId = String(item?.beverageItemId || '').trim();
+  if (inventoryId) return `inventory:${inventoryId}`;
+  const recipeKey = trimImportValue(item?.cocktailRecipeKey, 240).toLowerCase();
+  if (recipeKey) return `recipe:${recipeKey}`;
+  return `item:${[item?.name, item?.section, item?.entrySource]
+    .map((value) => trimImportValue(value, 240).toLowerCase()).join('|')}`;
+};
+
+const mergeBarEventData = async (sourceEventId, targetEventId, session = null) => {
+  const options = session ? { session } : {};
+  const [sourceBarEvent, targetBarEvent] = await Promise.all([
+    BarEvent.findOne({ linkedEventId: sourceEventId }, null, options),
+    BarEvent.findOne({ linkedEventId: targetEventId }, null, options),
+  ]);
+  if (!sourceBarEvent) return;
+
+  if (!targetBarEvent) {
+    sourceBarEvent.linkedEventId = targetEventId;
+    sourceBarEvent.audit.push({
+      action: 'dashboard_event_merged',
+      details: { sourceEventId: String(sourceEventId), targetEventId: String(targetEventId) },
+    });
+    await sourceBarEvent.save(options);
+    return;
+  }
+
+  const existingKeys = new Set(targetBarEvent.items.map(barItemMergeKey));
+  sourceBarEvent.items.forEach((item) => {
+    const key = barItemMergeKey(item);
+    if (existingKeys.has(key)) return;
+    targetBarEvent.items.push(item.toObject ? item.toObject() : item);
+    existingKeys.add(key);
+  });
+  targetBarEvent.assignedUserIds = [...new Set([
+    ...targetBarEvent.assignedUserIds.map(String),
+    ...sourceBarEvent.assignedUserIds.map(String),
+  ])];
+  const copyIfBlank = (field) => {
+    if (targetBarEvent[field] === '' || targetBarEvent[field] === null || targetBarEvent[field] === undefined) {
+      targetBarEvent[field] = sourceBarEvent[field];
+    }
+  };
+  [
+    'eventNumber',
+    'venue',
+    'salesRep',
+    'eventTiming',
+    'deliveryTime',
+    'guestCount',
+    'submittedAt',
+    'submittedBy',
+    'reviewedAt',
+    'reviewedBy',
+    'notes',
+  ].forEach(copyIfBlank);
+  if (!targetBarEvent.packout?.fileName && sourceBarEvent.packout?.fileName) {
+    targetBarEvent.packout = sourceBarEvent.packout;
+  }
+  if (!targetBarEvent.clientCharge && sourceBarEvent.clientCharge) {
+    targetBarEvent.clientCharge = sourceBarEvent.clientCharge;
+    targetBarEvent.clientChargeDetails = sourceBarEvent.clientChargeDetails;
+  }
+  if (targetBarEvent.status === 'draft' && sourceBarEvent.status !== 'draft') {
+    targetBarEvent.status = sourceBarEvent.status;
+  }
+  targetBarEvent.audit.push({
+    action: 'dashboard_event_merged',
+    details: {
+      sourceEventId: String(sourceEventId),
+      targetEventId: String(targetEventId),
+      sourceBarEventId: String(sourceBarEvent._id),
+    },
+  });
+  await targetBarEvent.save(options);
+  await BarTask.updateMany(
+    { eventId: sourceBarEvent._id },
+    { $set: { eventId: targetBarEvent._id } },
+    options
+  );
+};
+
+const mergeImportedDuplicateIntoManualEvent = async (sourceEventId, targetEventId, session = null) => {
+  const options = session ? { session } : {};
+  await Promise.all([
+    Deck.updateMany({ eventId: sourceEventId }, { $set: { eventId: targetEventId } }, options),
+    Proposal.updateMany({ eventId: sourceEventId }, { $set: { eventId: targetEventId } }, options),
+    DecorPackout.updateMany({ eventId: sourceEventId }, { $set: { eventId: targetEventId } }, options),
+    BeverageItem.updateMany(
+      { 'inventoryMovements.sourceEventId': sourceEventId },
+      { $set: { 'inventoryMovements.$[movement].sourceEventId': targetEventId } },
+      { ...options, arrayFilters: [{ 'movement.sourceEventId': sourceEventId }] }
+    ),
+  ]);
+  await mergeBarEventData(sourceEventId, targetEventId, session);
+  await Event.updateOne(
+    { _id: sourceEventId },
+    {
+      $set: {
+        externalId: '',
+        status: 'deleted',
+        'meta.mergedIntoEventId': String(targetEventId),
+        'meta.mergedAt': new Date(),
+      },
+    },
+    options
+  );
+};
 
 const normalizeNowstaWorker = (source) => {
   if (!source || typeof source !== 'object' || Array.isArray(source)) return null;
@@ -83,7 +233,11 @@ export const normalizeImportedMeta = (source) => {
 
 export const normalizeImportedEvent = (source) => {
   if (!source || typeof source !== 'object' || Array.isArray(source)) return null;
-  const title = trimImportValue(source.title, 300);
+  const importSource = trimImportValue(source.importSource, 40).toLowerCase() === 'nowsta' ? 'nowsta' : 'caterease';
+  const rawTitle = trimImportValue(source.title, 300);
+  const title = importSource === 'nowsta'
+    ? rawTitle.replace(/\s*[-–—]\s*staffing(?:\s+set\s*up|_?\s*\d+\s*pax)?\s*$/i, '').trim()
+    : rawTitle;
   if (!title) return null;
   return {
     externalId: trimImportValue(source.externalId, 120),
@@ -92,7 +246,7 @@ export const normalizeImportedEvent = (source) => {
     client: trimImportValue(source.client, 300),
     managerId: trimImportValue(source.managerId, 300),
     status: trimImportValue(source.status, 100).toLowerCase() || 'draft',
-    importSource: trimImportValue(source.importSource, 40).toLowerCase() === 'nowsta' ? 'nowsta' : 'caterease',
+    importSource,
     meta: normalizeImportedMeta(source.meta),
   };
 };
@@ -224,6 +378,7 @@ router.post('/import', requireAdmin, async (req, res) => {
       created: 0,
       updated: 0,
       eventIdsAssigned: 0,
+      duplicatesMerged: 0,
       skipped: sourceRows.length - normalizedRows.length,
     };
     for (const { identity: _identity, meta, ...event } of uniqueRows) {
@@ -236,27 +391,43 @@ router.post('/import', requireAdmin, async (req, res) => {
             managerId: event.managerId,
           };
       let assigningEventId = false;
+      let duplicateEventIds = [];
       if (event.externalId) {
-        const existingById = await Event.findOne({ externalId: event.externalId }).select('_id').lean();
+        const existingById = await Event.findOne({
+          externalId: event.externalId,
+          status: { $not: /^deleted$/i },
+        }).select('_id title date').lean();
         if (existingById?._id) {
-          filter = { _id: existingById._id };
+          const manualMatches = await findManualEventMatches(event, existingById._id);
+          if (manualMatches.length === 1) {
+            filter = { _id: manualMatches[0]._id };
+            duplicateEventIds = (await findImportedNowstaDuplicates(event, manualMatches[0]._id))
+              .map((candidate) => candidate._id);
+            if (!duplicateEventIds.some((id) => String(id) === String(existingById._id))) {
+              duplicateEventIds.push(existingById._id);
+            }
+            assigningEventId = true;
+          } else {
+            filter = { _id: existingById._id };
+          }
         } else {
-          const exactManualMatches = await Event.find({
-            title: event.title,
-            date: event.date,
-            $or: [
-              { externalId: '' },
-              { externalId: null },
-              { externalId: { $exists: false } },
-            ],
-          }).select('_id').limit(2).lean();
-          if (exactManualMatches.length === 1) {
-            filter = { _id: exactManualMatches[0]._id };
+          const manualMatches = await findManualEventMatches(event);
+          if (manualMatches.length === 1) {
+            filter = { _id: manualMatches[0]._id };
+            duplicateEventIds = (await findImportedNowstaDuplicates(event, manualMatches[0]._id))
+              .map((candidate) => candidate._id);
             assigningEventId = true;
           }
         }
       }
       const setFields = { ...event };
+      const deferredIdentity = duplicateEventIds.length
+        ? { externalId: event.externalId, importSource: event.importSource }
+        : null;
+      if (deferredIdentity) {
+        delete setFields.externalId;
+        delete setFields.importSource;
+      }
       if (meta?.nowsta) {
         setFields['meta.nowsta'] = meta.nowsta;
         setFields['meta.venue'] = meta.venue;
@@ -276,6 +447,21 @@ router.post('/import', requireAdmin, async (req, res) => {
       else if (result.matchedCount) {
         stats.updated += 1;
         if (assigningEventId) stats.eventIdsAssigned += 1;
+      }
+      if (duplicateEventIds.length && result.matchedCount) {
+        const targetEventId = filter._id;
+        for (const duplicateEventId of duplicateEventIds) {
+          await runWithTransactionFallback(
+            (session) => mergeImportedDuplicateIntoManualEvent(duplicateEventId, targetEventId, session),
+            () => mergeImportedDuplicateIntoManualEvent(duplicateEventId, targetEventId)
+          );
+          stats.duplicatesMerged += 1;
+        }
+        await Event.updateOne(
+          { _id: targetEventId },
+          { $set: deferredIdentity },
+          { runValidators: true }
+        );
       }
     }
     stats.skipped += normalizedRows.length - uniqueRows.length;
@@ -297,7 +483,7 @@ router.post('/import', requireAdmin, async (req, res) => {
 // List (optionally by manager)
 router.get('/', cacheWithGroup('5 minutes', CACHE_GROUP), async (req, res) => {
   try {
-    const q = {};
+    const q = { status: { $not: /^deleted$/i } };
     if (req.query.managerId) q.managerId = req.query.managerId;
     const items = await Event.find(q).sort({ createdAt: -1 });
     res.json(items);

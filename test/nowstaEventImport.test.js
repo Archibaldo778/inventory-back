@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeImportedEvent, normalizeImportedMeta } from '../routes/events.js';
+import {
+  normalizeImportedEvent,
+  normalizeImportedEventMatchTitle,
+  normalizeImportedMeta,
+} from '../routes/events.js';
 
 test('Nowsta event import sanitizes operational fields and staffing assignments', () => {
   const event = normalizeImportedEvent({
@@ -31,6 +35,7 @@ test('Nowsta event import sanitizes operational fields and staffing assignments'
   });
 
   assert.equal(event.externalId, 'E22346 - S60940');
+  assert.equal(event.title, 'Aston Martin Cocktail');
   assert.equal(event.importSource, 'nowsta');
   assert.equal(event.meta.guestCount, 150);
   assert.equal(event.meta.nowsta.shifts[0].workers[0].status, 'confirmed');
@@ -42,4 +47,11 @@ test('event import rejects arbitrary import sources and missing guest counts', (
   const event = normalizeImportedEvent({ title: 'Dinner', importSource: 'unknown' });
   assert.equal(meta.guestCount, null);
   assert.equal(event.importSource, 'caterease');
+});
+
+test('event import matches Nowsta staffing titles to their existing event title', () => {
+  assert.equal(normalizeImportedEventMatchTitle('Dinner - Staffing'), 'dinner');
+  assert.equal(normalizeImportedEventMatchTitle('Dinner - Staffing Set up'), 'dinner');
+  assert.equal(normalizeImportedEventMatchTitle('Dinner - Staffing_10pax'), 'dinner');
+  assert.equal(normalizeImportedEventMatchTitle('Client & Partner Dinner'), 'client and partner dinner');
 });

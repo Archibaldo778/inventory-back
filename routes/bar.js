@@ -976,7 +976,7 @@ router.patch('/events/:id', requireBarManager, async (req, res) => {
       event.guestCount = cleanNumber(req.body.guestCount, { fallback: null });
       event.guestCountSource = 'manual';
       event.items.forEach((item) => {
-        if (getPreparedBeverageType(item) === 'cocktail' && item.cocktailServingsAuto !== false) {
+        if (getPreparedBeverageType(item) && item.cocktailServingsAuto !== false) {
           item.sentQty = cocktailServingsForGuests(event.guestCount);
           item.sentQtyText = String(item.sentQty);
         }
@@ -1190,7 +1190,7 @@ router.post('/events/:id/items', requireBarOperator, async (req, res) => {
     if (event.status === 'closed') return res.status(409).json({ message: 'This event bar report is closed' });
     const type = cleanString(req.body?.type, 30).toLowerCase();
     const sentQty = cleanNumber(req.body?.sentQty, { fallback: null });
-    if (!['liquor', 'cocktail'].includes(type)) return res.status(400).json({ message: 'Choose liquor or specialty cocktail' });
+    if (!['liquor', 'cocktail', 'mocktail'].includes(type)) return res.status(400).json({ message: 'Choose liquor, specialty cocktail or mocktail' });
     if (sentQty === null) return res.status(400).json({ message: 'Quantity must be zero or greater' });
     let item;
     if (type === 'liquor') {
@@ -1233,9 +1233,10 @@ router.post('/events/:id/items', requireBarOperator, async (req, res) => {
       const cocktailRecipeKey = cleanString(req.body?.cocktailRecipeKey, 80);
       const recipe = await CocktailRecipe.findOne({ key: cocktailRecipeKey, active: { $ne: false } });
       if (!recipe) return res.status(400).json({ message: 'Choose a specialty cocktail recipe' });
+      const preparedType = type === 'mocktail' || recipe.type === 'mocktail' ? 'mocktail' : 'cocktail';
       item = {
         name: recipe.name,
-        section: 'Cocktails',
+        section: preparedType === 'mocktail' ? 'Mocktails' : 'Cocktails',
         scope: 'review',
         included: true,
         sentQty,
@@ -1243,7 +1244,7 @@ router.post('/events/:id/items', requireBarOperator, async (req, res) => {
         sentQtyPending: false,
         deliveredQty: null,
         returnConfirmed: true,
-        unitCostSnapshot: 3,
+        unitCostSnapshot: preparedType === 'mocktail' ? 1.5 : 3,
         cocktailRecipeKey: recipe.key,
         cocktailServingsAuto: cleanBoolean(req.body?.cocktailServingsAuto, false),
         batchInstructions: cleanString(req.body?.batchInstructions ?? recipe.instructions, 2000),
@@ -1301,7 +1302,7 @@ router.patch('/events/:id/items/:itemId', requireBarManager, async (req, res) =>
     if (req.body?.sentQty !== undefined) {
       item.sentQty = cleanNumber(req.body.sentQty, { fallback: 0 });
       if (req.body?.sentQtyText === undefined) item.sentQtyText = String(item.sentQty);
-      if (getPreparedBeverageType(item) === 'cocktail' && req.body?.cocktailServingsAuto === undefined) {
+      if (getPreparedBeverageType(item) && req.body?.cocktailServingsAuto === undefined) {
         item.cocktailServingsAuto = false;
       }
     }
@@ -1321,7 +1322,7 @@ router.patch('/events/:id/items/:itemId', requireBarManager, async (req, res) =>
     if (req.body?.cocktailRecipeKey !== undefined) item.cocktailRecipeKey = cleanString(req.body.cocktailRecipeKey, 80);
     if (req.body?.cocktailServingsAuto !== undefined) {
       item.cocktailServingsAuto = cleanBoolean(req.body.cocktailServingsAuto, item.cocktailServingsAuto);
-      if (item.cocktailServingsAuto && getPreparedBeverageType(item) === 'cocktail') {
+      if (item.cocktailServingsAuto && getPreparedBeverageType(item)) {
         item.sentQty = cocktailServingsForGuests(event.guestCount);
         item.sentQtyText = String(item.sentQty);
       }

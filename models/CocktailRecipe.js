@@ -8,6 +8,7 @@ const cocktailIngredientSchema = new mongoose.Schema({
 
 const CocktailRecipeSchema = new mongoose.Schema({
   key: { type: String, required: true, trim: true, unique: true, index: true },
+  type: { type: String, enum: ['cocktail', 'mocktail'], default: 'cocktail', index: true },
   name: { type: String, required: true, trim: true },
   aliases: { type: [String], default: [] },
   ingredients: { type: [cocktailIngredientSchema], default: [] },
@@ -16,6 +17,6 @@ const CocktailRecipeSchema = new mongoose.Schema({
   active: { type: Boolean, default: true, index: true },
 }, { timestamps: true });
 
-CocktailRecipeSchema.index({ active: 1, name: 1 });
+CocktailRecipeSchema.index({ active: 1, type: 1, name: 1 });
 
 export default mongoose.model('CocktailRecipe', CocktailRecipeSchema);

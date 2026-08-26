@@ -42,6 +42,7 @@ const cleanIngredients = (value) => parseArray(value).slice(0, 50).map((ingredie
 })).filter((ingredient) => ingredient.name && (ingredient.amountMl === null || (Number.isFinite(ingredient.amountMl) && ingredient.amountMl >= 0)));
 const cleanAliases = (value) => parseArray(value).slice(0, 50).map((alias) => clean(alias, 160)).filter(Boolean);
 const cleanKey = (value) => clean(value, 80).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+const cleanRecipeType = (value) => String(value || '').trim().toLowerCase() === 'mocktail' ? 'mocktail' : 'cocktail';
 
 let defaultsEnsured = false;
 const ensureDefaults = async () => {
@@ -104,7 +105,7 @@ router.post('/', upload.single('image'), async (req, res) => {
     const ingredients = cleanIngredients(req.body?.ingredients);
     if (!name || !key || !ingredients.length) return res.status(400).json({ message: 'Name and ingredients are required' });
     if (req.file) image = await saveImage(req.file);
-    const recipe = await CocktailRecipe.create({ key, name, aliases: cleanAliases(req.body?.aliases), ingredients, instructions: clean(req.body?.instructions, 2000), active: parseBoolean(req.body?.active), image: image || null });
+    const recipe = await CocktailRecipe.create({ key, type: cleanRecipeType(req.body?.type), name, aliases: cleanAliases(req.body?.aliases), ingredients, instructions: clean(req.body?.instructions, 2000), active: parseBoolean(req.body?.active), image: image || null });
     return res.status(201).json(recipe);
   } catch (error) {
     if (image) await cleanupManagedImageSafely(image, 'orphaned cocktail image');
@@ -121,6 +122,7 @@ router.patch('/:id', upload.single('image'), async (req, res) => {
     if (req.file && !isAllowedImageUpload(req.file, ['jpeg', 'png', 'webp', 'heif'])) return res.status(400).json(INVALID_IMAGE_UPLOAD_RESPONSE);
     const updates = {};
     if (req.body?.key !== undefined) updates.key = cleanKey(req.body.key);
+    if (req.body?.type !== undefined) updates.type = cleanRecipeType(req.body.type);
     if (req.body?.name !== undefined) updates.name = clean(req.body.name, 160);
     if (req.body?.aliases !== undefined) updates.aliases = cleanAliases(req.body.aliases);
     if (req.body?.ingredients !== undefined) updates.ingredients = cleanIngredients(req.body.ingredients);

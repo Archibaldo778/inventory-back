@@ -12,6 +12,7 @@ import { recognizeDocuments } from '../utils/googleDocumentAi.js';
 import { matchRecognizedItemsToCatalog, parseRecognizedPackout } from '../utils/barPackoutRecognition.js';
 import { requiresBarReturn } from '../utils/barPackoutScope.js';
 import { sendApiError } from '../utils/apiErrors.js';
+import { applyGuestReceivedRows } from '../utils/barGuestReturns.js';
 
 const router = Router();
 const WINDOW_MS = 10 * 60 * 1000;
@@ -385,6 +386,72 @@ router.post('/:eventId/packout', async (req, res) => {
     return res.json(publicEvent(event));
   } catch (error) {
     return sendApiError(res, error, { context: 'Guest packout import failed', fallbackMessage: 'Could not save this packout' });
+  }
+});
+
+router.post('/:eventId/items', async (req, res) => {
+  try {
+    const event = await loadEditableEvent(req, res);
+    if (!event) return undefined;
+    if (event.items.length >= MAX_ITEMS) return res.status(413).json({ message: `This event is limited to ${MAX_ITEMS} items` });
+    const reporterName = clean(req.body?.reporterName, 160);
+    const name = clean(req.body?.name, 240);
+    if (reporterName.length < 2) return res.status(400).json({ message: 'Enter your name' });
+    if (name.length < 2) return res.status(400).json({ message: 'Enter the bottle name' });
+    if (event.items.some((item) => normalizedName(item.name) === normalizedName(name))) {
+      return res.status(409).json({ message: 'This bottle is already listed for the event' });
+    }
+    const sentQtyMissing = req.body?.sentQty === '' || req.body?.sentQty === null || req.body?.sentQty === undefined;
+    const sentQty = sentQtyMissing ? 0 : Number(req.body.sentQty);
+    if (!Number.isFinite(sentQty) || sentQty < 0) return res.status(400).json({ message: 'Enter a valid sent quantity or leave it blank' });
+    const [item] = await normalizePackoutItems([{
+      name,
+      section: 'Captain added',
+      scope: 'alcohol',
+      included: true,
+      sentQty,
+      sentQtyText: sentQtyMissing ? 'Pending captain count' : String(sentQty),
+      sentQtyPending: sentQtyMissing,
+      entrySource: 'manual',
+    }], { allowFinancials: false, guestCount: event.guestCount });
+    if (!item) return res.status(422).json({ message: 'This row could not be added' });
+    const now = new Date();
+    item.entrySource = 'manual';
+    item.updatedBy = reporterName;
+    item.updatedAt = now;
+    event.items.push(item);
+    event.revision += 1;
+    event.audit.push({ action: 'guest_item_added', username: reporterName, at: now, details: { name } });
+    await event.save();
+    return res.status(201).json({ ok: true, event: publicEvent(event) });
+  } catch (error) {
+    return sendApiError(res, error, { context: 'Guest item creation failed', fallbackMessage: 'Could not add this bottle' });
+  }
+});
+
+router.patch('/:eventId/received', async (req, res) => {
+  try {
+    const event = await loadEditableEvent(req, res);
+    if (!event) return undefined;
+    const reporterName = clean(req.body?.reporterName, 160);
+    const rows = Array.isArray(req.body?.items) ? req.body.items : [];
+    const required = event.items.filter((item) => item.included !== false && requiresBarReturn(item));
+    if (reporterName.length < 2) return res.status(400).json({ message: 'Enter your name' });
+    if (!required.length) return res.status(400).json({ message: 'This event has no receivable items' });
+    if (rows.length !== required.length || rows.length > MAX_ITEMS) {
+      return res.status(400).json({ message: 'Enter a received quantity for every item' });
+    }
+    const now = new Date();
+    const receivedResult = applyGuestReceivedRows(required, rows, { at: now, by: reporterName });
+    if (!receivedResult.valid) return res.status(400).json({ message: receivedResult.message });
+    if (event.status === 'draft' || event.status === 'ready') event.status = 'in_progress';
+    event.guestIntake.reporterName = reporterName;
+    event.revision += 1;
+    event.audit.push({ action: 'guest_received_saved', username: reporterName, at: now, details: { count: receivedResult.count } });
+    await event.save();
+    return res.json({ ok: true, event: publicEvent(event) });
+  } catch (error) {
+    return sendApiError(res, error, { context: 'Guest received quantities save failed', fallbackMessage: 'Could not save received quantities' });
   }
 });
 

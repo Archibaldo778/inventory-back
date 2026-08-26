@@ -36,6 +36,11 @@ export const normalizeImportedEventMatchTitle = (value) => trimImportValue(value
   .trim()
   .replace(/\s+/g, ' ');
 
+export const normalizeImportedEventBaseId = (value) => {
+  const match = trimImportValue(value, 120).toUpperCase().match(/\bE\s*\d+\b/);
+  return match ? match[0].replace(/\s+/g, '') : '';
+};
+
 const findEventTitleDateMatches = async (event, session = null) => {
   const query = Event.find({
     date: event.date,
@@ -49,9 +54,13 @@ const findEventTitleDateMatches = async (event, session = null) => {
 
 const findManualEventMatches = async (event, excludeId = null, session = null) => {
   const matches = await findEventTitleDateMatches(event, session);
+  const importedBaseId = normalizeImportedEventBaseId(event.externalId);
   return matches.filter((candidate) => (
-    !String(candidate.externalId || '').trim()
-    && String(candidate.importSource || '').toLowerCase() !== 'nowsta'
+    String(candidate.importSource || '').toLowerCase() !== 'nowsta'
+    && (
+      !String(candidate.externalId || '').trim()
+      || (importedBaseId && normalizeImportedEventBaseId(candidate.externalId) === importedBaseId)
+    )
     && (!excludeId || String(candidate._id) !== String(excludeId))
   ));
 };

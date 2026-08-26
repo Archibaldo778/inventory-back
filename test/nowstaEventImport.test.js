@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   normalizeImportedEvent,
+  normalizeImportedEventBaseId,
   normalizeImportedEventMatchTitle,
   normalizeImportedMeta,
 } from '../routes/events.js';
@@ -54,4 +55,7 @@ test('event import matches Nowsta staffing titles to their existing event title'
   assert.equal(normalizeImportedEventMatchTitle('Dinner - Staffing Set up'), 'dinner');
   assert.equal(normalizeImportedEventMatchTitle('Dinner - Staffing_10pax'), 'dinner');
   assert.equal(normalizeImportedEventMatchTitle('Client & Partner Dinner'), 'client and partner dinner');
+  assert.equal(normalizeImportedEventBaseId('E22346 - S60940'), 'E22346');
+  assert.equal(normalizeImportedEventBaseId(' E 22346 '), 'E22346');
+  assert.equal(normalizeImportedEventBaseId('S60940'), '');
 });

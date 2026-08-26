@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import multer from 'multer';
 import BarEvent, { BAR_EVENT_STATUSES, BAR_ITEM_SCOPES, BAR_PRICE_UNITS } from '../models/BarEvent.js';
 import BarPackage from '../models/BarPackage.js';
+import BarTask from '../models/BarTask.js';
 import BeverageItem from '../models/BeverageItem.js';
 import CocktailRecipe from '../models/CocktailRecipe.js';
 import Event from '../models/Event.js';
@@ -147,6 +148,16 @@ const serializeBarEvent = (source, { includeFinancials = false } = {}) => {
   }
   delete event.assignedUserIds;
   return event;
+};
+
+const serializeBarTask = (source) => {
+  const task = typeof source?.toObject === 'function' ? source.toObject() : { ...(source || {}) };
+  return {
+    ...task,
+    eventId: task.eventId ? String(task.eventId) : '',
+    eventItemId: task.eventItemId ? String(task.eventItemId) : '',
+    completed: Boolean(task.completedAt),
+  };
 };
 
 const requireBarManager = (req, res, next) => {
@@ -514,6 +525,112 @@ export const normalizePackoutItems = async (items, { allowFinancials = false, gu
     })
     .filter((item) => item.name);
 };
+
+router.get('/tasks', requireBarManager, async (_req, res) => {
+  try {
+    const tasks = await BarTask.find({}).sort({ scheduledDate: 1, createdAt: 1 }).limit(5000);
+    return res.json(tasks.map(serializeBarTask));
+  } catch (error) {
+    return sendApiError(res, error, {
+      context: 'Bar task list failed',
+      fallbackMessage: 'Failed to list bar tasks',
+    });
+  }
+});
+
+router.post('/tasks', requireBarManager, async (req, res) => {
+  try {
+    const title = cleanString(req.body?.title, 500);
+    const scheduledDate = cleanString(req.body?.scheduledDate, 10);
+    if (title.length < 2) return res.status(400).json({ message: 'Task description is required' });
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(scheduledDate)) {
+      return res.status(400).json({ message: 'Task date must use YYYY-MM-DD format' });
+    }
+
+    const requestedEventId = cleanString(req.body?.eventId, 80);
+    const requestedItemId = cleanString(req.body?.eventItemId, 80);
+    let event = null;
+    let eventItem = null;
+    if (requestedEventId) {
+      if (!isObjectId(requestedEventId)) return res.status(400).json({ message: 'Invalid event id' });
+      event = await BarEvent.findById(requestedEventId);
+      if (!event) return res.status(400).json({ message: 'Event not found' });
+      if (requestedItemId) {
+        if (!isObjectId(requestedItemId)) return res.status(400).json({ message: 'Invalid cocktail id' });
+        eventItem = event.items.id(requestedItemId);
+        if (!eventItem) return res.status(400).json({ message: 'Cocktail was not found in this event' });
+      }
+    } else if (requestedItemId) {
+      return res.status(400).json({ message: 'Choose an event before choosing its cocktail' });
+    }
+
+    const username = String(req.auth?.username || req.auth?.email || '');
+    const task = await BarTask.create({
+      title,
+      scheduledDate,
+      eventId: event?._id || null,
+      eventItemId: eventItem?._id || null,
+      cocktailRecipeKey: cleanString(req.body?.cocktailRecipeKey, 80) || cleanString(eventItem?.cocktailRecipeKey, 80),
+      cocktailName: cleanString(req.body?.cocktailName, 240) || cleanString(eventItem?.name, 240),
+      createdBy: username,
+      updatedBy: username,
+    });
+    return res.status(201).json(serializeBarTask(task));
+  } catch (error) {
+    return sendApiError(res, error, {
+      context: 'Bar task creation failed',
+      fallbackMessage: 'Failed to create bar task',
+    });
+  }
+});
+
+router.patch('/tasks/:taskId', requireBarManager, async (req, res) => {
+  try {
+    if (!isObjectId(req.params.taskId)) return res.status(400).json({ message: 'Invalid task id' });
+    const task = await BarTask.findById(req.params.taskId);
+    if (!task) return res.status(404).json({ message: 'Task not found' });
+    if (req.body?.title !== undefined) {
+      const title = cleanString(req.body.title, 500);
+      if (title.length < 2) return res.status(400).json({ message: 'Task description is required' });
+      task.title = title;
+    }
+    if (req.body?.scheduledDate !== undefined) {
+      const scheduledDate = cleanString(req.body.scheduledDate, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(scheduledDate)) {
+        return res.status(400).json({ message: 'Task date must use YYYY-MM-DD format' });
+      }
+      task.scheduledDate = scheduledDate;
+    }
+    if (req.body?.completed !== undefined) {
+      const completed = cleanBoolean(req.body.completed, Boolean(task.completedAt));
+      const username = String(req.auth?.username || req.auth?.email || '');
+      task.completedAt = completed ? (task.completedAt || new Date()) : null;
+      task.completedBy = completed ? (task.completedBy || username) : '';
+    }
+    task.updatedBy = String(req.auth?.username || req.auth?.email || '');
+    await task.save();
+    return res.json(serializeBarTask(task));
+  } catch (error) {
+    return sendApiError(res, error, {
+      context: 'Bar task update failed',
+      fallbackMessage: 'Failed to update bar task',
+    });
+  }
+});
+
+router.delete('/tasks/:taskId', requireBarManager, async (req, res) => {
+  try {
+    if (!isObjectId(req.params.taskId)) return res.status(400).json({ message: 'Invalid task id' });
+    const removed = await BarTask.findByIdAndDelete(req.params.taskId);
+    if (!removed) return res.status(404).json({ message: 'Task not found' });
+    return res.status(204).end();
+  } catch (error) {
+    return sendApiError(res, error, {
+      context: 'Bar task deletion failed',
+      fallbackMessage: 'Failed to delete bar task',
+    });
+  }
+});
 
 router.get('/events', async (req, res) => {
   try {

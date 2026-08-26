@@ -5,6 +5,20 @@ export const normalizeBarEventNumber = (value) => String(value || '')
   .toUpperCase()
   .replace(/\s+/g, '');
 
+export const normalizeBarEventBaseNumber = (value) => {
+  const normalized = normalizeBarEventNumber(value);
+  const match = normalized.match(/^E\d+/);
+  return match ? match[0] : normalized;
+};
+
+export const barEventNumbersMatch = (left, right) => {
+  const normalizedLeft = normalizeBarEventNumber(left);
+  const normalizedRight = normalizeBarEventNumber(right);
+  if (!normalizedLeft || !normalizedRight) return false;
+  return normalizedLeft === normalizedRight
+    || normalizeBarEventBaseNumber(normalizedLeft) === normalizeBarEventBaseNumber(normalizedRight);
+};
+
 const normalizeEventName = (value) => String(value || '')
   .toLowerCase()
   .replace(/&/g, ' and ')

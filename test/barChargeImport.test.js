@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { inferBarChargeDateRange, prepareBarChargeImport } from '../utils/barChargeImport.js';
+import { barEventNumbersMatch, inferBarChargeDateRange, prepareBarChargeImport } from '../utils/barChargeImport.js';
+
+test('PO base event number matches the full Nowsta event id', () => {
+  assert.equal(barEventNumbersMatch('E22346', 'E22346-S60940'), true);
+  assert.equal(barEventNumbersMatch('E22346', 'E22346 - S60940'), true);
+  assert.equal(barEventNumbersMatch('E22346', 'E22347-S60940'), false);
+});
 
 test('charge import date range is inferred from the workbook rows', () => {
   assert.deepEqual(inferBarChargeDateRange([

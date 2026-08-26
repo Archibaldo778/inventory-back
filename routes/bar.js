@@ -15,6 +15,7 @@ import {
 } from '../utils/barEventAccounting.js';
 import { normalizeBarEventDate } from '../utils/barEventDates.js';
 import {
+  barEventNumbersMatch,
   inferBarChargeDateRange,
   normalizeBarEventNumber,
   prepareBarChargeImport,
@@ -1123,14 +1124,14 @@ router.post('/events/:id/packout', async (req, res) => {
     }
     const importedEventNumber = normalizeBarEventNumber(cleanString(req.body?.eventNumber, 120));
     const storedEventNumber = normalizeBarEventNumber(event.eventNumber);
-    if (importedEventNumber && storedEventNumber && importedEventNumber !== storedEventNumber) {
+    if (importedEventNumber && storedEventNumber && !barEventNumbersMatch(importedEventNumber, storedEventNumber)) {
       return res.status(409).json({ message: `PO Event # ${importedEventNumber} does not match this event (${storedEventNumber})` });
     }
     let linkedDashboardEvent = null;
     if (importedEventNumber && isObjectId(event.linkedEventId)) {
       linkedDashboardEvent = await Event.findById(event.linkedEventId).select('externalId');
       const canonicalEventNumber = normalizeBarEventNumber(linkedDashboardEvent?.externalId);
-      if (canonicalEventNumber && canonicalEventNumber !== importedEventNumber) {
+      if (canonicalEventNumber && !barEventNumbersMatch(canonicalEventNumber, importedEventNumber)) {
         return res.status(409).json({ message: `PO Event # ${importedEventNumber} does not match the linked event (${canonicalEventNumber})` });
       }
     }

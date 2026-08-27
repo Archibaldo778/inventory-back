@@ -136,12 +136,17 @@ const parseRows = (rows, startSection = '', startScope = 'review', startIndex = 
       return;
     }
     const quantityState = parseQuantity(quantityCell);
+    const inferredScope = classifyRecognizedSection(name);
+    const preparedBeverageSection = /\b(?:cocktails?|mocktails?)\b/i.test(currentSection);
+    const itemScope = currentScope === 'non_bar'
+      ? 'non_bar'
+      : (inferredScope === 'alcohol' && !preparedBeverageSection ? 'alcohol' : currentScope);
     items.push({
       id: `google-scan-${startIndex + items.length + 1}`,
       name,
       section: currentSection,
-      scope: currentScope,
-      includedByDefault: currentScope === 'alcohol' || currentScope === 'bar_support',
+      scope: itemScope,
+      includedByDefault: itemScope === 'alcohol' || itemScope === 'bar_support',
       quantity: quantityState.quantity,
       quantityText: quantityState.quantityText,
       notes: columns.notes >= 0 ? cleanText(cells[columns.notes], 1000) : '',

@@ -71,6 +71,26 @@ test('server parser keeps every Milken alcohol section instead of only OTHER LIQ
   assert.ok(result.items.every((item) => item.scope === 'alcohol'));
 });
 
+test('spirit words in cocktail names do not turn prepared cocktails into returnable alcohol', () => {
+  const result = parseRecognizedPackout({
+    text: 'Event: Milken Institute',
+    tables: [{
+      headerRows: [['Name', 'Qty', 'Notes/Comments', 'Delivered', 'Returned']],
+      bodyRows: [
+        ['SPECIALTY COCKTAILS', '', '', '', ''],
+        ['GIN BASIL SMASH', '150', '', '', ''],
+        ['ADDITIONAL', '', '', '', ''],
+        ['Bitters', '1', '', '', ''],
+      ],
+    }],
+  });
+
+  assert.deepEqual(result.items.map((item) => [item.name, item.scope, item.returnRequired]), [
+    ['GIN BASIL SMASH', 'bar_support', false],
+    ['Bitters', 'alcohol', true],
+  ]);
+});
+
 test('recognized names match exact aliases and leave ambiguous suggestions unconfirmed', () => {
   const catalog = [
     { _id: 'a1', name: 'Tito’s Handmade Vodka', aliases: ['Titos Vodka', 'Titos Vodka 1L'] },

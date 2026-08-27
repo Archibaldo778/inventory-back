@@ -43,6 +43,34 @@ test('recognized Form Parser rows preserve sections and quantities', () => {
   assert.equal(result.metadata.eventName, 'Sample Event');
 });
 
+test('server parser keeps every Milken alcohol section instead of only OTHER LIQUOR and BEER', () => {
+  const sections = [
+    ['HOUSE COCKTAIL/ DINNER WINE', 'Sancerre, Domaine Reverdy'],
+    ['SPARKLING', 'Louis Roederer Brut Collection Champagne'],
+    ['VODKA', "Tito's"],
+    ['GIN', 'Hendricks'],
+    ['TEQUILA', 'Patron Silver'],
+    ['WHISKEY', 'Bulleit Bourbon'],
+    ['RUM', 'El Dorado 12 Yr'],
+    ['OTHER LIQUOR', 'Aperol'],
+    ['BEER', 'Assorted'],
+  ];
+  const bodyRows = sections.flatMap(([section, name]) => [
+    [section, '', '', '', ''],
+    [name, '3', '', '', ''],
+  ]);
+  const result = parseRecognizedPackout({
+    text: 'Event: Milken Institute',
+    tables: [{
+      headerRows: [['Name', 'Qty', 'Notes/Comments', 'Delivered', 'Returned']],
+      bodyRows,
+    }],
+  });
+  assert.equal(result.items.length, sections.length);
+  assert.deepEqual(result.items.map((item) => item.section), sections.map(([section]) => section));
+  assert.ok(result.items.every((item) => item.scope === 'alcohol'));
+});
+
 test('recognized names match exact aliases and leave ambiguous suggestions unconfirmed', () => {
   const catalog = [
     { _id: 'a1', name: 'Tito’s Handmade Vodka', aliases: ['Titos Vodka', 'Titos Vodka 1L'] },

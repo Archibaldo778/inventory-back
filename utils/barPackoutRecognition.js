@@ -38,7 +38,7 @@ export const classifyRecognizedSection = (value) => {
   if (/\b(?:staff|kitchen|sanitation|disposable|equipment|rental|linen|decor)\b/i.test(section)) {
     return 'non_bar';
   }
-  if (/\b(?:alcohol|liquor|spirits?|wines?|champagne|prosecco|beer|cider|seltzer|vermouth|amaro|bitters)\b/i.test(section)) {
+  if (/\b(?:alcohol|liquor|spirits?|wines?|sparkling|champagne|prosecco|beer|cider|seltzer|vermouth|amaro|bitters|vodka|gin|tequila|mezcal|whisk(?:e)?y|bourbon|scotch|rum|cognac|brandy|sancerre|chablis|chardonnay|sauvignon|cabernet|merlot|pinot|ros[eé])\b/i.test(section)) {
     return 'alcohol';
   }
   if (/\b(?:cocktails?|mocktails?|ice|waters?|garnish|mixers?|juices?|sodas?|beverages?|bar supplies?)\b/i.test(section)) {

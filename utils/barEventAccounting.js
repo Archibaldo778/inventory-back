@@ -117,6 +117,12 @@ export const calculateBarEventAccounting = (event = {}) => {
     accounting: calculateBarItemAccounting(item),
   }));
   const includedLines = lines.filter(({ item }) => item?.included !== false);
+  const sentInventoryCost = round(
+    includedLines.reduce((sum, line) => (
+      sum + (line.accounting.sentQty * line.accounting.unitCost)
+    ), 0),
+    2
+  );
   const inventoryCost = round(
     includedLines.reduce((sum, line) => sum + line.accounting.actualCost, 0),
     2
@@ -128,6 +134,7 @@ export const calculateBarEventAccounting = (event = {}) => {
     : null;
   const packageAccounting = calculateBarPackageCharge(event);
   return {
+    sentInventoryCost,
     inventoryCost,
     clientCharge,
     grossProfit,

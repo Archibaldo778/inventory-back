@@ -117,6 +117,7 @@ test('prepared beverages count toward event cost without blocking return submiss
   });
 
   assert.equal(totals.inventoryCost, 90);
+  assert.equal(totals.sentInventoryCost, 90);
   assert.equal(totals.grossProfit, 410);
   assert.equal(totals.includedItemCount, 1);
   assert.equal(totals.confirmedItemCount, 1);
@@ -173,6 +174,7 @@ test('bar event accounting uses included items and final client charge', () => {
   });
 
   assert.deepEqual(totals, {
+    sentInventoryCost: 200,
     inventoryCost: 120,
     clientCharge: 1000,
     grossProfit: 880,
@@ -208,6 +210,7 @@ test('old non-bar rows do not affect event totals', () => {
   });
 
   assert.equal(totals.inventoryCost, 20);
+  assert.equal(totals.sentInventoryCost, 20);
   assert.equal(totals.includedItemCount, 1);
 });
 

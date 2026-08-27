@@ -61,3 +61,15 @@ test('recognized names match exact aliases and leave ambiguous suggestions uncon
   assert.equal(matched[2].beverageItemId, null);
   assert.equal(matched[2].catalogMatch.status, 'unmatched');
 });
+
+test('Domaine Ott PO wording matches the existing By.Ott inventory item', () => {
+  const matched = matchRecognizedItemsToCatalog([
+    { name: 'Domaine Ott, Cotes de Provence Rose' },
+  ], [{
+    _id: 'ott-rose',
+    name: 'Domaines Ott By.Ott Rosé',
+    aliases: ['By Ott (Rosé)'],
+  }]);
+  assert.equal(matched[0].beverageItemId, 'ott-rose');
+  assert.equal(matched[0].catalogMatch.status, 'exact');
+});

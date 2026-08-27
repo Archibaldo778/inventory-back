@@ -10,15 +10,21 @@ const cleanText = (value, maxLength = 500) => String(value ?? '')
   .trim()
   .slice(0, maxLength);
 
-export const normalizeOcrCatalogName = (value) => cleanText(value, 240)
-  .toLowerCase()
-  .normalize('NFKD')
-  .replace(/[\u0300-\u036f]/g, '')
-  .replace(/\b\d+(?:[.,]\d+)?\s*(?:ml|cl|l|liters?|litres?|ounces?|oz)\b/g, ' ')
-  .replace(/\b(?:bottle|bottles|case|cases|ml|cl|liters?|litres?|ounces?|oz)\b/g, ' ')
-  .replace(/[^a-z0-9]+/g, ' ')
-  .replace(/\s+/g, ' ')
-  .trim();
+export const normalizeOcrCatalogName = (value) => {
+  const normalized = cleanText(value, 240)
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\b\d+(?:[.,]\d+)?\s*(?:ml|cl|l|liters?|litres?|ounces?|oz)\b/g, ' ')
+    .replace(/\b(?:bottle|bottles|case|cases|ml|cl|liters?|litres?|ounces?|oz)\b/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (/\bott\b/.test(normalized) && /\brose\b/.test(normalized) && (/\bby ott\b/.test(normalized) || /\bcotes? de provence\b/.test(normalized))) {
+    return 'domaines ott by ott rose';
+  }
+  return normalized;
+};
 
 export const classifyRecognizedSection = (value) => {
   const section = cleanText(value, 160);

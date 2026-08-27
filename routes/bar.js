@@ -120,6 +120,17 @@ const addAudit = (event, auth, action, details = {}) => {
 const serializeBarEvent = (source, { includeFinancials = false } = {}) => {
   const event = typeof source?.toObject === 'function' ? source.toObject() : { ...(source || {}) };
   const totals = calculateBarEventAccounting(event);
+  const captainSyncAudit = [...(Array.isArray(event.audit) ? event.audit : [])].reverse().find((entry) => (
+    ['guest_received_saved', 'guest_returns_submitted'].includes(String(entry?.action || ''))
+  ));
+  event.captainSync = captainSyncAudit ? {
+    action: captainSyncAudit.action,
+    reporterName: captainSyncAudit.username || event.guestIntake?.reporterName || '',
+    syncedAt: captainSyncAudit.at || null,
+    clientSavedAt: captainSyncAudit.details?.clientSavedAt || '',
+    queuedAt: captainSyncAudit.details?.queuedAt || '',
+    deviceId: captainSyncAudit.details?.clientDeviceId || '',
+  } : null;
   event.items = (Array.isArray(event.items) ? event.items : []).map((item) => {
     const next = {
       ...item,

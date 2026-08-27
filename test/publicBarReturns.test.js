@@ -4,10 +4,20 @@ import {
   buildGuestEventDedupeKey,
   buildGuestEventChoices,
   guestEventNameSimilarity,
+  guestMutationWasApplied,
   safeGuestReturnsPinEqual,
   selectGuestEventNameMatch,
   selectGuestEventNumberMatch,
 } from '../routes/publicBarReturns.js';
+
+test('guest mutation ids make offline retries idempotent', () => {
+  const event = {
+    audit: [{ action: 'guest_returns_submitted', details: { clientMutationId: 'device-mutation-1' } }],
+  };
+  assert.equal(guestMutationWasApplied(event, 'guest_returns_submitted', 'device-mutation-1'), true);
+  assert.equal(guestMutationWasApplied(event, 'guest_received_saved', 'device-mutation-1'), false);
+  assert.equal(guestMutationWasApplied(event, 'guest_returns_submitted', ''), false);
+});
 
 test('guest returns PIN comparison accepts only an exact PIN', () => {
   assert.equal(safeGuestReturnsPinEqual('2468', '2468'), true);

@@ -37,6 +37,32 @@ const ipKey = (req) => clean(req.ip || req.socket?.remoteAddress || 'unknown', 1
 const MIN_EVENT_NAME_SIMILARITY = 0.6;
 const AMBIGUOUS_SCORE_GAP = 0.05;
 
+export const guestMutationWasApplied = (event, action, clientMutationId) => {
+  const mutationId = clean(clientMutationId, 120);
+  if (!mutationId) return false;
+  return (Array.isArray(event?.audit) ? event.audit : []).some((entry) => (
+    clean(entry?.action, 80) === action
+    && clean(entry?.details?.clientMutationId, 120) === mutationId
+  ));
+};
+
+const mutationDetails = (body, details = {}) => ({
+  ...details,
+  clientMutationId: clean(body?.clientMutationId, 120),
+  clientDeviceId: clean(body?.clientDeviceId, 120),
+  clientSavedAt: clean(body?.clientSavedAt, 80),
+  queuedAt: clean(body?.queuedAt, 80),
+});
+
+const findAppliedGuestMutation = async (eventId, action, clientMutationId) => {
+  const mutationId = clean(clientMutationId, 120);
+  if (!mutationId || !isObjectId(eventId)) return null;
+  return BarEvent.findOne({
+    _id: eventId,
+    audit: { $elemMatch: { action, 'details.clientMutationId': mutationId } },
+  });
+};
+
 const levenshteinDistance = (left, right) => {
   if (!left) return right.length;
   if (!right) return left.length;
@@ -181,6 +207,7 @@ const publicEvent = (event) => ({
   eventNumber: clean(event?.eventNumber, 80),
   guestCount: Number.isFinite(Number(event?.guestCount)) ? Number(event.guestCount) : null,
   status: clean(event?.status, 40),
+  revision: Number(event?.revision || 0),
   pendingReview: event?.guestIntake?.pendingReview === true,
   hasPackout: Array.isArray(event?.items) && event.items.length > 0,
   items: (Array.isArray(event?.items) ? event.items : []).map(publicItem),
@@ -479,6 +506,8 @@ router.post('/:eventId/items', async (req, res) => {
 
 router.patch('/:eventId/received', async (req, res) => {
   try {
+    const duplicate = await findAppliedGuestMutation(req.params.eventId, 'guest_received_saved', req.body?.clientMutationId);
+    if (duplicate) return res.json({ ok: true, duplicate: true, event: publicEvent(duplicate) });
     const event = await loadEditableEvent(req, res);
     if (!event) return undefined;
     const reporterName = clean(req.body?.reporterName, 160);
@@ -495,7 +524,7 @@ router.patch('/:eventId/received', async (req, res) => {
     if (event.status === 'draft' || event.status === 'ready') event.status = 'in_progress';
     event.guestIntake.reporterName = reporterName;
     event.revision += 1;
-    event.audit.push({ action: 'guest_received_saved', username: reporterName, at: now, details: { count: receivedResult.count } });
+    event.audit.push({ action: 'guest_received_saved', username: reporterName, at: now, details: mutationDetails(req.body, { count: receivedResult.count }) });
     await event.save();
     return res.json({ ok: true, event: publicEvent(event) });
   } catch (error) {
@@ -505,6 +534,8 @@ router.patch('/:eventId/received', async (req, res) => {
 
 router.patch('/:eventId/returns', async (req, res) => {
   try {
+    const duplicate = await findAppliedGuestMutation(req.params.eventId, 'guest_returns_submitted', req.body?.clientMutationId);
+    if (duplicate) return res.json({ ok: true, duplicate: true, event: publicEvent(duplicate) });
     const event = await loadEditableEvent(req, res);
     if (!event) return undefined;
     const reporterName = clean(req.body?.reporterName, 160);
@@ -557,7 +588,7 @@ router.patch('/:eventId/returns', async (req, res) => {
     event.guestIntake.reporterName = reporterName;
     event.guestIntake.lastSubmittedAt = now;
     event.revision += 1;
-    event.audit.push({ action: 'guest_returns_submitted', username: reporterName, at: now, details: { count: updates.length } });
+    event.audit.push({ action: 'guest_returns_submitted', username: reporterName, at: now, details: mutationDetails(req.body, { count: updates.length }) });
     await event.save();
     return res.json({ ok: true, event: publicEvent(event) });
   } catch (error) {

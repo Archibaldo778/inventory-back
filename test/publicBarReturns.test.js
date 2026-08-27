@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   buildGuestEventDedupeKey,
   buildGuestEventChoices,
+  filterGuestBarReportsForActiveEvents,
   guestEventNameSimilarity,
   guestMutationWasApplied,
   safeGuestReturnsPinEqual,
@@ -71,6 +72,17 @@ test('ambiguous guest lookup can show every event on the date without duplicatin
   ]);
   assert.deepEqual(choices.map((choice) => choice.name), ['Acme Dinner East', 'Acme Dinner West', 'Other Event']);
   assert.equal(choices.filter((choice) => choice.name === 'Acme Dinner East').length, 1);
+});
+
+test('captain lookup excludes bar reports linked to deleted dashboard duplicates', () => {
+  const active = { _id: 'active-dashboard' };
+  const reports = filterGuestBarReportsForActiveEvents([
+    { _id: 'correct-report', linkedEventId: 'active-dashboard', items: Array(29) },
+    { _id: 'stale-report', linkedEventId: 'deleted-dashboard', items: Array(9) },
+    { _id: 'manual-report', linkedEventId: null, items: [] },
+  ], [active]);
+
+  assert.deepEqual(reports.map((report) => report._id), ['correct-report', 'manual-report']);
 });
 
 test('a unique first word can select an event but a shared first word stays ambiguous', () => {

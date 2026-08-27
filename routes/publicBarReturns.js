@@ -246,10 +246,21 @@ const guestEventChoice = (event, source) => ({
   eventNumber: clean(source === 'dashboard' ? event?.externalId : event?.eventNumber, 80),
 });
 
+export const filterGuestBarReportsForActiveEvents = (reports, dashboardEvents) => {
+  const activeDashboardIds = new Set((Array.isArray(dashboardEvents) ? dashboardEvents : [])
+    .map((event) => String(event?._id || ''))
+    .filter(Boolean));
+  return (Array.isArray(reports) ? reports : []).filter((report) => {
+    const linkedEventId = String(report?.linkedEventId || '');
+    return !linkedEventId || activeDashboardIds.has(linkedEventId);
+  });
+};
+
 const dateChoices = (reports, dashboardEvents) => {
-  const linkedIds = new Set((reports || []).map((event) => String(event?.linkedEventId || '')).filter(Boolean));
+  const activeReports = filterGuestBarReportsForActiveEvents(reports, dashboardEvents);
+  const linkedIds = new Set(activeReports.map((event) => String(event?.linkedEventId || '')).filter(Boolean));
   return [
-    ...(reports || []).map((event) => guestEventChoice(event, 'bar')),
+    ...activeReports.map((event) => guestEventChoice(event, 'bar')),
     ...(dashboardEvents || [])
       .filter((event) => !linkedIds.has(String(event?._id || '')))
       .map((event) => guestEventChoice(event, 'dashboard')),
@@ -282,10 +293,15 @@ router.post('/offline-events', async (_req, res) => {
     const from = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
     const to = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 30);
     const dateString = (value) => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
-    const events = await BarEvent.find({
+    const reports = await BarEvent.find({
       eventDate: { $gte: dateString(from), $lte: dateString(to) },
       status: { $nin: ['reviewed', 'closed'] },
     }).sort({ eventDate: 1, name: 1 }).limit(200);
+    const linkedIds = [...new Set(reports.map((event) => String(event?.linkedEventId || '')).filter(isObjectId))];
+    const dashboardEvents = linkedIds.length
+      ? await Event.find({ _id: { $in: linkedIds }, status: { $not: /^deleted$/i } }).select('_id').lean()
+      : [];
+    const events = filterGuestBarReportsForActiveEvents(reports, dashboardEvents);
     return res.json({ events: events.map(publicEvent) });
   } catch (error) {
     return sendApiError(res, error, { context: 'Offline bar events load failed', fallbackMessage: 'Could not prepare offline events' });
@@ -348,6 +364,13 @@ router.post('/select-event', async (req, res) => {
     let event;
     if (source === 'bar') {
       event = await BarEvent.findOne({ _id: id, eventDate });
+      if (event?.linkedEventId) {
+        const activeDashboardEvent = await Event.exists({
+          _id: event.linkedEventId,
+          status: { $not: /^deleted$/i },
+        });
+        if (!activeDashboardEvent) event = null;
+      }
     } else {
       const dashboardEvent = await Event.findOne({ _id: id, status: { $not: /^deleted$/i } })
         .select('title date client meta');

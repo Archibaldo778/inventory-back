@@ -10,6 +10,14 @@ const isPreparedBeverageSupportRow = (item = {}) => (
 );
 
 export const getPreparedBeverageType = (item = {}) => {
+  const section = String(item?.section || '').trim();
+  const explicitType = /^\s*mocktails?\s*$/i.test(section)
+    ? 'mocktail'
+    : (/^\s*(?:specialty\s+)?cocktails?\s*$/i.test(section) ? 'cocktail' : '');
+  if (explicitType) {
+    if (/\b(?:garnish|ice|cups?|glassware|napkins?|straws?|mixers?|juices?|sodas?)\b/i.test(String(item?.name || '').trim())) return '';
+    return explicitType;
+  }
   if (String(item?.scope || '') === 'alcohol') return '';
   if (isPreparedBeverageSupportRow(item)) return '';
   const source = sourceText(item);

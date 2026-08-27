@@ -38,6 +38,7 @@ test('recognized Form Parser rows preserve sections and quantities', () => {
     ['ARM IN ARM', 30, 'bar_support'],
   ]);
   assert.equal(result.items[4].returnRequired, false);
+  assert.equal(result.items[1].returnRequired, true);
   assert.equal(result.items[4].unitCostSnapshot, 3);
   assert.equal(result.packoutType, 'bar_only');
   assert.equal(result.metadata.eventName, 'Sample Event');
@@ -88,6 +89,56 @@ test('spirit words in cocktail names do not turn prepared cocktails into returna
   assert.deepEqual(result.items.map((item) => [item.name, item.scope, item.returnRequired]), [
     ['GIN BASIL SMASH', 'bar_support', false],
     ['Bitters', 'alcohol', true],
+  ]);
+});
+
+test('Ranch Water remains a prepared cocktail instead of being filtered as water', () => {
+  const result = parseRecognizedPackout({
+    tables: [{
+      headerRows: [['Name', 'Qty', 'Notes/Comments', 'Delivered', 'Returned']],
+      bodyRows: [
+        ['COCKTAIL', '', '', '', ''],
+        ['RANCH WATER', '120', '', '', ''],
+      ],
+    }],
+  });
+  assert.equal(result.items.length, 1);
+  assert.equal(result.items[0].preparedBeverageType, 'cocktail');
+  assert.equal(result.items[0].returnRequired, false);
+});
+
+test('equipment containing wine champagne or rose words is excluded from captain returns', () => {
+  const result = parseRecognizedPackout({
+    tables: [{
+      headerRows: [['Name', 'Qty', 'Notes/Comments', 'Delivered', 'Returned']],
+      bodyRows: [
+        ['TRAYS', '', '', '', ''],
+        ['Long oval rose gold tray', '2', '', '', ''],
+        ['Charleston Wine/Champagne Bucket', '2', '', '', ''],
+        ['RISER', '', '', '', ''],
+        ['Charleston Wine/Champagne Bucket', '1', '', '', ''],
+        ['ADDITIONAL', '', '', '', ''],
+        ['Bitters', '2', '', '', ''],
+      ],
+    }],
+  });
+
+  assert.deepEqual(result.items.map((item) => item.name), ['Bitters']);
+});
+
+test('fallback OCR keeps alcohol rows whose names also look like section headings', () => {
+  const result = parseRecognizedPackout({
+    text: [
+      'Event: Sample Event',
+      'SPARKLING',
+      'Champagne Louis Roederer  10',
+      'TRAYS',
+      'Charleston Wine/Champagne Bucket  2',
+    ].join('\n'),
+  });
+
+  assert.deepEqual(result.items.map((item) => [item.name, item.quantity]), [
+    ['Champagne Louis Roederer', 10],
   ]);
 });
 

@@ -104,12 +104,8 @@ export const guestEventNameSimilarity = (leftValue, rightValue) => {
 };
 
 export const selectGuestEventNameMatch = (query, candidates, getName = (candidate) => candidate?.name) => {
-  const unique = new Map();
-  (Array.isArray(candidates) ? candidates : []).forEach((candidate) => {
-    const key = normalizedName(getName(candidate));
-    if (key && !unique.has(key)) unique.set(key, candidate);
-  });
-  const ranked = [...unique.values()]
+  const ranked = (Array.isArray(candidates) ? candidates : [])
+    .filter((candidate) => normalizedName(getName(candidate)))
     .map((candidate) => ({ candidate, score: guestEventNameSimilarity(query, getName(candidate)) }))
     .filter((entry) => entry.score >= MIN_EVENT_NAME_SIMILARITY)
     .sort((left, right) => right.score - left.score);
@@ -200,7 +196,7 @@ export const serializeGuestBarItem = (item) => ({
   returnRequired: item?.included !== false && requiresBarReturn(item),
 });
 
-const publicEvent = (event) => ({
+export const publicEvent = (event) => ({
   id: String(event?._id || ''),
   name: clean(event?.name, 240),
   eventDate: clean(event?.eventDate, 80),
@@ -210,7 +206,7 @@ const publicEvent = (event) => ({
   status: clean(event?.status, 40),
   revision: Number(event?.revision || 0),
   pendingReview: event?.guestIntake?.pendingReview === true,
-  hasPackout: Array.isArray(event?.items) && event.items.length > 0,
+  hasPackout: (Array.isArray(event?.items) && event.items.length > 0) || Boolean(event?.packout?.importedAt),
   items: (Array.isArray(event?.items) ? event.items : []).map(serializeGuestBarItem),
 });
 

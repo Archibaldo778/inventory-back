@@ -6,11 +6,21 @@ import {
   filterGuestBarReportsForActiveEvents,
   guestEventNameSimilarity,
   guestMutationWasApplied,
+  publicEvent,
   safeGuestReturnsPinEqual,
   serializeGuestBarItem,
   selectGuestEventNameMatch,
   selectGuestEventNumberMatch,
 } from '../routes/publicBarReturns.js';
+
+test('captain treats an imported zero-return PO as attached', () => {
+  const event = publicEvent({
+    _id: 'event', name: 'No return event', eventDate: '2026-08-29', items: [],
+    packout: { importedAt: new Date('2026-08-27T12:00:00Z') },
+  });
+  assert.equal(event.hasPackout, true);
+  assert.deepEqual(event.items, []);
+});
 
 test('captain payload keeps included PO items visible even when they do not require returns', () => {
   const cocktail = serializeGuestBarItem({
@@ -103,6 +113,15 @@ test('guest event lookup rejects ambiguous fuzzy matches', () => {
   const result = selectGuestEventNameMatch('Acme Dinner', [
     { id: 'one', name: 'Acme Dinner East' },
     { id: 'two', name: 'Acme Dinner West' },
+  ]);
+  assert.equal(result.match, null);
+  assert.equal(result.ambiguous, true);
+});
+
+test('identically named active events stay ambiguous so the captain can choose by Event ID', () => {
+  const result = selectGuestEventNameMatch('Prada Day 1', [
+    { id: 'nowsta', name: 'Prada Day 1', eventNumber: 'E22304 - S60815' },
+    { id: 'po', name: 'Prada Day 1', eventNumber: 'E22301' },
   ]);
   assert.equal(result.match, null);
   assert.equal(result.ambiguous, true);

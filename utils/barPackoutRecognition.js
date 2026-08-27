@@ -35,13 +35,13 @@ export const normalizeOcrCatalogName = (value) => {
 export const classifyRecognizedSection = (value) => {
   const section = cleanText(value, 160);
   if (!section) return 'review';
-  if (/\b(?:staff|kitchen|sanitation|disposable|equipment|rental|linen|decor)\b/i.test(section)) {
+  if (/\b(?:staff|kitchen|sanitation|disposable|equipment|rental|linen|decor|trays?|risers?)\b/i.test(section)) {
     return 'non_bar';
   }
   if (/\b(?:alcohol|liquor|spirits?|wines?|sparkling|champagne|prosecco|beer|cider|seltzer|vermouth|amaro|bitters|vodka|gin|tequila|mezcal|whisk(?:e)?y|bourbon|scotch|rum|cognac|brandy|sancerre|chablis|chardonnay|sauvignon|cabernet|merlot|pinot|ros[eé])\b/i.test(section)) {
     return 'alcohol';
   }
-  if (/\b(?:cocktails?|mocktails?|ice|waters?|garnish|mixers?|juices?|sodas?|beverages?|bar supplies?)\b/i.test(section)) {
+  if (/\b(?:cocktails?|mocktails?|ice|waters?|garnish|mixers?|juices?|sodas?|beverages?|bar supplies?|additional)\b/i.test(section)) {
     return 'bar_support';
   }
   return 'review';
@@ -138,9 +138,10 @@ const parseRows = (rows, startSection = '', startScope = 'review', startIndex = 
     const quantityState = parseQuantity(quantityCell);
     const inferredScope = classifyRecognizedSection(name);
     const preparedBeverageSection = /\b(?:cocktails?|mocktails?)\b/i.test(currentSection);
+    const alcoholInferenceAllowed = !currentSection || currentScope === 'bar_support';
     const itemScope = currentScope === 'non_bar'
       ? 'non_bar'
-      : (inferredScope === 'alcohol' && !preparedBeverageSection ? 'alcohol' : currentScope);
+      : (inferredScope === 'alcohol' && alcoholInferenceAllowed && !preparedBeverageSection ? 'alcohol' : currentScope);
     items.push({
       id: `google-scan-${startIndex + items.length + 1}`,
       name,
@@ -158,21 +159,23 @@ const parseRows = (rows, startSection = '', startScope = 'review', startIndex = 
 };
 
 const parseFallbackText = (text, startIndex = 0) => {
-  const rows = String(text || '').split(/\r?\n/).map((line) => cleanText(line, 500)).filter(Boolean);
+  const rows = String(text || '').split(/\r?\n/)
+    .map((line) => String(line || '').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '').trim().slice(0, 500))
+    .filter(Boolean);
   const items = [];
   const sections = [];
   let section = '';
   let scope = 'review';
   rows.forEach((line) => {
     if (/^(?:event|sales rep|guests?|delivery time|date po modified)\s*:/i.test(line)) return;
+    const match = line.match(/^(.+?)(?:\t+| {2,})(\d+(?:[.,]\d+)?)(?:(?:\t+| {2,})(.*))?$/);
     const classified = classifyRecognizedSection(line);
-    if (classified !== 'review' || isUppercaseSection(line)) {
+    if (!match && (classified !== 'review' || isUppercaseSection(line))) {
       section = line;
       scope = classified;
       sections.push({ name: line, scope });
       return;
     }
-    const match = line.match(/^(.+?)\s{2,}(\d+(?:[.,]\d+)?)(?:\s{2,}(.*))?$/);
     if (!match) return;
     const quantityState = parseQuantity(match[2]);
     items.push({

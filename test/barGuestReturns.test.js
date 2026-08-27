@@ -18,3 +18,18 @@ test('captain can save received quantities without confirming final returns', ()
   assert.equal(items[1].sentQtyPending, false);
   assert.equal(items[1].deliveredQty, 4);
 });
+
+test('received save is atomic when a row is missing or duplicated', () => {
+  const items = [
+    { _id: 'a', name: 'Vodka', scope: 'alcohol', included: true, sentQty: 3, deliveredQty: null },
+    { _id: 'b', name: 'Gin', scope: 'alcohol', included: true, sentQty: 2, deliveredQty: null },
+  ];
+  const result = applyGuestReceivedRows(items, [
+    { itemId: 'a', deliveredQty: 3 },
+    { itemId: 'a', deliveredQty: 2 },
+  ]);
+
+  assert.equal(result.valid, false);
+  assert.equal(items[0].deliveredQty, null);
+  assert.equal(items[1].deliveredQty, null);
+});

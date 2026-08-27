@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { barItemIdentityKey, mergeManualItemsWithPackout, mergePackoutDocumentItems, schedulePreparedItemsForEvent } from '../utils/barManualItems.js';
+import { barItemIdentityKey, mergeManualItemsWithPackout, mergePackoutDocumentItems, preservePackoutOperationalState, schedulePreparedItemsForEvent } from '../utils/barManualItems.js';
 
 test('manual liquor and cocktails keep stable catalog identities', () => {
   assert.equal(barItemIdentityKey({ beverageItemId: 'ABC123', name: 'Vodka' }), 'beverage:abc123');
@@ -51,6 +51,22 @@ test('a PO import updates products without deleting Kitchen Menu drinks', () => 
     existing[1],
     { ...po[0], entrySource: 'packout' },
   ]);
+});
+
+test('updated PO collapses By Ott aliases while preserving confirmed captain returns', () => {
+  const existing = [
+    { name: 'Domaine Ott, Cotes de Provence Rose', entrySource: 'packout', sentQty: 24, returnedOpenQty: 0, returnConfirmed: false },
+    { name: 'By Ott, Provence Rosé', entrySource: 'packout', sentQty: 10, deliveredQty: 12, returnedOpenQty: 11, returnConfirmed: true, updatedBy: 'Alexander' },
+  ];
+  const imported = [{ name: 'Domaine Ott, Cotes de Provence Rose', entrySource: 'packout', sentQty: 24 }];
+  const merged = mergePackoutDocumentItems(existing, imported, ['po', 'kitchen_menu']);
+  const preserved = preservePackoutOperationalState(existing, merged);
+  assert.equal(preserved.length, 1);
+  assert.equal(preserved[0].sentQty, 24);
+  assert.equal(preserved[0].deliveredQty, 12);
+  assert.equal(preserved[0].returnedOpenQty, 11);
+  assert.equal(preserved[0].returnConfirmed, true);
+  assert.equal(preserved[0].updatedBy, 'Alexander');
 });
 
 test('packout import schedules cocktails and mocktails on the event date without moving existing tasks', () => {

@@ -24,7 +24,7 @@ import {
 import { sendApiError } from '../utils/apiErrors.js';
 import { clearApiCacheGroups } from '../utils/apiCache.js';
 import { cocktailServingsForGuests, resolveCocktailRecipeKey } from '../utils/cocktailRecipes.js';
-import { barItemIdentityKey, mergePackoutDocumentItems, schedulePreparedItemsForEvent } from '../utils/barManualItems.js';
+import { barItemIdentityKey, mergePackoutDocumentItems, preservePackoutOperationalState, schedulePreparedItemsForEvent } from '../utils/barManualItems.js';
 import { recognizeDocuments } from '../utils/googleDocumentAi.js';
 import { snapshotBarDocumentImport } from '../utils/documentImportAudit.js';
 import {
@@ -1155,7 +1155,10 @@ router.post('/events/:id/packout', async (req, res) => {
       allowFinancials: manager,
       guestCount: event.guestCount,
     });
-    event.items = mergePackoutDocumentItems(event.items, importedItems, req.body?.documentTypes);
+    event.items = preservePackoutOperationalState(
+      event.items,
+      mergePackoutDocumentItems(event.items, importedItems, req.body?.documentTypes),
+    );
     schedulePreparedItemsForEvent(event.items, event.eventDate, {
       at: new Date(),
       by: String(req.auth?.username || req.auth?.email || ''),

@@ -1,11 +1,19 @@
 import { getPreparedBeverageType } from './barPackoutScope.js';
 
-const normalizedName = (value) => String(value || '')
-  .toLowerCase()
-  .replace(/\b(?:signature|cocktails?)\b/g, ' ')
-  .replace(/[^a-z0-9]+/g, ' ')
-  .replace(/\s+/g, ' ')
-  .trim();
+const normalizedName = (value) => {
+  const normalized = String(value || '')
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\b(?:signature|cocktails?)\b/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (/\bott\b/.test(normalized) && /\brose\b/.test(normalized) && (/\bby ott\b/.test(normalized) || /\bcotes? de provence\b/.test(normalized))) {
+    return 'domaines ott by ott rose';
+  }
+  return normalized;
+};
 
 export const barItemIdentityKey = (item) => {
   const recipeKey = String(item?.cocktailRecipeKey || '').trim().toLowerCase();
@@ -65,6 +73,41 @@ export const mergePackoutDocumentItems = (existingItems, importedItems, document
     return (!key || !incomingKeys.has(key)) && (!name || !incomingNames.has(name));
   });
   return [...manualItems, ...preserved, ...incoming];
+};
+
+const operationalStateScore = (item) => (
+  (item?.returnConfirmed === true ? 100 : 0)
+  + (item?.deliveredQty !== null && item?.deliveredQty !== undefined ? 10 : 0)
+  + (item?.updatedAt ? 1 : 0)
+);
+
+export const preservePackoutOperationalState = (existingItems, nextItems) => {
+  const existing = (Array.isArray(existingItems) ? existingItems : [])
+    .map((item) => typeof item?.toObject === 'function' ? item.toObject() : { ...item });
+  return (Array.isArray(nextItems) ? nextItems : []).map((item) => {
+    const identity = barItemIdentityKey(item);
+    const name = barItemNameKey(item);
+    const match = existing
+      .filter((candidate) => (
+        (identity && barItemIdentityKey(candidate) === identity)
+        || (name && barItemNameKey(candidate) === name)
+      ))
+      .sort((left, right) => operationalStateScore(right) - operationalStateScore(left))[0];
+    if (!match) return item;
+    const next = {
+      ...item,
+      deliveredQty: match.deliveredQty ?? item.deliveredQty ?? null,
+      returnedFullQty: Number(match.returnedFullQty ?? item.returnedFullQty ?? 0),
+      returnedOpenQty: Number(match.returnedOpenQty ?? item.returnedOpenQty ?? 0),
+      lostDamagedQty: Number(match.lostDamagedQty ?? item.lostDamagedQty ?? 0),
+      returnConfirmed: match.returnConfirmed === true || item.returnConfirmed === true,
+      captainNotes: String(match.captainNotes || item.captainNotes || ''),
+      updatedBy: String(match.updatedBy || item.updatedBy || ''),
+      updatedAt: match.updatedAt || item.updatedAt || null,
+    };
+    if (match._id) next._id = match._id;
+    return next;
+  });
 };
 
 export const schedulePreparedItemsForEvent = (items, eventDate, { at = new Date(), by = '' } = {}) => {

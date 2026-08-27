@@ -6,9 +6,31 @@ import {
   guestEventNameSimilarity,
   guestMutationWasApplied,
   safeGuestReturnsPinEqual,
+  serializeGuestBarItem,
   selectGuestEventNameMatch,
   selectGuestEventNumberMatch,
 } from '../routes/publicBarReturns.js';
+
+test('captain payload keeps included PO items visible even when they do not require returns', () => {
+  const cocktail = serializeGuestBarItem({
+    _id: 'cocktail-row',
+    name: 'Gin Basil Smash',
+    section: 'Specialty Cocktails',
+    scope: 'review',
+    included: true,
+    sentQty: 195,
+  });
+  assert.equal(cocktail.included, true);
+  assert.equal(cocktail.returnRequired, false);
+
+  const excluded = serializeGuestBarItem({
+    _id: 'excluded-row',
+    name: 'Office use only',
+    included: false,
+  });
+  assert.equal(excluded.included, false);
+  assert.equal(excluded.returnRequired, false);
+});
 
 test('guest mutation ids make offline retries idempotent', () => {
   const event = {

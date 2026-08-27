@@ -184,10 +184,11 @@ const scanUpload = multer({
   },
 });
 
-const publicItem = (item) => ({
+export const serializeGuestBarItem = (item) => ({
   id: String(item?._id || ''),
   name: clean(item?.name, 240),
   section: clean(item?.section, 160),
+  included: item?.included !== false,
   sentQty: Number(item?.sentQty || 0),
   sentQtyText: clean(item?.sentQtyText, 80),
   sentQtyPending: item?.sentQtyPending === true,
@@ -210,7 +211,7 @@ const publicEvent = (event) => ({
   revision: Number(event?.revision || 0),
   pendingReview: event?.guestIntake?.pendingReview === true,
   hasPackout: Array.isArray(event?.items) && event.items.length > 0,
-  items: (Array.isArray(event?.items) ? event.items : []).map(publicItem),
+  items: (Array.isArray(event?.items) ? event.items : []).map(serializeGuestBarItem),
 });
 
 const loadEditableEvent = async (req, res) => {

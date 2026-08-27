@@ -680,14 +680,23 @@ router.get('/events-readiness', async (req, res) => {
       return res.status(403).json({ message: 'Bar access required' });
     }
     const requestedFrom = cleanString(req.query.from, 10);
+    const linkedEventId = cleanString(req.query.linkedEventId, 80);
+    if (linkedEventId && !isObjectId(linkedEventId)) {
+      return res.status(400).json({ message: 'Invalid linked event id' });
+    }
     const from = /^\d{4}-\d{2}-\d{2}$/.test(requestedFrom)
       ? requestedFrom
       : new Date().toISOString().slice(0, 10);
-    const events = await BarEvent.find({
+    const query = {
       linkedEventId: { $ne: null },
-      eventDate: { $gte: from },
-      status: { $ne: 'closed' },
-    })
+    };
+    if (linkedEventId) {
+      query.linkedEventId = linkedEventId;
+    } else {
+      query.eventDate = { $gte: from };
+      query.status = { $ne: 'closed' };
+    }
+    const events = await BarEvent.find(query)
       .select('_id linkedEventId items')
       .lean();
     return res.json(events.map(summarizeBarEventReadiness));

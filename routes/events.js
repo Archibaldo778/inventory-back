@@ -1,4 +1,10 @@
 import { Router } from 'express';
+import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
+import multer from 'multer';
+import { v2 as cloudinary } from 'cloudinary';
+import { fileURLToPath } from 'url';
 import Event from '../models/Event.js';
 import Deck from '../models/Deck.js';
 import Page from '../models/Page.js';
@@ -8,12 +14,14 @@ import DecorPackout from '../models/DecorPackout.js';
 import BarEvent from '../models/BarEvent.js';
 import BarTask from '../models/BarTask.js';
 import BeverageItem from '../models/BeverageItem.js';
-import { requireAdmin } from '../middleware/auth.js';
+import { requireAdmin, requireRoles } from '../middleware/auth.js';
 import { clearApiCacheGroups, createGroupedApiCache } from '../utils/apiCache.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import { runWithTransactionFallback } from '../utils/mongoTransaction.js';
 
 const router = Router();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 const CACHE_GROUP = 'events';
 const cacheWithGroup = createGroupedApiCache;
 
@@ -25,6 +33,82 @@ const clearRelatedCaches = () => {
 const createHttpError = (statusCode, message) => Object.assign(new Error(message), { statusCode });
 const MAX_IMPORT_ROWS = 2_000;
 const trimImportValue = (value, maxLength = 500) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, maxLength);
+const EVENT_DOCUMENT_MAX_BYTES = 20 * 1024 * 1024;
+const eventDocumentUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: EVENT_DOCUMENT_MAX_BYTES, files: 1, fields: 10, parts: 11 },
+});
+
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
+const normalizeEventDocumentType = (value) => {
+  const normalized = String(value || '').trim().toLowerCase();
+  return ['po', 'kitchen_menu'].includes(normalized) ? normalized : '';
+};
+
+const parseKitchenDocumentItems = (value) => {
+  if (!value) return [];
+  let source = value;
+  if (typeof source === 'string') {
+    try { source = JSON.parse(source); } catch { return []; }
+  }
+  if (!Array.isArray(source)) return [];
+  return source.slice(0, 500).map((item) => ({
+    name: trimImportValue(item?.name, 300),
+    normalizedName: trimImportValue(item?.normalizedName, 300).toLowerCase(),
+    section: trimImportValue(item?.section, 200),
+  })).filter((item) => item.name);
+};
+
+const isDocxUpload = (file) => {
+  if (!file?.buffer || file.buffer.length < 4) return false;
+  const fileName = String(file.originalname || '');
+  const zipSignature = file.buffer[0] === 0x50 && file.buffer[1] === 0x4b;
+  return /\.docx$/i.test(fileName) && zipSignature;
+};
+
+const uploadEventDocument = (file, eventId, type, version) => new Promise((resolve, reject) => {
+  const publicId = `event-documents/${eventId}/${type}-v${version}-${crypto.randomUUID()}.docx`;
+  const stream = cloudinary.uploader.upload_stream({
+    resource_type: 'raw',
+    public_id: publicId,
+    overwrite: false,
+  }, (error, result) => {
+    if (error) return reject(error);
+    resolve({ url: result?.secure_url || result?.url || '', publicId: result?.public_id || publicId });
+  });
+  stream.end(file.buffer);
+});
+
+const writeLocalEventDocument = async (file, eventId, type, version) => {
+  const directory = path.join(__dirname, '..', 'uploads', 'event-documents');
+  await fs.promises.mkdir(directory, { recursive: true });
+  const fileName = `${eventId}-${type}-v${version}-${crypto.randomUUID()}.docx`;
+  await fs.promises.writeFile(path.join(directory, fileName), file.buffer);
+  return { url: `/uploads/event-documents/${fileName}`, publicId: '' };
+};
+
+const storeEventDocument = async (file, eventId, type, version) => {
+  const hasCloudinary = Boolean(process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET);
+  if (hasCloudinary) return uploadEventDocument(file, eventId, type, version);
+  return writeLocalEventDocument(file, eventId, type, version);
+};
+
+const cleanupEventDocument = async (document) => {
+  const publicId = String(document?.publicId || '').trim();
+  if (publicId) {
+    await cloudinary.uploader.destroy(publicId, { resource_type: 'raw', invalidate: true }).catch(() => null);
+    return;
+  }
+  const url = String(document?.url || '');
+  if (!url.startsWith('/uploads/event-documents/')) return;
+  const target = path.join(__dirname, '..', url.replace(/^\/+/, ''));
+  await fs.promises.unlink(target).catch(() => null);
+};
 
 const importedEventFailureMessage = (error) => {
   if (Number(error?.code) === 11000) return 'Duplicate Event ID conflict.';
@@ -163,6 +247,23 @@ const mergeBarEventData = async (sourceEventId, targetEventId, session = null) =
 
 const mergeImportedDuplicateIntoManualEvent = async (sourceEventId, targetEventId, session = null) => {
   const options = session ? { session } : {};
+  const [sourceEvent, targetEvent] = await Promise.all([
+    Event.findById(sourceEventId, null, options),
+    Event.findById(targetEventId, null, options),
+  ]);
+  if (sourceEvent && targetEvent && Array.isArray(sourceEvent.documents) && sourceEvent.documents.length) {
+    const documentsByType = new Map((targetEvent.documents || []).map((document) => [String(document.type), document]));
+    sourceEvent.documents.forEach((document) => {
+      const current = documentsByType.get(String(document.type));
+      if (!current || new Date(document.uploadedAt || 0) > new Date(current.uploadedAt || 0)) {
+        documentsByType.set(String(document.type), document?.toObject ? document.toObject() : document);
+      }
+    });
+    targetEvent.documents = [...documentsByType.values()].map((document) => (
+      document?.toObject ? document.toObject() : document
+    ));
+    await targetEvent.save(options);
+  }
   await Promise.all([
     Deck.updateMany({ eventId: sourceEventId }, { $set: { eventId: targetEventId } }, options),
     Proposal.updateMany({ eventId: sourceEventId }, { $set: { eventId: targetEventId } }, options),
@@ -528,6 +629,63 @@ router.get('/', cacheWithGroup('5 minutes', CACHE_GROUP), async (req, res) => {
     });
   }
 });
+
+// Save the latest source PO or Kitchen Menu on the dashboard event.
+// Re-uploading the same type replaces the current file and increments its version.
+router.post(
+  '/:id/documents',
+  requireRoles(['admin', 'super admin', 'bar admin']),
+  eventDocumentUpload.single('file'),
+  async (req, res) => {
+  let stored = null;
+  try {
+    if (!req.file) return res.status(400).json({ error: 'DOCX file is required' });
+    if (!isDocxUpload(req.file)) return res.status(400).json({ error: 'Only a valid DOCX file can be uploaded' });
+    const type = normalizeEventDocumentType(req.body?.type);
+    if (!type) return res.status(400).json({ error: 'Document type must be po or kitchen_menu' });
+    const event = await Event.findById(req.params.id);
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+
+    const checksum = crypto.createHash('sha256').update(req.file.buffer).digest('hex');
+    const existing = (event.documents || []).find((document) => String(document.type) === type) || null;
+    if (existing && String(existing.checksum || '') === checksum) {
+      return res.json({ event, document: existing, unchanged: true });
+    }
+
+    const version = Math.max(0, Number(existing?.version) || 0) + 1;
+    stored = await storeEventDocument(req.file, String(event._id), type, version);
+    if (!stored?.url) throw new Error('Document storage did not return a download URL');
+    const nextDocument = {
+      type,
+      fileName: trimImportValue(req.file.originalname, 240) || `${type}.docx`,
+      contentType: trimImportValue(req.file.mimetype, 120),
+      size: req.file.size,
+      checksum,
+      url: stored.url,
+      publicId: stored.publicId,
+      version,
+      uploadedAt: new Date(),
+      uploadedBy: trimImportValue(req.auth?.username || req.auth?.email, 240),
+      kitchenItems: type === 'kitchen_menu' ? parseKitchenDocumentItems(req.body?.kitchenItems) : undefined,
+    };
+    event.documents = [
+      ...(event.documents || []).filter((document) => String(document.type) !== type),
+      nextDocument,
+    ];
+    await event.save();
+    if (existing) await cleanupEventDocument(existing);
+    clearRelatedCaches();
+    const saved = event.documents.find((document) => String(document.type) === type);
+    return res.status(existing ? 200 : 201).json({ event, document: saved, unchanged: false });
+  } catch (error) {
+    if (stored?.url) await cleanupEventDocument(stored);
+    return sendApiError(res, error, {
+      context: 'Event document upload failed',
+      fallbackMessage: 'Failed to save event document',
+    });
+  }
+  }
+);
 
 // Get by id
 router.get('/:id', cacheWithGroup('5 minutes', CACHE_GROUP), async (req, res) => {

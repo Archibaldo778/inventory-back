@@ -27,6 +27,7 @@ import { cocktailServingsForGuests, resolveCocktailRecipeKey } from '../utils/co
 import { barItemIdentityKey, mergePackoutDocumentItems, preservePackoutOperationalState, schedulePreparedItemsForEvent } from '../utils/barManualItems.js';
 import { recognizeDocuments } from '../utils/googleDocumentAi.js';
 import { snapshotBarDocumentImport } from '../utils/documentImportAudit.js';
+import { summarizeBarEventReadiness } from '../utils/barEventReadiness.js';
 import {
   keepBarAccountingItems,
   matchRecognizedItemsToCatalog,
@@ -669,6 +670,31 @@ router.get('/events', async (req, res) => {
     return sendApiError(res, error, {
       context: 'Event bar reports list failed',
       fallbackMessage: 'Failed to list event bar reports',
+    });
+  }
+});
+
+router.get('/events-readiness', async (req, res) => {
+  try {
+    if (!isBarManager(req.auth) && !isBarWorker(req.auth) && !BAR_VIEWER_ROLES.has(normalizeRole(req.auth?.role))) {
+      return res.status(403).json({ message: 'Bar access required' });
+    }
+    const requestedFrom = cleanString(req.query.from, 10);
+    const from = /^\d{4}-\d{2}-\d{2}$/.test(requestedFrom)
+      ? requestedFrom
+      : new Date().toISOString().slice(0, 10);
+    const events = await BarEvent.find({
+      linkedEventId: { $ne: null },
+      eventDate: { $gte: from },
+      status: { $ne: 'closed' },
+    })
+      .select('_id linkedEventId items')
+      .lean();
+    return res.json(events.map(summarizeBarEventReadiness));
+  } catch (error) {
+    return sendApiError(res, error, {
+      context: 'Bar event readiness failed',
+      fallbackMessage: 'Failed to load bar event readiness',
     });
   }
 });

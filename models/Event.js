@@ -37,6 +37,7 @@ const eventSchema = new mongoose.Schema(
     status: { type: String, trim: true, default: 'draft' },
     meta: { type: Object, default: {} },
     documents: { type: [eventDocumentSchema], default: [] },
+    documentHistory: { type: [eventDocumentSchema], default: [] },
     deckRevision: { type: Number, default: 0, min: 0, select: false },
   },
   { timestamps: true }

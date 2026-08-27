@@ -25,3 +25,14 @@ test('event document rejects unsupported source types', () => {
   });
   assert.ok(event.validateSync()?.errors?.['documents.0.type']);
 });
+
+test('event keeps previous source document versions separately from current files', () => {
+  const event = new Event({
+    title: 'Versioned Event',
+    documents: [{ type: 'po', fileName: 'PO v2.docx', url: '/po-v2.docx', version: 2 }],
+    documentHistory: [{ type: 'po', fileName: 'PO v1.docx', url: '/po-v1.docx', version: 1 }],
+  });
+  assert.equal(event.validateSync(), undefined);
+  assert.equal(event.documents[0].version, 2);
+  assert.equal(event.documentHistory[0].version, 1);
+});

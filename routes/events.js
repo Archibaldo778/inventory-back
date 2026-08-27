@@ -15,6 +15,7 @@ import BarEvent from '../models/BarEvent.js';
 import BarTask from '../models/BarTask.js';
 import BeverageItem from '../models/BeverageItem.js';
 import ImportRun from '../models/ImportRun.js';
+import DocumentImportRun from '../models/DocumentImportRun.js';
 import { requireAdmin, requireRoles } from '../middleware/auth.js';
 import { clearApiCacheGroups, createGroupedApiCache } from '../utils/apiCache.js';
 import { sendApiError } from '../utils/apiErrors.js';
@@ -24,6 +25,14 @@ import {
   snapshotImportedEvent,
   summarizeImportOperations,
 } from '../utils/eventImportAudit.js';
+import {
+  applyBarDocumentImportSnapshot,
+  barDocumentImportMatchesSnapshot,
+  eventDocumentsMatchSnapshot,
+  mergeEventDocumentHistory,
+  nextEventDocumentVersion,
+  snapshotEventDocuments,
+} from '../utils/documentImportAudit.js';
 
 const router = Router();
 const __filename = fileURLToPath(import.meta.url);
@@ -341,15 +350,24 @@ const mergeImportedDuplicateIntoManualEvent = async (sourceEventId, targetEventI
   ]);
   if (sourceEvent && targetEvent && Array.isArray(sourceEvent.documents) && sourceEvent.documents.length) {
     const documentsByType = new Map((targetEvent.documents || []).map((document) => [String(document.type), document]));
+    const displacedDocuments = [];
     sourceEvent.documents.forEach((document) => {
       const current = documentsByType.get(String(document.type));
       if (!current || new Date(document.uploadedAt || 0) > new Date(current.uploadedAt || 0)) {
+        if (current) displacedDocuments.push(current);
         documentsByType.set(String(document.type), document?.toObject ? document.toObject() : document);
+      } else {
+        displacedDocuments.push(document);
       }
     });
     targetEvent.documents = [...documentsByType.values()].map((document) => (
       document?.toObject ? document.toObject() : document
     ));
+    targetEvent.documentHistory = mergeEventDocumentHistory(
+      targetEvent.documentHistory,
+      sourceEvent.documentHistory,
+      displacedDocuments
+    );
     await targetEvent.save(options);
   }
   await Promise.all([
@@ -707,6 +725,107 @@ router.post('/imports/:runId/undo', requireAdmin, async (req, res) => {
   }
 });
 
+router.get('/document-imports', requireRoles(['admin', 'super admin', 'bar admin']), async (req, res) => {
+  try {
+    const limit = Math.max(1, Math.min(100, Number(req.query?.limit) || 30));
+    const query = {};
+    if (req.query?.eventId) query.eventId = req.query.eventId;
+    const runs = await DocumentImportRun.find(query)
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .select('-beforeDocuments -afterDocuments -beforeBarEvent -afterBarEvent')
+      .lean();
+    return res.json(runs);
+  } catch (error) {
+    return sendApiError(res, error, {
+      context: 'Document import history load failed',
+      fallbackMessage: 'Failed to load document import history',
+    });
+  }
+});
+
+router.post('/document-imports/:runId/undo', requireRoles(['admin', 'super admin', 'bar admin']), async (req, res) => {
+  try {
+    const run = await DocumentImportRun.findById(req.params.runId);
+    if (!run) return res.status(404).json({ error: 'Document import not found' });
+    if (run.status === 'undone') return res.status(409).json({ error: 'This document import was already undone' });
+
+    const groupedRuns = run.batchId
+      ? await DocumentImportRun.find({ eventId: run.eventId, batchId: run.batchId, status: 'applied' }).sort({ createdAt: 1 })
+      : [run];
+    if (!groupedRuns.length) return res.status(409).json({ error: 'This import package is no longer active' });
+    const firstRun = groupedRuns[0];
+    const lastRun = groupedRuns[groupedRuns.length - 1];
+
+    const event = await Event.findById(run.eventId);
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!eventDocumentsMatchSnapshot(event.documents, lastRun.afterDocuments)) {
+      await DocumentImportRun.updateMany(
+        { _id: { $in: groupedRuns.map((entry) => entry._id) } },
+        { $set: { status: 'conflict', undoMessage: 'Event documents changed after this import and were left untouched.' } }
+      );
+      return res.status(409).json({ error: 'Event documents changed after this import and were left untouched.', status: 'conflict' });
+    }
+
+    const before = snapshotEventDocuments(firstRun.beforeDocuments);
+    const beforeIds = new Set(before.map((document) => String(document?._id || '')).filter(Boolean));
+    const current = snapshotEventDocuments(event.documents);
+    const displaced = current.filter((document) => !beforeIds.has(String(document?._id || '')));
+
+    const barSnapshotRun = [...groupedRuns].reverse().find((entry) => entry.afterBarEvent) || null;
+    let barEvent = null;
+    if (barSnapshotRun) {
+      barEvent = await BarEvent.findOne({ linkedEventId: event._id });
+      if (!barEvent || !barDocumentImportMatchesSnapshot(barEvent, barSnapshotRun.afterBarEvent)) {
+        await DocumentImportRun.updateMany(
+          { _id: { $in: groupedRuns.map((entry) => entry._id) } },
+          { $set: { status: 'conflict', undoMessage: 'Bar event changed after this import and was left untouched.' } }
+        );
+        return res.status(409).json({ error: 'Bar event changed after this import and was left untouched.', status: 'conflict' });
+      }
+    }
+
+    event.documentHistory = mergeEventDocumentHistory(
+      (event.documentHistory || []).filter((document) => !beforeIds.has(String(document?._id || ''))),
+      displaced
+    );
+    event.documents = before;
+    await event.save();
+
+    if (barEvent && barSnapshotRun?.beforeBarEvent) {
+      applyBarDocumentImportSnapshot(barEvent, barSnapshotRun.beforeBarEvent);
+      if (Array.isArray(barEvent.audit)) {
+        barEvent.audit.push({
+          action: 'document_import_undone',
+          details: { batchId: run.batchId || String(run._id) },
+        });
+      }
+      await barEvent.save();
+    }
+
+    const undoneAt = new Date();
+    const undoneBy = trimImportValue(req.auth?.username || req.auth?.email, 180);
+    await DocumentImportRun.updateMany(
+      { _id: { $in: groupedRuns.map((entry) => entry._id) } },
+      { $set: { status: 'undone', undoneAt, undoneBy, undoMessage: 'Previous documents and imported bar data restored.' } }
+    );
+    clearRelatedCaches();
+    return res.json({
+      ok: true,
+      status: 'undone',
+      event,
+      importRunId: String(run._id),
+      undoneDocuments: groupedRuns.length,
+      barEventRestored: Boolean(barEvent),
+    });
+  } catch (error) {
+    return sendApiError(res, error, {
+      context: 'Document import undo failed',
+      fallbackMessage: 'Failed to undo document import',
+    });
+  }
+});
+
 router.post('/import', requireAdmin, async (req, res) => {
   try {
     const sourceRows = Array.isArray(req.body?.events) ? req.body.events : [];
@@ -897,7 +1016,7 @@ router.get('/', cacheWithGroup('5 minutes', CACHE_GROUP), async (req, res) => {
   try {
     const q = { status: { $not: /^deleted$/i } };
     if (req.query.managerId) q.managerId = req.query.managerId;
-    const items = await Event.find(q).sort({ createdAt: -1 });
+    const items = await Event.find(q).select('-documentHistory').sort({ createdAt: -1 });
     res.json(items);
   } catch (e) {
     sendApiError(res, e, {
@@ -915,6 +1034,7 @@ router.post(
   eventDocumentUpload.single('file'),
   async (req, res) => {
   let stored = null;
+  let eventSaved = false;
   try {
     if (!req.file) return res.status(400).json({ error: 'DOCX file is required' });
     if (!isDocxUpload(req.file)) return res.status(400).json({ error: 'Only a valid DOCX file can be uploaded' });
@@ -924,13 +1044,37 @@ router.post(
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
     const checksum = crypto.createHash('sha256').update(req.file.buffer).digest('hex');
+    const batchId = trimImportValue(req.body?.importBatchId, 120) || crypto.randomUUID();
     const existing = (event.documents || []).find((document) => String(document.type) === type) || null;
     if (existing && String(existing.checksum || '') === checksum) {
-      return res.json({ event, document: existing, unchanged: true });
+      const documents = snapshotEventDocuments(event.documents);
+      const run = await DocumentImportRun.create({
+        eventId: event._id,
+        eventTitle: event.title,
+        batchId,
+        documentType: type,
+        action: 'reprocessed',
+        fileName: existing.fileName,
+        version: existing.version || 1,
+        checksum,
+        beforeDocuments: documents,
+        afterDocuments: documents,
+        createdBy: trimImportValue(req.auth?.username || req.auth?.email, 180),
+        createdById: trimImportValue(req.auth?.id || req.auth?._id, 120),
+      });
+      return res.json({ event, document: existing, unchanged: true, action: 'reprocessed', importRunId: String(run._id) });
     }
 
-    const version = Math.max(0, Number(existing?.version) || 0) + 1;
-    stored = await storeEventDocument(req.file, String(event._id), type, version);
+    const beforeDocuments = snapshotEventDocuments(event.documents);
+    const sameFileWrongType = (event.documents || []).find((document) => (
+      String(document.type) !== type && String(document.checksum || '') === checksum
+    )) || null;
+    const version = nextEventDocumentVersion(type, event.documents, event.documentHistory);
+    if (sameFileWrongType) {
+      stored = { url: sameFileWrongType.url, publicId: sameFileWrongType.publicId || '', reused: true };
+    } else {
+      stored = await storeEventDocument(req.file, String(event._id), type, version);
+    }
     if (!stored?.url) throw new Error('Document storage did not return a download URL');
     const nextDocument = {
       type,
@@ -945,17 +1089,47 @@ router.post(
       uploadedBy: trimImportValue(req.auth?.username || req.auth?.email, 240),
       kitchenItems: type === 'kitchen_menu' ? parseKitchenDocumentItems(req.body?.kitchenItems) : undefined,
     };
+    const replacedDocuments = (event.documents || []).filter((document) => (
+      String(document.type) === type
+      || (sameFileWrongType && String(document._id) === String(sameFileWrongType._id))
+    ));
+    event.documentHistory = mergeEventDocumentHistory(event.documentHistory, replacedDocuments);
     event.documents = [
-      ...(event.documents || []).filter((document) => String(document.type) !== type),
+      ...(event.documents || []).filter((document) => (
+        String(document.type) !== type
+        && (!sameFileWrongType || String(document._id) !== String(sameFileWrongType._id))
+      )),
       nextDocument,
     ];
     await event.save();
-    if (existing) await cleanupEventDocument(existing);
+    eventSaved = true;
     clearRelatedCaches();
     const saved = event.documents.find((document) => String(document.type) === type);
-    return res.status(existing ? 200 : 201).json({ event, document: saved, unchanged: false });
+    const action = sameFileWrongType ? 'corrected_type' : (existing ? 'replaced' : 'uploaded');
+    const run = await DocumentImportRun.create({
+      eventId: event._id,
+      eventTitle: event.title,
+      batchId,
+      documentType: type,
+      action,
+      fileName: saved?.fileName || nextDocument.fileName,
+      version,
+      checksum,
+      beforeDocuments,
+      afterDocuments: snapshotEventDocuments(event.documents),
+      createdBy: trimImportValue(req.auth?.username || req.auth?.email, 180),
+      createdById: trimImportValue(req.auth?.id || req.auth?._id, 120),
+    });
+    return res.status(existing || sameFileWrongType ? 200 : 201).json({
+      event,
+      document: saved,
+      unchanged: false,
+      action,
+      correctedFromType: sameFileWrongType?.type || '',
+      importRunId: String(run._id),
+    });
   } catch (error) {
-    if (stored?.url) await cleanupEventDocument(stored);
+    if (!eventSaved && stored?.url && !stored?.reused) await cleanupEventDocument(stored);
     return sendApiError(res, error, {
       context: 'Event document upload failed',
       fallbackMessage: 'Failed to save event document',

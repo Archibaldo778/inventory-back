@@ -7,6 +7,7 @@ import BarTask from '../models/BarTask.js';
 import BeverageItem from '../models/BeverageItem.js';
 import CocktailRecipe from '../models/CocktailRecipe.js';
 import Event from '../models/Event.js';
+import DocumentImportRun from '../models/DocumentImportRun.js';
 import { canSeeBarFinancials, isAdminAuth, normalizeRole } from '../middleware/auth.js';
 import {
   calculateBarEventAccounting,
@@ -25,6 +26,7 @@ import { clearApiCacheGroups } from '../utils/apiCache.js';
 import { cocktailServingsForGuests, resolveCocktailRecipeKey } from '../utils/cocktailRecipes.js';
 import { barItemIdentityKey, mergePackoutDocumentItems, schedulePreparedItemsForEvent } from '../utils/barManualItems.js';
 import { recognizeDocuments } from '../utils/googleDocumentAi.js';
+import { snapshotBarDocumentImport } from '../utils/documentImportAudit.js';
 import {
   keepBarAccountingItems,
   matchRecognizedItemsToCatalog,
@@ -1102,6 +1104,8 @@ router.post('/events/:id/packout', async (req, res) => {
   try {
     const event = await loadEvent(req, res);
     if (!event) return undefined;
+    const documentImportBatchId = cleanString(req.body?.documentImportBatchId, 120);
+    const beforeBarEvent = documentImportBatchId ? snapshotBarDocumentImport(event) : null;
     const manager = isBarManager(req.auth);
     if (!manager && !isBarWorker(req.auth)) {
       return res.status(403).json({ message: 'Bar operation access required' });
@@ -1166,6 +1170,21 @@ router.post('/events/:id/packout', async (req, res) => {
       packoutType,
     });
     await event.save();
+    if (documentImportBatchId && isObjectId(event.linkedEventId)) {
+      await DocumentImportRun.updateMany(
+        {
+          eventId: event.linkedEventId,
+          batchId: documentImportBatchId,
+          status: 'applied',
+        },
+        {
+          $set: {
+            beforeBarEvent,
+            afterBarEvent: snapshotBarDocumentImport(event),
+          },
+        }
+      );
+    }
     if (linkedDashboardEvent && !normalizeBarEventNumber(linkedDashboardEvent.externalId) && importedEventNumber) {
       linkedDashboardEvent.externalId = importedEventNumber;
       await linkedDashboardEvent.save();

@@ -23,6 +23,12 @@ export const normalizeOcrCatalogName = (value) => {
   if (/\bott\b/.test(normalized) && /\brose\b/.test(normalized) && (/\bby ott\b/.test(normalized) || /\bcotes? de provence\b/.test(normalized))) {
     return 'domaines ott by ott rose';
   }
+  if (/\bsancerre\b/.test(normalized) && /\breverdy\b/.test(normalized)) {
+    return 'sancerre reverdy';
+  }
+  if (/\bpinot noir\b/.test(normalized) && /\bbench\b/.test(normalized)) {
+    return 'bench pinot noir';
+  }
   return normalized;
 };
 
@@ -259,9 +265,15 @@ export const matchRecognizedItemsToCatalog = (items, catalog) => {
   return (Array.isArray(items) ? items : []).map((item) => {
     const source = normalizeOcrCatalogName(item?.name);
     if (!source) return { ...item, beverageItemId: null, catalogMatch: { status: 'unmatched', confidence: 0 } };
+    const sourceValues = [source];
+    if (/^assorted$/i.test(String(item?.name || '').trim()) && /\bbeer\b/i.test(String(item?.section || ''))) {
+      sourceValues.push(normalizeOcrCatalogName(`Beer ${item.name}`));
+    }
     const ranked = catalogRows.map((entry) => {
-      const exact = entry.values.includes(source);
-      const score = exact ? 1 : Math.max(...entry.values.map((value) => similarity(source, value)));
+      const exact = sourceValues.some((value) => entry.values.includes(value));
+      const score = exact ? 1 : Math.max(...sourceValues.flatMap((sourceValue) => (
+        entry.values.map((value) => similarity(sourceValue, value))
+      )));
       return { ...entry, exact, score };
     }).sort((left, right) => right.score - left.score);
     const best = ranked[0];

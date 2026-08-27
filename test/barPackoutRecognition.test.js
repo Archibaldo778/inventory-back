@@ -73,3 +73,19 @@ test('Domaine Ott PO wording matches the existing By.Ott inventory item', () => 
   assert.equal(matched[0].beverageItemId, 'ott-rose');
   assert.equal(matched[0].catalogMatch.status, 'exact');
 });
+
+test('Milken PO shorthand matches existing wine and assorted beer inventory', () => {
+  const catalog = [
+    { _id: 'sancerre', name: 'Sancerre, Romain Reverdy', aliases: ['Sancerre, Romain Reverdy (White)'] },
+    { _id: 'pinot', name: 'Bench Sonoma Coast Pinot Noir', aliases: ['Pinot Noir, Bench Sonoma Coast (Red)'] },
+    { _id: 'beer', name: 'Beer (Assorted)', aliases: ['Beer Assorted'] },
+  ];
+  const matched = matchRecognizedItemsToCatalog([
+    { name: 'Sancerre, Domaine Reverdy', section: 'HOUSE COCKTAIL/ DINNER WINE', scope: 'alcohol' },
+    { name: 'Pinot Noir, Bench', section: 'HOUSE COCKTAIL/ DINNER WINE', scope: 'alcohol' },
+    { name: 'Assorted', section: 'BEER', scope: 'alcohol' },
+  ], catalog);
+
+  assert.deepEqual(matched.map((item) => item.beverageItemId), ['sancerre', 'pinot', 'beer']);
+  assert.ok(matched.every((item) => item.catalogMatch.status === 'exact'));
+});

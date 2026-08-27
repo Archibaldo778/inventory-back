@@ -26,6 +26,12 @@ const createHttpError = (statusCode, message) => Object.assign(new Error(message
 const MAX_IMPORT_ROWS = 2_000;
 const trimImportValue = (value, maxLength = 500) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, maxLength);
 
+const importedEventFailureMessage = (error) => {
+  if (Number(error?.code) === 11000) return 'Duplicate Event ID conflict.';
+  if (String(error?.name || '') === 'ValidationError') return 'Event data did not pass validation.';
+  return 'Event could not be imported.';
+};
+
 export const normalizeImportedEventMatchTitle = (value) => trimImportValue(value, 300)
   .replace(/\s*[-–—]\s*staffing(?:\s+set\s*up|_?\s*\d+\s*pax)?\s*$/i, '')
   .normalize('NFKD')
@@ -388,89 +394,107 @@ router.post('/import', requireAdmin, async (req, res) => {
       updated: 0,
       eventIdsAssigned: 0,
       duplicatesMerged: 0,
+      failed: 0,
       skipped: sourceRows.length - normalizedRows.length,
     };
+    const failures = [];
     for (const { identity: _identity, meta, ...event } of uniqueRows) {
-      let filter = event.externalId
-        ? { externalId: event.externalId }
-        : {
-            title: event.title,
-            date: event.date,
-            client: event.client,
-            managerId: event.managerId,
-          };
-      let assigningEventId = false;
-      let duplicateEventIds = [];
-      if (event.externalId) {
-        const existingById = await Event.findOne({
-          externalId: event.externalId,
-          status: { $not: /^deleted$/i },
-        }).select('_id title date').lean();
-        if (existingById?._id) {
-          const manualMatches = await findManualEventMatches(event, existingById._id);
-          if (manualMatches.length === 1) {
-            filter = { _id: manualMatches[0]._id };
-            duplicateEventIds = (await findImportedNowstaDuplicates(event, manualMatches[0]._id))
-              .map((candidate) => candidate._id);
-            if (!duplicateEventIds.some((id) => String(id) === String(existingById._id))) {
-              duplicateEventIds.push(existingById._id);
+      try {
+        let filter = event.externalId
+          ? { externalId: event.externalId }
+          : {
+              title: event.title,
+              date: event.date,
+              client: event.client,
+              managerId: event.managerId,
+            };
+        let assigningEventId = false;
+        let duplicateEventIds = [];
+        if (event.externalId) {
+          const existingById = await Event.findOne({
+            externalId: event.externalId,
+            status: { $not: /^deleted$/i },
+          }).select('_id title date').lean();
+          if (existingById?._id) {
+            const manualMatches = await findManualEventMatches(event, existingById._id);
+            if (manualMatches.length === 1) {
+              filter = { _id: manualMatches[0]._id };
+              duplicateEventIds = (await findImportedNowstaDuplicates(event, manualMatches[0]._id))
+                .map((candidate) => candidate._id);
+              if (!duplicateEventIds.some((id) => String(id) === String(existingById._id))) {
+                duplicateEventIds.push(existingById._id);
+              }
+              assigningEventId = true;
+            } else {
+              filter = { _id: existingById._id };
             }
-            assigningEventId = true;
           } else {
-            filter = { _id: existingById._id };
-          }
-        } else {
-          const manualMatches = await findManualEventMatches(event);
-          if (manualMatches.length === 1) {
-            filter = { _id: manualMatches[0]._id };
-            duplicateEventIds = (await findImportedNowstaDuplicates(event, manualMatches[0]._id))
-              .map((candidate) => candidate._id);
-            assigningEventId = true;
+            const manualMatches = await findManualEventMatches(event);
+            if (manualMatches.length === 1) {
+              filter = { _id: manualMatches[0]._id };
+              duplicateEventIds = (await findImportedNowstaDuplicates(event, manualMatches[0]._id))
+                .map((candidate) => candidate._id);
+              assigningEventId = true;
+            }
           }
         }
-      }
-      const setFields = { ...event };
-      const deferredIdentity = duplicateEventIds.length
-        ? { externalId: event.externalId, importSource: event.importSource }
-        : null;
-      if (deferredIdentity) {
-        delete setFields.externalId;
-        delete setFields.importSource;
-      }
-      if (meta?.nowsta) {
-        setFields['meta.nowsta'] = meta.nowsta;
-        setFields['meta.venue'] = meta.venue;
-        setFields['meta.address'] = meta.address;
-        setFields['meta.eventTime'] = meta.eventTime;
-        if (meta.guestCount !== null) setFields['meta.guestCount'] = meta.guestCount;
-      }
-      const result = await Event.updateOne(
-        filter,
-        {
-          $set: setFields,
-        },
-        { upsert: true, runValidators: true }
-      );
-      stats.processed += 1;
-      if (result.upsertedCount) stats.created += 1;
-      else if (result.matchedCount) {
-        stats.updated += 1;
-        if (assigningEventId) stats.eventIdsAssigned += 1;
-      }
-      if (duplicateEventIds.length && result.matchedCount) {
-        const targetEventId = filter._id;
-        for (const duplicateEventId of duplicateEventIds) {
-          await runWithTransactionFallback(
-            (session) => mergeImportedDuplicateIntoManualEvent(duplicateEventId, targetEventId, session),
-            () => mergeImportedDuplicateIntoManualEvent(duplicateEventId, targetEventId)
-          );
-          stats.duplicatesMerged += 1;
+        const setFields = { ...event };
+        const deferredIdentity = duplicateEventIds.length
+          ? { externalId: event.externalId, importSource: event.importSource }
+          : null;
+        if (deferredIdentity) {
+          delete setFields.externalId;
+          delete setFields.importSource;
         }
-        await Event.updateOne(
-          { _id: targetEventId },
-          { $set: deferredIdentity },
-          { runValidators: true }
+        if (meta?.nowsta) {
+          setFields['meta.nowsta'] = meta.nowsta;
+          setFields['meta.venue'] = meta.venue;
+          setFields['meta.address'] = meta.address;
+          setFields['meta.eventTime'] = meta.eventTime;
+          if (meta.guestCount !== null) setFields['meta.guestCount'] = meta.guestCount;
+        }
+        const result = await Event.updateOne(
+          filter,
+          {
+            $set: setFields,
+          },
+          { upsert: true, runValidators: true }
         );
+        if (duplicateEventIds.length && result.matchedCount) {
+          const targetEventId = filter._id;
+          for (const duplicateEventId of duplicateEventIds) {
+            await runWithTransactionFallback(
+              (session) => mergeImportedDuplicateIntoManualEvent(duplicateEventId, targetEventId, session),
+              () => mergeImportedDuplicateIntoManualEvent(duplicateEventId, targetEventId)
+            );
+            stats.duplicatesMerged += 1;
+          }
+          await Event.updateOne(
+            { _id: targetEventId },
+            { $set: deferredIdentity },
+            { runValidators: true }
+          );
+        }
+        stats.processed += 1;
+        if (result.upsertedCount) stats.created += 1;
+        else if (result.matchedCount) {
+          stats.updated += 1;
+          if (assigningEventId) stats.eventIdsAssigned += 1;
+        }
+      } catch (rowError) {
+        stats.failed += 1;
+        failures.push({
+          externalId: event.externalId,
+          title: event.title,
+          date: event.date,
+          error: importedEventFailureMessage(rowError),
+        });
+        console.error('Event calendar row import failed', {
+          externalId: event.externalId,
+          title: event.title,
+          date: event.date,
+          error: rowError,
+        });
       }
     }
     stats.skipped += normalizedRows.length - uniqueRows.length;
@@ -480,6 +504,7 @@ router.post('/import', requireAdmin, async (req, res) => {
       ok: true,
       totalRows: sourceRows.length,
       stats,
+      failures,
     });
   } catch (e) {
     return sendApiError(res, e, {

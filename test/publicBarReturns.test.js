@@ -6,6 +6,7 @@ import {
   guestEventNameSimilarity,
   safeGuestReturnsPinEqual,
   selectGuestEventNameMatch,
+  selectGuestEventNumberMatch,
 } from '../routes/publicBarReturns.js';
 
 test('guest returns PIN comparison accepts only an exact PIN', () => {
@@ -61,6 +62,15 @@ test('guest event lookup rejects ambiguous fuzzy matches', () => {
   ]);
   assert.equal(result.match, null);
   assert.equal(result.ambiguous, true);
+});
+
+test('guest event id lookup does not require a date and supports the PO base id', () => {
+  const result = selectGuestEventNumberMatch('E22346', [
+    { id: 'expected', eventNumber: 'E22346-S60940' },
+    { id: 'other', eventNumber: 'E60815' },
+  ]);
+  assert.equal(result.match?.id, 'expected');
+  assert.equal(result.ambiguous, false);
 });
 
 test('guest pending reports deduplicate normalized event names and exact dates', () => {

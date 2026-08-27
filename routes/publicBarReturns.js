@@ -13,6 +13,7 @@ import { matchRecognizedItemsToCatalog, parseRecognizedPackout } from '../utils/
 import { requiresBarReturn } from '../utils/barPackoutScope.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import { applyGuestReceivedRows } from '../utils/barGuestReturns.js';
+import { barEventNumbersMatch, normalizeBarEventNumber } from '../utils/barChargeImport.js';
 
 const router = Router();
 const WINDOW_MS = 10 * 60 * 1000;
@@ -89,6 +90,17 @@ export const selectGuestEventNameMatch = (query, candidates, getName = (candidat
   if (!ranked.length) return { match: null, ambiguous: false, score: 0 };
   const ambiguous = ranked.length > 1 && (ranked[0].score - ranked[1].score) < AMBIGUOUS_SCORE_GAP;
   return { match: ambiguous ? null : ranked[0].candidate, ambiguous, score: ranked[0].score };
+};
+
+export const selectGuestEventNumberMatch = (query, candidates, getNumber = (candidate) => candidate?.eventNumber || candidate?.externalId) => {
+  const normalized = normalizeBarEventNumber(query);
+  if (!normalized) return { match: null, ambiguous: false };
+  const matches = (Array.isArray(candidates) ? candidates : [])
+    .filter((candidate) => barEventNumbersMatch(normalized, getNumber(candidate)));
+  if (matches.length === 1) return { match: matches[0], ambiguous: false };
+  const exact = matches.filter((candidate) => normalizeBarEventNumber(getNumber(candidate)) === normalized);
+  if (exact.length === 1) return { match: exact[0], ambiguous: false };
+  return { match: null, ambiguous: matches.length > 1 };
 };
 
 const increment = (map, key) => {
@@ -203,6 +215,7 @@ const guestEventChoice = (event, source) => ({
   eventDate: normalizeBarEventDate(source === 'dashboard' ? event?.date : event?.eventDate),
   venue: source === 'dashboard' ? dashboardVenue(event) : clean(event?.venue, 240),
   client: clean(event?.client, 180),
+  eventNumber: clean(source === 'dashboard' ? event?.externalId : event?.eventNumber, 80),
 });
 
 const dateChoices = (reports, dashboardEvents) => {
@@ -225,6 +238,7 @@ const syncDashboardEvent = (event) => BarEvent.findOneAndUpdate(
       eventDate: normalizeBarEventDate(event.date) || clean(event.date, 80),
       client: clean(event.client, 180),
       venue: dashboardVenue(event),
+      eventNumber: clean(event.externalId, 120),
     },
     $setOnInsert: { linkedEventId: event._id, status: 'draft', notes: '' },
   },
@@ -234,15 +248,49 @@ const syncDashboardEvent = (event) => BarEvent.findOneAndUpdate(
 router.use(requirePin);
 router.post('/verify-pin', (_req, res) => res.json({ ok: true }));
 
+router.post('/offline-events', async (_req, res) => {
+  try {
+    const today = new Date();
+    const from = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
+    const to = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 30);
+    const dateString = (value) => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
+    const events = await BarEvent.find({
+      eventDate: { $gte: dateString(from), $lte: dateString(to) },
+      status: { $nin: ['reviewed', 'closed'] },
+    }).sort({ eventDate: 1, name: 1 }).limit(200);
+    return res.json({ events: events.map(publicEvent) });
+  } catch (error) {
+    return sendApiError(res, error, { context: 'Offline bar events load failed', fallbackMessage: 'Could not prepare offline events' });
+  }
+});
+
 // The date must be exact. An ambiguous name returns the day's choices after PIN verification.
 router.post('/find-event', async (req, res) => {
   try {
     const name = clean(req.body?.name, 240);
     const eventDate = normalizeBarEventDate(req.body?.eventDate);
-    if (name.length < 2 || !eventDate) return res.status(400).json({ message: 'Enter at least 2 characters and an exact event date' });
+    const requestedEventNumber = normalizeBarEventNumber(clean(req.body?.eventNumber, 120));
+    if (requestedEventNumber) {
+      const [reports, dashboardCandidates] = await Promise.all([
+        BarEvent.find({ eventNumber: { $ne: '' } }).limit(500),
+        Event.find({ externalId: { $ne: '' }, status: { $not: /^deleted$/i } })
+          .select('title date client meta externalId').limit(500).lean(),
+      ]);
+      const choices = dateChoices(reports, dashboardCandidates);
+      const numberMatch = selectGuestEventNumberMatch(requestedEventNumber, choices);
+      if (numberMatch.ambiguous) return res.json({ event: null, events: choices.filter((choice) => barEventNumbersMatch(requestedEventNumber, choice.eventNumber)) });
+      if (!numberMatch.match) return res.json({ event: null });
+      let event = reports.find((candidate) => String(candidate._id) === numberMatch.match.id) || null;
+      if (!event && numberMatch.match.source === 'dashboard') {
+        const dashboardEvent = dashboardCandidates.find((candidate) => String(candidate._id) === numberMatch.match.id);
+        if (dashboardEvent) event = await syncDashboardEvent(dashboardEvent);
+      }
+      return res.json({ event: event ? publicEvent(event) : null });
+    }
+    if (name.length < 2 || !eventDate) return res.status(400).json({ message: 'Enter an Event ID, or at least 2 name characters and an exact event date' });
     const [reports, dashboardCandidates] = await Promise.all([
       BarEvent.find({ eventDate }).limit(100),
-      Event.find({ status: { $not: /^deleted$/i } }).select('title date client meta').limit(500).lean(),
+      Event.find({ status: { $not: /^deleted$/i } }).select('title date client meta externalId').limit(500).lean(),
     ]);
     const sameDate = dashboardCandidates.filter((candidate) => normalizeBarEventDate(candidate.date) === eventDate);
     const choices = dateChoices(reports, sameDate);

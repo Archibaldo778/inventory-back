@@ -14,10 +14,16 @@ import DecorPackout from '../models/DecorPackout.js';
 import BarEvent from '../models/BarEvent.js';
 import BarTask from '../models/BarTask.js';
 import BeverageItem from '../models/BeverageItem.js';
+import ImportRun from '../models/ImportRun.js';
 import { requireAdmin, requireRoles } from '../middleware/auth.js';
 import { clearApiCacheGroups, createGroupedApiCache } from '../utils/apiCache.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import { runWithTransactionFallback } from '../utils/mongoTransaction.js';
+import {
+  importedEventMatchesSnapshot,
+  snapshotImportedEvent,
+  summarizeImportOperations,
+} from '../utils/eventImportAudit.js';
 
 const router = Router();
 const __filename = fileURLToPath(import.meta.url);
@@ -161,6 +167,88 @@ const findImportedNowstaDuplicates = async (event, targetEventId) => {
     String(candidate._id) !== String(targetEventId)
     && String(candidate.importSource || '').toLowerCase() === 'nowsta'
   ));
+};
+
+const prepareImportedRows = (sourceRows) => {
+  const normalizedRows = sourceRows.map(normalizeImportedEvent).filter(Boolean);
+  const uniqueRows = [];
+  const seen = new Set();
+  normalizedRows.forEach((event) => {
+    const identity = event.externalId
+      ? `id:${event.externalId.toLowerCase()}`
+      : `event:${[event.title, event.date, event.client, event.managerId].map((value) => value.toLowerCase()).join('|')}`;
+    if (seen.has(identity)) return;
+    seen.add(identity);
+    uniqueRows.push({ ...event, identity });
+  });
+  return {
+    normalizedRows,
+    uniqueRows,
+    skipped: sourceRows.length - uniqueRows.length,
+  };
+};
+
+const resolveImportedEventTarget = async (event) => {
+  let filter = event.externalId
+    ? { externalId: event.externalId }
+    : {
+        title: event.title,
+        date: event.date,
+        client: event.client,
+        managerId: event.managerId,
+      };
+  let assigningEventId = false;
+  let duplicateEventIds = [];
+  let conflict = '';
+  let matchedEvent = null;
+
+  if (event.externalId) {
+    const existingById = await Event.findOne({
+      externalId: event.externalId,
+      status: { $not: /^deleted$/i },
+    }).lean();
+    if (existingById?._id) {
+      const manualMatches = await findManualEventMatches(event, existingById._id);
+      if (manualMatches.length === 1) {
+        matchedEvent = await Event.findById(manualMatches[0]._id).lean();
+        filter = { _id: manualMatches[0]._id };
+        duplicateEventIds = (await findImportedNowstaDuplicates(event, manualMatches[0]._id))
+          .map((candidate) => candidate._id);
+        if (!duplicateEventIds.some((id) => String(id) === String(existingById._id))) {
+          duplicateEventIds.push(existingById._id);
+        }
+        assigningEventId = true;
+      } else {
+        matchedEvent = existingById;
+        filter = { _id: existingById._id };
+      }
+    } else {
+      const manualMatches = await findManualEventMatches(event);
+      if (manualMatches.length === 1) {
+        matchedEvent = await Event.findById(manualMatches[0]._id).lean();
+        filter = { _id: manualMatches[0]._id };
+        duplicateEventIds = (await findImportedNowstaDuplicates(event, manualMatches[0]._id))
+          .map((candidate) => candidate._id);
+        assigningEventId = true;
+      } else if (manualMatches.length > 1) {
+        conflict = `${manualMatches.length} existing events have the same name and date. Resolve duplicates before importing.`;
+      }
+    }
+  } else {
+    matchedEvent = await Event.findOne({ ...filter, status: { $not: /^deleted$/i } }).lean();
+    if (matchedEvent?._id) filter = { _id: matchedEvent._id };
+  }
+
+  const action = conflict
+    ? 'skipped'
+    : duplicateEventIds.length
+      ? 'duplicates_merged'
+      : assigningEventId
+        ? 'event_id_assigned'
+        : matchedEvent
+          ? 'updated'
+          : 'created';
+  return { filter, assigningEventId, duplicateEventIds, conflict, matchedEvent, action };
 };
 
 const barItemMergeKey = (item) => {
@@ -466,6 +554,159 @@ router.post('/', async (req, res) => {
   }
 });
 
+router.post('/import/preview', requireAdmin, async (req, res) => {
+  try {
+    const sourceRows = Array.isArray(req.body?.events) ? req.body.events : [];
+    if (!sourceRows.length) return res.status(400).json({ error: 'events array is required' });
+    if (sourceRows.length > MAX_IMPORT_ROWS) {
+      return res.status(413).json({ error: `Import preview is limited to ${MAX_IMPORT_ROWS} rows` });
+    }
+
+    const { uniqueRows, skipped } = prepareImportedRows(sourceRows);
+    const rows = [];
+    for (const { identity: _identity, ...event } of uniqueRows) {
+      const target = await resolveImportedEventTarget(event);
+      rows.push({
+        action: target.action,
+        eventId: String(target.matchedEvent?._id || ''),
+        externalId: event.externalId,
+        title: event.title,
+        date: event.date,
+        matchedTitle: target.matchedEvent?.title || '',
+        matchedDate: target.matchedEvent?.date || '',
+        message: target.conflict || (
+          target.action === 'created' ? 'A new event will be created.'
+            : target.action === 'event_id_assigned' ? 'Event ID will be assigned to the existing event.'
+              : target.action === 'duplicates_merged' ? 'Existing duplicate import rows will be merged into the manual event.'
+                : 'The existing event will be updated.'
+        ),
+        undoable: target.action !== 'duplicates_merged',
+      });
+    }
+
+    return res.json({
+      ok: true,
+      totalRows: sourceRows.length,
+      skipped,
+      summary: summarizeImportOperations(rows),
+      rows,
+    });
+  } catch (error) {
+    return sendApiError(res, error, {
+      context: 'Event calendar preview failed',
+      fallbackMessage: 'Failed to preview event calendar import',
+    });
+  }
+});
+
+router.get('/imports', requireAdmin, async (req, res) => {
+  try {
+    const limit = Math.max(1, Math.min(50, Number(req.query?.limit) || 20));
+    const runs = await ImportRun.find({ kind: 'event_calendar' })
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .select('-operations.before -operations.after')
+      .lean();
+    return res.json(runs);
+  } catch (error) {
+    return sendApiError(res, error, {
+      context: 'Import history load failed',
+      fallbackMessage: 'Failed to load import history',
+    });
+  }
+});
+
+router.post('/imports/:runId/undo', requireAdmin, async (req, res) => {
+  try {
+    const run = await ImportRun.findOne({ _id: req.params.runId, kind: 'event_calendar' });
+    if (!run) return res.status(404).json({ error: 'Import run not found' });
+    if (run.status === 'undone') return res.status(409).json({ error: 'This import was already undone' });
+
+    let undone = 0;
+    let conflicts = 0;
+    let skipped = 0;
+    for (let index = run.operations.length - 1; index >= 0; index -= 1) {
+      const operation = run.operations[index];
+      if (!operation.undoable || !operation.eventId || ['failed', 'skipped'].includes(operation.action)) {
+        operation.undoStatus = 'skipped';
+        operation.undoMessage = operation.undoable ? 'No event change to undo.' : 'This row included a duplicate merge and cannot be safely undone.';
+        skipped += 1;
+        continue;
+      }
+
+      const current = await Event.findById(operation.eventId).lean();
+      if (!current || !importedEventMatchesSnapshot(current, operation.after)) {
+        operation.undoStatus = 'conflict';
+        operation.undoMessage = current
+          ? 'The event changed after this import and was left untouched.'
+          : 'The event no longer exists.';
+        conflicts += 1;
+        continue;
+      }
+
+      if (operation.action === 'created') {
+        const [deck, proposal, packout, barEvent] = await Promise.all([
+          Deck.exists({ eventId: operation.eventId }),
+          Proposal.exists({ eventId: operation.eventId }),
+          DecorPackout.exists({ eventId: operation.eventId }),
+          BarEvent.exists({ linkedEventId: operation.eventId }),
+        ]);
+        if (current.documents?.length || deck || proposal || packout || barEvent) {
+          operation.undoStatus = 'conflict';
+          operation.undoMessage = 'The new event already has documents or operational data and was left untouched.';
+          conflicts += 1;
+          continue;
+        }
+        await Event.updateOne(
+          { _id: operation.eventId },
+          {
+            $set: {
+              status: 'deleted',
+              'meta.importUndo': {
+                importRunId: String(run._id),
+                undoneAt: new Date(),
+              },
+            },
+            $unset: { externalId: 1 },
+          }
+        );
+      } else {
+        const before = operation.before || {};
+        const setFields = {};
+        const unsetFields = {};
+        for (const field of ['externalId', 'title', 'date', 'client', 'managerId', 'status', 'importSource', 'meta']) {
+          if (before[field] === undefined) unsetFields[field] = 1;
+          else setFields[field] = before[field];
+        }
+        await Event.updateOne(
+          { _id: operation.eventId },
+          {
+            ...(Object.keys(setFields).length ? { $set: setFields } : {}),
+            ...(Object.keys(unsetFields).length ? { $unset: unsetFields } : {}),
+          },
+          { runValidators: true }
+        );
+      }
+      operation.undoStatus = 'undone';
+      operation.undoMessage = 'Restored.';
+      undone += 1;
+    }
+
+    run.status = conflicts || skipped ? 'partially_undone' : 'undone';
+    run.undoneAt = new Date();
+    run.undoneBy = trimImportValue(req.auth?.username || req.auth?.email, 180);
+    run.markModified('operations');
+    await run.save();
+    clearRelatedCaches();
+    return res.json({ ok: true, importRunId: String(run._id), status: run.status, undone, conflicts, skipped });
+  } catch (error) {
+    return sendApiError(res, error, {
+      context: 'Import undo failed',
+      fallbackMessage: 'Failed to undo event import',
+    });
+  }
+});
+
 router.post('/import', requireAdmin, async (req, res) => {
   try {
     const sourceRows = Array.isArray(req.body?.events) ? req.body.events : [];
@@ -474,17 +715,7 @@ router.post('/import', requireAdmin, async (req, res) => {
       return res.status(413).json({ error: `Import is limited to ${MAX_IMPORT_ROWS} rows` });
     }
 
-    const normalizedRows = sourceRows.map(normalizeImportedEvent).filter(Boolean);
-    const uniqueRows = [];
-    const seen = new Set();
-    normalizedRows.forEach((event) => {
-      const identity = event.externalId
-        ? `id:${event.externalId.toLowerCase()}`
-        : `event:${[event.title, event.date, event.client, event.managerId].map((value) => value.toLowerCase()).join('|')}`;
-      if (seen.has(identity)) return;
-      seen.add(identity);
-      uniqueRows.push({ ...event, identity });
-    });
+    const { normalizedRows, uniqueRows } = prepareImportedRows(sourceRows);
 
     const clientNames = [...new Set(uniqueRows.map((event) => event.client).filter(Boolean))];
     for (const client of clientNames) await ensureClientRecord(client);
@@ -499,46 +730,24 @@ router.post('/import', requireAdmin, async (req, res) => {
       skipped: sourceRows.length - normalizedRows.length,
     };
     const failures = [];
+    const operations = [];
     for (const { identity: _identity, meta, ...event } of uniqueRows) {
       try {
-        let filter = event.externalId
-          ? { externalId: event.externalId }
-          : {
-              title: event.title,
-              date: event.date,
-              client: event.client,
-              managerId: event.managerId,
-            };
-        let assigningEventId = false;
-        let duplicateEventIds = [];
-        if (event.externalId) {
-          const existingById = await Event.findOne({
+        const target = await resolveImportedEventTarget(event);
+        if (target.conflict) {
+          stats.skipped += 1;
+          operations.push({
+            action: 'skipped',
             externalId: event.externalId,
-            status: { $not: /^deleted$/i },
-          }).select('_id title date').lean();
-          if (existingById?._id) {
-            const manualMatches = await findManualEventMatches(event, existingById._id);
-            if (manualMatches.length === 1) {
-              filter = { _id: manualMatches[0]._id };
-              duplicateEventIds = (await findImportedNowstaDuplicates(event, manualMatches[0]._id))
-                .map((candidate) => candidate._id);
-              if (!duplicateEventIds.some((id) => String(id) === String(existingById._id))) {
-                duplicateEventIds.push(existingById._id);
-              }
-              assigningEventId = true;
-            } else {
-              filter = { _id: existingById._id };
-            }
-          } else {
-            const manualMatches = await findManualEventMatches(event);
-            if (manualMatches.length === 1) {
-              filter = { _id: manualMatches[0]._id };
-              duplicateEventIds = (await findImportedNowstaDuplicates(event, manualMatches[0]._id))
-                .map((candidate) => candidate._id);
-              assigningEventId = true;
-            }
-          }
+            title: event.title,
+            date: event.date,
+            message: target.conflict,
+            undoable: false,
+          });
+          continue;
         }
+        const { filter, assigningEventId, duplicateEventIds } = target;
+        const before = target.matchedEvent ? snapshotImportedEvent(target.matchedEvent) : null;
         const setFields = { ...event };
         const deferredIdentity = duplicateEventIds.length
           ? { externalId: event.externalId, importSource: event.importSource }
@@ -577,11 +786,34 @@ router.post('/import', requireAdmin, async (req, res) => {
           );
         }
         stats.processed += 1;
-        if (result.upsertedCount) stats.created += 1;
+        let action = target.action;
+        if (result.upsertedCount) {
+          stats.created += 1;
+          action = 'created';
+        }
         else if (result.matchedCount) {
           stats.updated += 1;
           if (assigningEventId) stats.eventIdsAssigned += 1;
+          if (action === 'created') action = 'updated';
         }
+        const targetEventId = result.upsertedId || filter._id;
+        const savedEvent = targetEventId
+          ? await Event.findById(targetEventId).lean()
+          : await Event.findOne(filter).lean();
+        operations.push({
+          action,
+          eventId: savedEvent?._id || targetEventId || null,
+          externalId: event.externalId,
+          title: event.title,
+          date: event.date,
+          message: action === 'created' ? 'Event created.'
+            : action === 'event_id_assigned' ? 'Event ID assigned to existing event.'
+              : action === 'duplicates_merged' ? `${duplicateEventIds.length} duplicate event${duplicateEventIds.length === 1 ? '' : 's'} merged.`
+                : 'Existing event updated.',
+          before,
+          after: savedEvent ? snapshotImportedEvent(savedEvent) : null,
+          undoable: action !== 'duplicates_merged',
+        });
       } catch (rowError) {
         stats.failed += 1;
         failures.push({
@@ -589,6 +821,14 @@ router.post('/import', requireAdmin, async (req, res) => {
           title: event.title,
           date: event.date,
           error: importedEventFailureMessage(rowError),
+        });
+        operations.push({
+          action: 'failed',
+          externalId: event.externalId,
+          title: event.title,
+          date: event.date,
+          message: importedEventFailureMessage(rowError),
+          undoable: false,
         });
         console.error('Event calendar row import failed', {
           externalId: event.externalId,
@@ -600,12 +840,49 @@ router.post('/import', requireAdmin, async (req, res) => {
     }
     stats.skipped += normalizedRows.length - uniqueRows.length;
 
+    const runMetadata = {
+      source: trimImportValue(req.body?.source, 80),
+      fileName: trimImportValue(req.body?.fileName, 300),
+      createdBy: trimImportValue(req.auth?.username || req.auth?.email, 180),
+      createdById: trimImportValue(req.auth?.userId, 120),
+    };
+    let importRun = null;
+    if (req.body?.importRunId) {
+      importRun = await ImportRun.findOne({
+        _id: req.body.importRunId,
+        kind: 'event_calendar',
+        status: 'applied',
+      });
+      if (!importRun) return res.status(409).json({ error: 'The import run can no longer accept additional rows' });
+      importRun.operations.push(...operations);
+      const previousSummary = importRun.summary || {};
+      importRun.summary = {
+        totalRows: (Number(previousSummary.totalRows) || 0) + sourceRows.length,
+        ...Object.fromEntries(Object.keys(stats).map((field) => [
+          field,
+          (Number(previousSummary[field]) || 0) + (Number(stats[field]) || 0),
+        ])),
+      };
+      if (!importRun.fileName && runMetadata.fileName) importRun.fileName = runMetadata.fileName;
+      if (!importRun.source && runMetadata.source) importRun.source = runMetadata.source;
+      await importRun.save();
+    } else {
+      importRun = await ImportRun.create({
+        kind: 'event_calendar',
+        ...runMetadata,
+        summary: { totalRows: sourceRows.length, ...stats },
+        operations,
+      });
+    }
+
     clearRelatedCaches();
     return res.json({
       ok: true,
       totalRows: sourceRows.length,
       stats,
       failures,
+      importRunId: String(importRun._id),
+      rows: operations.map(({ before: _before, after: _after, ...operation }) => operation),
     });
   } catch (e) {
     return sendApiError(res, e, {

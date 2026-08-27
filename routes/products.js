@@ -10,6 +10,7 @@ import { cleanupManagedImageSafely } from '../utils/managedImageCleanup.js';
 import { INVALID_IMAGE_UPLOAD_RESPONSE, isAllowedImageUpload } from '../utils/imageSignature.js';
 import { clearApiCacheGroups, createGroupedApiCache } from '../utils/apiCache.js';
 import { sendApiError } from '../utils/apiErrors.js';
+import { buildProductLocationPayload } from '../utils/productLocations.js';
 import {
   allocateDecorInventoryCode,
   ensureDecorInventoryCodes,
@@ -360,6 +361,7 @@ router.post('/', upload.single('image'), async (req, res) => {
       material,
       color,
       description,
+      locations,
     } = req.body;
 
     if (!name || !name.trim()) {
@@ -374,6 +376,10 @@ router.post('/', upload.single('image'), async (req, res) => {
       ? undefined
       : await allocateDecorInventoryCode();
     const qtyNum = Number((quantity ?? qty) ?? 0);
+    const locationPayload = buildProductLocationPayload(locations, {
+      location,
+      quantity: Number.isFinite(qtyNum) ? qtyNum : 0,
+    });
     let image = null;
 
     if (req.file) {
@@ -405,9 +411,10 @@ router.post('/', upload.single('image'), async (req, res) => {
     const doc = await Product.create({
       ...(inventoryCode ? { inventoryCode } : {}),
       name: name.trim(),
-      quantity: Number.isFinite(qtyNum) ? qtyNum : 0,
+      quantity: locationPayload.quantity,
+      locations: locationPayload.locations.length ? locationPayload.locations : undefined,
       supplier: supplier || '',
-      location: location || '',
+      location: locationPayload.location,
       category: categoryValue,
       material: material || '',
       color: color || '',
@@ -483,13 +490,22 @@ router.patch('/:id', upload.single('image'), async (req, res) => {
     }
 
     const hasQty = typeof req.body.qty !== 'undefined' || typeof req.body.quantity !== 'undefined';
-    if (hasQty) {
+    const hasLocations = typeof req.body.locations !== 'undefined';
+    if (hasLocations) {
+      const locationPayload = buildProductLocationPayload(req.body.locations, {
+        location: req.body.location ?? currentDoc.location,
+        quantity: req.body.quantity ?? req.body.qty ?? currentDoc.quantity,
+      });
+      updates.locations = locationPayload.locations;
+      updates.location = locationPayload.location;
+      updates.quantity = locationPayload.quantity;
+    } else if (hasQty) {
       const q = Number((req.body.quantity ?? req.body.qty));
       updates.quantity = Number.isFinite(q) ? q : 0;
     }
 
     if (typeof req.body.supplier !== 'undefined') updates.supplier = req.body.supplier || '';
-    if (typeof req.body.location !== 'undefined') updates.location = req.body.location || '';
+    if (!hasLocations && typeof req.body.location !== 'undefined') updates.location = req.body.location || '';
 
     let nextCategoryValue = String(currentDoc.category || '').trim() || 'Trays';
     if (typeof req.body.category !== 'undefined') {

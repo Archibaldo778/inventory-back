@@ -10,6 +10,14 @@ const sizeDimensionsSchema = new mongoose.Schema(
   { _id: false, strict: false }
 );
 
+const productLocationSchema = new mongoose.Schema(
+  {
+    name: { type: String, required: true, trim: true },
+    quantity: { type: Number, default: 0, min: 0 },
+  },
+  { _id: false }
+);
+
 // Product schema updated to store supplier/location, size metadata, and Cloudinary data
 const productSchema = new mongoose.Schema(
   {
@@ -21,6 +29,7 @@ const productSchema = new mongoose.Schema(
 
     // inventory
     quantity: { type: Number, default: 0, min: 0 },
+    locations: { type: [productLocationSchema], default: undefined },
 
     // optional meta
     description: { type: String, trim: true },

@@ -34,6 +34,39 @@ export const mergeManualItemsWithPackout = (existingItems, importedItems) => {
   return [...manualItems, ...newPackoutItems];
 };
 
+export const mergePackoutDocumentItems = (existingItems, importedItems, documentTypes = []) => {
+  const types = new Set((Array.isArray(documentTypes) ? documentTypes : [])
+    .map((value) => String(value || '').toLowerCase()));
+  if (!types.size || (types.has('po') && types.has('kitchen_menu'))) {
+    return mergeManualItemsWithPackout(existingItems, importedItems);
+  }
+  const preservePrepared = types.has('po');
+  const source = Array.isArray(existingItems) ? existingItems : [];
+  const manualItems = source
+    .filter((item) => item?.entrySource === 'manual')
+    .map((item) => typeof item?.toObject === 'function' ? item.toObject() : { ...item });
+  const manualKeys = new Set(manualItems.map(barItemIdentityKey).filter(Boolean));
+  const manualNames = new Set(manualItems.map(barItemNameKey).filter(Boolean));
+  const retained = source
+    .filter((item) => item?.entrySource !== 'manual' && Boolean(getPreparedBeverageType(item)) === preservePrepared)
+    .map((item) => typeof item?.toObject === 'function' ? item.toObject() : { ...item });
+  const incoming = (Array.isArray(importedItems) ? importedItems : [])
+    .filter((item) => {
+      const key = barItemIdentityKey(item);
+      const name = barItemNameKey(item);
+      return (!key || !manualKeys.has(key)) && (!name || !manualNames.has(name));
+    })
+    .map((item) => ({ ...item, entrySource: 'packout' }));
+  const incomingKeys = new Set(incoming.map(barItemIdentityKey).filter(Boolean));
+  const incomingNames = new Set(incoming.map(barItemNameKey).filter(Boolean));
+  const preserved = retained.filter((item) => {
+    const key = barItemIdentityKey(item);
+    const name = barItemNameKey(item);
+    return (!key || !incomingKeys.has(key)) && (!name || !incomingNames.has(name));
+  });
+  return [...manualItems, ...preserved, ...incoming];
+};
+
 export const schedulePreparedItemsForEvent = (items, eventDate, { at = new Date(), by = '' } = {}) => {
   const scheduledDate = String(eventDate || '').trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(scheduledDate)) return items;

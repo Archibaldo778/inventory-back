@@ -23,7 +23,7 @@ import {
 import { sendApiError } from '../utils/apiErrors.js';
 import { clearApiCacheGroups } from '../utils/apiCache.js';
 import { cocktailServingsForGuests, resolveCocktailRecipeKey } from '../utils/cocktailRecipes.js';
-import { barItemIdentityKey, mergeManualItemsWithPackout, schedulePreparedItemsForEvent } from '../utils/barManualItems.js';
+import { barItemIdentityKey, mergePackoutDocumentItems, schedulePreparedItemsForEvent } from '../utils/barManualItems.js';
 import { recognizeDocuments } from '../utils/googleDocumentAi.js';
 import {
   keepBarAccountingItems,
@@ -480,7 +480,7 @@ export const normalizePackoutItems = async (items, { allowFinancials = false, gu
         : 'review';
       const preparedBeverageType = getPreparedBeverageType(item);
       const preparedRate = getPreparedBeverageRate(item);
-      const cocktailServingsAuto = preparedBeverageType === 'cocktail'
+      const cocktailServingsAuto = preparedBeverageType
         ? cleanBoolean(item?.cocktailServingsAuto, true)
         : false;
       const automaticCocktailServings = cocktailServingsAuto
@@ -1140,7 +1140,7 @@ router.post('/events/:id/packout', async (req, res) => {
       allowFinancials: manager,
       guestCount: event.guestCount,
     });
-    event.items = mergeManualItemsWithPackout(event.items, importedItems);
+    event.items = mergePackoutDocumentItems(event.items, importedItems, req.body?.documentTypes);
     schedulePreparedItemsForEvent(event.items, event.eventDate, {
       at: new Date(),
       by: String(req.auth?.username || req.auth?.email || ''),

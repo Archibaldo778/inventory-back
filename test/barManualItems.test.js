@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { barItemIdentityKey, mergeManualItemsWithPackout, schedulePreparedItemsForEvent } from '../utils/barManualItems.js';
+import { barItemIdentityKey, mergeManualItemsWithPackout, mergePackoutDocumentItems, schedulePreparedItemsForEvent } from '../utils/barManualItems.js';
 
 test('manual liquor and cocktails keep stable catalog identities', () => {
   assert.equal(barItemIdentityKey({ beverageItemId: 'ABC123', name: 'Vodka' }), 'beverage:abc123');
@@ -22,6 +22,34 @@ test('packout merge preserves manual items, drops their duplicates, and replaces
     existing[0],
     existing[2],
     { ...imported[1], entrySource: 'packout' },
+  ]);
+});
+
+test('a Kitchen Menu import updates prepared drinks without deleting PO alcohol', () => {
+  const existing = [
+    { name: 'Belvedere', section: 'VODKA', scope: 'alcohol', entrySource: 'packout', sentQty: 4 },
+    { name: 'Old Cocktail', section: 'COCKTAIL', scope: 'review', entrySource: 'packout', sentQty: 100 },
+    { name: 'Manual Mezcal', section: 'Manual Liquor', scope: 'alcohol', entrySource: 'manual', sentQty: 1 },
+  ];
+  const kitchenMenu = [
+    { name: 'New Cocktail', section: 'COCKTAIL', scope: 'review', sentQty: 130 },
+  ];
+  assert.deepEqual(mergePackoutDocumentItems(existing, kitchenMenu, ['kitchen_menu']), [
+    existing[2],
+    existing[0],
+    { ...kitchenMenu[0], entrySource: 'packout' },
+  ]);
+});
+
+test('a PO import updates products without deleting Kitchen Menu drinks', () => {
+  const existing = [
+    { name: 'Old Vodka', section: 'VODKA', scope: 'alcohol', entrySource: 'packout', sentQty: 2 },
+    { name: 'KM Cocktail', section: 'COCKTAIL', scope: 'review', entrySource: 'packout', sentQty: 130 },
+  ];
+  const po = [{ name: 'New Gin', section: 'GIN', scope: 'alcohol', sentQty: 3 }];
+  assert.deepEqual(mergePackoutDocumentItems(existing, po, ['po']), [
+    existing[1],
+    { ...po[0], entrySource: 'packout' },
   ]);
 });
 

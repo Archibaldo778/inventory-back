@@ -728,8 +728,14 @@ router.post('/events/charges/import', requireBarManager, async (req, res) => {
       return res.status(400).json({ message: 'No valid Event Date range was found in the Caterease report' });
     }
 
-    await syncDashboardEventsToBar();
-    const events = await BarEvent.find({ eventDate: { $gte: from, $lte: to } })
+    const activeDashboardEventIds = await syncDashboardEventsToBar();
+    const events = await BarEvent.find({
+      eventDate: { $gte: from, $lte: to },
+      $or: [
+        { linkedEventId: { $in: activeDashboardEventIds } },
+        { linkedEventId: null },
+      ],
+    })
       .select('_id linkedEventId eventNumber eventDate name client clientCharge')
       .lean();
     const preview = prepareBarChargeImport({ rows, events, from, to });

@@ -12,5 +12,7 @@ const pageSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+pageSchema.index({ deckId: 1, deletedAt: 1, index: 1, createdAt: 1 });
+
 const Page = mongoose.model('Page', pageSchema);
 export default Page;

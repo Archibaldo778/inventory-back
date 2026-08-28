@@ -225,9 +225,17 @@ router.patch('/:id', async (req, res) => {
       return res.status(404).json({ error: 'Not found' });
     }
 
-    const responsePage = sanitizePageCanvasForResponse(page);
-    res.json(responsePage);
     clearCache();
+    if (String(req.query?.compact || '') === '1') {
+      return res.json({
+        _id: page._id,
+        index: page.index,
+        revision: page.revision,
+        updatedAt: page.updatedAt,
+      });
+    }
+    const responsePage = sanitizePageCanvasForResponse(page);
+    return res.json(responsePage);
   } catch (e) {
     sendApiError(res, e, {
       context: 'Page update failed',

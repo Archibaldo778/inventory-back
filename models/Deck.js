@@ -10,5 +10,7 @@ const deckSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+deckSchema.index({ eventId: 1, type: 1, createdAt: -1 });
+
 const Deck = mongoose.model('Deck', deckSchema);
 export default Deck;

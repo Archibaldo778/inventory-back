@@ -13,6 +13,11 @@ const cacheWithGroup = createGroupedApiCache;
 
 const clearCache = () => clearApiCacheGroups(CACHE_GROUP, 'pages');
 
+const normalizeObjectId = (value) => {
+  const raw = String(value || '').trim();
+  return raw && /^[a-f\d]{24}$/i.test(raw) ? raw : '';
+};
+
 const createHttpError = (statusCode, message) => Object.assign(new Error(message), { statusCode });
 
 const deleteDeckInTransaction = async (deckId, session) => {
@@ -84,6 +89,67 @@ router.get('/', cacheWithGroup('5 minutes', CACHE_GROUP), async (req, res) => {
     sendApiError(res, e, {
       context: 'Decks list failed',
       fallbackMessage: 'Failed to list decks',
+    });
+  }
+});
+
+// Lightweight data for the event overview. Never include canvas or previews here:
+// those fields can be megabytes and the overview only needs counts and labels.
+router.get('/summaries/event/:eventId', async (req, res) => {
+  try {
+    const eventId = normalizeObjectId(req.params.eventId);
+    if (!eventId) return res.status(400).json({ error: 'Invalid eventId' });
+
+    const decks = await Deck.find({ eventId })
+      .select('_id eventId type title createdAt updatedAt')
+      .sort({ createdAt: -1 })
+      .lean();
+    const deckIds = decks.map((deck) => deck._id);
+    const pageCounts = deckIds.length
+      ? await Page.aggregate([
+          { $match: { deckId: { $in: deckIds }, deletedAt: null } },
+          { $group: { _id: '$deckId', pageCount: { $sum: 1 } } },
+        ])
+      : [];
+    const countByDeckId = new Map(pageCounts.map((row) => [String(row._id), Number(row.pageCount) || 0]));
+
+    return res.json(decks.map((deck) => ({
+      ...deck,
+      pageCount: countByDeckId.get(String(deck._id)) || 0,
+    })));
+  } catch (e) {
+    return sendApiError(res, e, {
+      context: 'Deck summaries lookup failed',
+      fallbackMessage: 'Failed to load deck summaries',
+    });
+  }
+});
+
+// Poll this endpoint instead of downloading every canvas and base64 preview.
+// The client fetches a full deck only after metadata proves that a remote page changed.
+router.get('/:id/sync-state', async (req, res) => {
+  try {
+    const deck = await Deck.findById(req.params.id).select('_id updatedAt').lean();
+    if (!deck) return res.status(404).json({ error: 'Not found' });
+    const pages = await Page.find({ deckId: deck._id, deletedAt: null })
+      .select('_id index revision updatedAt canvas.meta')
+      .sort({ index: 1, createdAt: 1 })
+      .lean();
+    return res.json({
+      _id: deck._id,
+      updatedAt: deck.updatedAt,
+      pages: pages.map((page) => ({
+        _id: page._id,
+        index: page.index,
+        revision: page.revision,
+        updatedAt: page.updatedAt,
+        meta: page.canvas?.meta || {},
+      })),
+    });
+  } catch (e) {
+    return sendApiError(res, e, {
+      context: 'Deck sync state lookup failed',
+      fallbackMessage: 'Failed to load deck sync state',
     });
   }
 });

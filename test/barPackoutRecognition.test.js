@@ -161,6 +161,21 @@ test('recognized names match exact aliases and leave ambiguous suggestions uncon
   assert.equal(matched[2].catalogMatch.status, 'unmatched');
 });
 
+test('Hendricks punctuation and common PO typo match Hendrick\'s Gin inventory', () => {
+  const catalog = [{
+    _id: 'hendricks-gin',
+    name: "Hendrick's Gin",
+    aliases: ["Hendrick's"],
+  }];
+  const matched = matchRecognizedItemsToCatalog([
+    { name: 'Hendricks' },
+    { name: "Hendik's" },
+  ], catalog);
+
+  assert.deepEqual(matched.map((item) => item.beverageItemId), ['hendricks-gin', 'hendricks-gin']);
+  assert.ok(matched.every((item) => item.catalogMatch.status === 'exact'));
+});
+
 test('Domaine Ott PO wording matches the existing By.Ott inventory item', () => {
   const matched = matchRecognizedItemsToCatalog([
     { name: 'Domaine Ott, Cotes de Provence Rose' },

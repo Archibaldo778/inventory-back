@@ -31,6 +31,7 @@ import { summarizeBarEventReadiness } from '../utils/barEventReadiness.js';
 import {
   keepBarAccountingItems,
   matchRecognizedItemsToCatalog,
+  normalizeOcrCatalogName,
   parseRecognizedPackout,
 } from '../utils/barPackoutRecognition.js';
 import {
@@ -451,7 +452,7 @@ const resolveCatalog = async (items) => {
     .map((item) => String(item?.beverageItemId || '').trim())
     .filter(isObjectId))];
   const names = new Set((Array.isArray(items) ? items : [])
-    .map((item) => normalizeCatalogName(item?.name))
+    .map((item) => normalizeOcrCatalogName(item?.name))
     .filter(Boolean));
   const query = ids.length
     ? {
@@ -465,10 +466,10 @@ const resolveCatalog = async (items) => {
   const byName = new Map();
   catalog.forEach((item) => {
     byId.set(String(item._id), item);
-    const nameKey = normalizeCatalogName(item.name);
+    const nameKey = normalizeOcrCatalogName(item.name);
     if (nameKey && names.has(nameKey) && !byName.has(nameKey)) byName.set(nameKey, item);
     (Array.isArray(item.aliases) ? item.aliases : []).forEach((alias) => {
-      const aliasKey = normalizeCatalogName(alias);
+      const aliasKey = normalizeOcrCatalogName(alias);
       if (aliasKey && names.has(aliasKey) && !byName.has(aliasKey)) byName.set(aliasKey, item);
     });
   });
@@ -485,7 +486,7 @@ export const normalizePackoutItems = async (items, { allowFinancials = false, gu
     .map((item) => {
       const requestedCatalogId = isObjectId(item?.beverageItemId) ? String(item.beverageItemId) : null;
       const catalogItem = (requestedCatalogId ? catalog.byId.get(requestedCatalogId) : null)
-        || catalog.byName.get(normalizeCatalogName(item?.name))
+        || catalog.byName.get(normalizeOcrCatalogName(item?.name))
         || null;
       const beverageItemId = catalogItem?._id || requestedCatalogId || null;
       const catalogUnitCost = resolveCatalogUnitCost(catalogItem);

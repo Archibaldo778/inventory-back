@@ -19,7 +19,12 @@ export const normalizeOcrCatalogName = (value) => {
     .replace(/\b(?:bottle|bottles|case|cases|ml|cl|liters?|litres?|ounces?|oz)\b/g, ' ')
     .replace(/[^a-z0-9]+/g, ' ')
     .replace(/\s+/g, ' ')
+    .replace(/\b([a-z0-9]{3,}) s\b/g, '$1s')
     .trim();
+  const compact = normalized.replace(/\s+/g, '');
+  if (['hendricks', 'hendricksgin', 'hendriks', 'hendriksgin', 'hendiks', 'hendiksgin'].includes(compact)) {
+    return 'hendricks';
+  }
   if (/\bott\b/.test(normalized) && /\brose\b/.test(normalized) && (/\bby ott\b/.test(normalized) || /\bcotes? de provence\b/.test(normalized))) {
     return 'domaines ott by ott rose';
   }

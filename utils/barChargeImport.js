@@ -90,8 +90,13 @@ export const prepareBarChargeImport = ({ rows, events, from, to }) => {
   (Array.isArray(events) ? events : []).forEach((event) => {
     const key = normalizeBarEventNumber(event?.eventNumber);
     if (key) {
-      if (!eventsByNumber.has(key)) eventsByNumber.set(key, []);
-      eventsByNumber.get(key).push(event);
+      const keys = new Set([key, normalizeBarEventBaseNumber(key)]);
+      keys.forEach((lookupKey) => {
+        if (!lookupKey) return;
+        if (!eventsByNumber.has(lookupKey)) eventsByNumber.set(lookupKey, new Map());
+        const eventId = String(event?._id || event?.id || `${event?.eventDate || ''}|${event?.name || ''}`);
+        eventsByNumber.get(lookupKey).set(eventId, event);
+      });
       return;
     }
     const name = normalizeEventName(event?.name);
@@ -115,7 +120,9 @@ export const prepareBarChargeImport = ({ rows, events, from, to }) => {
       return;
     }
     const row = duplicates[0];
-    let matches = eventsByNumber.get(eventNumber) || [];
+    const eventMatches = eventsByNumber.get(eventNumber)
+      || eventsByNumber.get(normalizeBarEventBaseNumber(eventNumber));
+    let matches = eventMatches ? [...eventMatches.values()] : [];
     let matchMethod = 'event_number';
     if (!matches.length) {
       const nameDateKey = `${row.eventDate}|${normalizeEventName(row.partyName)}`;

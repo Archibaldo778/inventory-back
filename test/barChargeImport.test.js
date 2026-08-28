@@ -32,6 +32,31 @@ test('charge preview matches by event number and ignores rows outside the select
   assert.equal(preview.importableRows[0].eventId, 'bar-1');
 });
 
+test('charge preview matches a Caterease base number to the full Nowsta event id', () => {
+  const preview = prepareBarChargeImport({
+    from: '2026-08-28',
+    to: '2026-08-28',
+    events: [{
+      _id: 'bar-milken',
+      eventNumber: 'E22493-S61623',
+      eventDate: '2026-08-28',
+      name: 'Milken Institute Hamptons Dialogues Dinner',
+      clientCharge: 0,
+    }],
+    rows: [{
+      eventNumber: 'E22493',
+      eventDate: '2026-08-28',
+      partyName: 'Milken Institute Hamptons Dialogues Dinner',
+      beverageSubtotal: 5000,
+      liquorSubtotal: 1200,
+    }],
+  });
+
+  assert.equal(preview.summary.changes, 1);
+  assert.equal(preview.importableRows[0].eventId, 'bar-milken');
+  assert.equal(preview.importableRows[0].eventNumber, 'E22493');
+});
+
 test('conflicting duplicate charges are never importable', () => {
   const preview = prepareBarChargeImport({
     from: '2026-08-01',

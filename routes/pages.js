@@ -132,7 +132,7 @@ router.post('/', async (req, res) => {
 // Get page
 router.get('/:id', async (req, res) => {
   try {
-    const page = await Page.findById(req.params.id);
+    const page = await Page.findOne({ _id: req.params.id, deletedAt: null });
     if (!page) return res.status(404).json({ error: 'Not found' });
     const responsePage = sanitizePageCanvasForResponse(page);
     res.json(responsePage);
@@ -190,7 +190,7 @@ router.patch('/:id', async (req, res) => {
       return res.status(400).json({ error: 'expectedRevision must be a non-negative integer' });
     }
 
-    const filter = { _id: req.params.id };
+    const filter = { _id: req.params.id, deletedAt: null };
     if (hasExpectedRevision) {
       if (expectedRevision === 0) {
         filter.$or = [
@@ -210,7 +210,9 @@ router.patch('/:id', async (req, res) => {
     });
     if (!page) {
       if (hasExpectedRevision) {
-        const current = await Page.findById(req.params.id).select('_id revision updatedAt').lean();
+        const current = await Page.findOne({ _id: req.params.id, deletedAt: null })
+          .select('_id revision updatedAt')
+          .lean();
         if (current) {
           return res.status(409).json({
             error: 'Page was changed by another session. Reload before saving again.',
@@ -237,14 +239,38 @@ router.patch('/:id', async (req, res) => {
 // Delete page
 router.delete('/:id', async (req, res) => {
   try {
-    const deleted = await Page.findByIdAndDelete(req.params.id);
+    const deleted = await Page.findOneAndUpdate(
+      { _id: req.params.id, deletedAt: null },
+      { $set: { deletedAt: new Date() }, $inc: { revision: 1 } },
+      { new: true }
+    );
     if (!deleted) return res.status(404).json({ error: 'Not found' });
-    res.json({ ok: true });
+    res.json({ ok: true, recoverable: true });
     clearCache();
   } catch (e) {
     sendApiError(res, e, {
       context: 'Page deletion failed',
       fallbackMessage: 'Failed to delete page',
+    });
+  }
+});
+
+// Restore a page removed from a board. Kept as a server-side recovery path so
+// an accidental delete never destroys the work permanently.
+router.post('/:id/restore', async (req, res) => {
+  try {
+    const restored = await Page.findOneAndUpdate(
+      { _id: req.params.id, deletedAt: { $ne: null } },
+      { $set: { deletedAt: null }, $inc: { revision: 1 } },
+      { new: true, runValidators: true }
+    );
+    if (!restored) return res.status(404).json({ error: 'Deleted page not found' });
+    res.json(sanitizePageCanvasForResponse(restored));
+    clearCache();
+  } catch (e) {
+    sendApiError(res, e, {
+      context: 'Page restore failed',
+      fallbackMessage: 'Failed to restore page',
     });
   }
 });

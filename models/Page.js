@@ -7,6 +7,7 @@ const pageSchema = new mongoose.Schema(
     canvas: { type: Object, default: {} },
     preview: { type: String, default: '' },
     revision: { type: Number, default: 0, min: 0 },
+    deletedAt: { type: Date, default: null, index: true },
   },
   { timestamps: true }
 );

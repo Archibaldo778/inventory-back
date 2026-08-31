@@ -157,16 +157,16 @@ router.get('/:id/sync-state', async (req, res) => {
 // Get deck with pages
 router.get('/:id', async (req, res) => {
   try {
-    const deck = await Deck.findById(req.params.id);
+    const deck = await Deck.findById(req.params.id).lean();
     if (!deck) return res.status(404).json({ error: 'Not found' });
     const includePreviews = String(req.query?.includePreviews ?? '1') !== '0';
     const pageQuery = Page.find({ deckId: deck._id, deletedAt: null })
-      .sort({ index: 1, createdAt: 1 });
+      .sort({ index: 1, createdAt: 1 })
+      .lean();
     if (!includePreviews) pageQuery.select('-preview');
     const pages = await pageQuery;
 
-    const sanitizedPages = pages.map((pageDoc) => {
-      const page = pageDoc.toObject();
+    const sanitizedPages = pages.map((page) => {
       const nextCanvas = sanitizeBoardCanvas(page.canvas);
       return {
         ...page,
@@ -175,7 +175,7 @@ router.get('/:id', async (req, res) => {
       };
     });
 
-    res.json({ ...deck.toObject(), pages: sanitizedPages });
+    res.json({ ...deck, pages: sanitizedPages });
   } catch (e) {
     sendApiError(res, e, {
       context: 'Deck lookup failed',

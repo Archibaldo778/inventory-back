@@ -159,13 +159,18 @@ router.get('/:id', async (req, res) => {
   try {
     const deck = await Deck.findById(req.params.id);
     if (!deck) return res.status(404).json({ error: 'Not found' });
-    const pages = await Page.find({ deckId: deck._id, deletedAt: null }).sort({ index: 1, createdAt: 1 });
+    const includePreviews = String(req.query?.includePreviews ?? '1') !== '0';
+    const pageQuery = Page.find({ deckId: deck._id, deletedAt: null })
+      .sort({ index: 1, createdAt: 1 });
+    if (!includePreviews) pageQuery.select('-preview');
+    const pages = await pageQuery;
 
     const sanitizedPages = pages.map((pageDoc) => {
       const page = pageDoc.toObject();
       const nextCanvas = sanitizeBoardCanvas(page.canvas);
       return {
         ...page,
+        ...(includePreviews ? {} : { hasPreview: true }),
         canvas: nextCanvas,
       };
     });

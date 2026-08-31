@@ -1016,6 +1016,44 @@ router.get('/', cacheWithGroup('5 minutes', CACHE_GROUP), async (req, res) => {
   try {
     const q = { status: { $not: /^deleted$/i } };
     if (req.query.managerId) q.managerId = req.query.managerId;
+    if (String(req.query.calendar || '') === '1') {
+      const from = trimImportValue(req.query.from, 10);
+      const to = trimImportValue(req.query.to, 10);
+      const validDate = /^\d{4}-\d{2}-\d{2}$/;
+      if (!validDate.test(from) || !validDate.test(to) || from > to) {
+        return res.status(400).json({ error: 'Valid calendar from and to dates are required' });
+      }
+
+      const [items, undated, monthCountRows] = await Promise.all([
+        Event.find({ ...q, date: { $gte: from, $lte: to } })
+          .select('-documentHistory')
+          .sort({ date: 1, title: 1 })
+          .lean(),
+        Event.find({
+          ...q,
+          $or: [
+            { date: { $exists: false } },
+            { date: null },
+            { date: '' },
+          ],
+        })
+          .select('-documentHistory')
+          .sort({ createdAt: -1 })
+          .lean(),
+        Event.aggregate([
+          { $match: { ...q, date: { $regex: /^\d{4}-\d{2}-\d{2}/ } } },
+          { $group: { _id: { $substrBytes: ['$date', 0, 7] }, count: { $sum: 1 } } },
+          { $sort: { _id: 1 } },
+        ]),
+      ]);
+
+      return res.json({
+        items,
+        undated,
+        monthCounts: Object.fromEntries(monthCountRows.map((row) => [row._id, row.count])),
+        range: { from, to },
+      });
+    }
     const items = await Event.find(q).select('-documentHistory').sort({ createdAt: -1 });
     res.json(items);
   } catch (e) {

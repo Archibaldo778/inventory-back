@@ -106,6 +106,15 @@ const sanitizePageCanvasForResponse = (pageDoc) => {
   };
 };
 
+const parseDataImagePreview = (preview) => {
+  const value = String(preview || '').trim();
+  const match = value.match(/^data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=\s]+)$/i);
+  if (!match) return null;
+  const buffer = Buffer.from(match[2].replace(/\s/g, ''), 'base64');
+  if (!buffer.length || buffer.length > 6 * 1024 * 1024) return null;
+  return { contentType: match[1].toLowerCase(), buffer };
+};
+
 // Create page
 router.post('/', async (req, res) => {
   try {
@@ -125,6 +134,36 @@ router.post('/', async (req, res) => {
     sendApiError(res, e, {
       context: 'Page creation failed',
       fallbackMessage: 'Failed to create page',
+    });
+  }
+});
+
+// Load only the page thumbnail. Legacy previews remain stored exactly as they
+// are; this endpoint keeps their base64 payload out of the initial deck JSON.
+router.get('/:id/preview', async (req, res) => {
+  try {
+    const page = await Page.findOne({ _id: req.params.id, deletedAt: null })
+      .select('_id preview revision updatedAt')
+      .lean();
+    if (!page) return res.status(404).json({ error: 'Not found' });
+    const parsed = parseDataImagePreview(page.preview);
+    if (!parsed) return res.status(404).json({ error: 'Preview not available' });
+
+    const etagSeed = `${page._id}:${page.revision || 0}:${page.updatedAt?.getTime?.() || ''}:${parsed.buffer.length}`;
+    const etag = `\"${crypto.createHash('sha1').update(etagSeed).digest('hex')}\"`;
+    if (req.headers['if-none-match'] === etag) return res.status(304).end();
+
+    res.set({
+      'Content-Type': parsed.contentType,
+      'Content-Length': String(parsed.buffer.length),
+      'Cache-Control': 'private, max-age=300',
+      ETag: etag,
+    });
+    return res.send(parsed.buffer);
+  } catch (e) {
+    return sendApiError(res, e, {
+      context: 'Page preview lookup failed',
+      fallbackMessage: 'Failed to load page preview',
     });
   }
 });

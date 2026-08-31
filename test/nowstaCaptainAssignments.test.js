@@ -10,7 +10,7 @@ test('Nowsta captain assignment matches Aidan Collis by email local part', () =>
     meta: {
       nowsta: {
         shifts: [{
-          position: 'Captain',
+          position: 'Server',
           workers: [{ name: 'Aidan Collis', status: 'confirmed' }],
         }],
       },
@@ -20,18 +20,21 @@ test('Nowsta captain assignment matches Aidan Collis by email local part', () =>
   assert.deepEqual(matchNowstaCaptainUserIds({ event, users }), ['captain-aidan']);
 });
 
-test('Nowsta captain assignment ignores non-captain shifts and unconfirmed workers', () => {
+test('Nowsta captain assignment includes any confirmed shift and ignores unconfirmed workers', () => {
   const event = {
     meta: {
       nowsta: {
         shifts: [
           { position: 'Bartender', workers: [{ name: 'Aidan Collis', status: 'confirmed' }] },
-          { position: 'Lead Server', workers: [{ name: 'Aidan Collis', status: 'pending' }] },
+          { position: 'Captain', workers: [{ name: 'Pending Person', status: 'pending' }] },
         ],
       },
     },
   };
-  const users = [{ _id: 'captain-aidan', nowstaName: 'Aidan Collis' }];
-  assert.deepEqual(matchNowstaCaptainUserIds({ event, users }), []);
+  const users = [
+    { _id: 'captain-aidan', nowstaName: 'Aidan Collis' },
+    { _id: 'captain-pending', nowstaName: 'Pending Person' },
+  ];
+  assert.deepEqual(matchNowstaCaptainUserIds({ event, users }), ['captain-aidan']);
   assert.equal(normalizeNowstaPersonName('zz Matrix - Aidan Collis (Agency)'), 'aidan collis');
 });

@@ -991,7 +991,11 @@ router.get('/events/by-linked/:linkedEventId', async (req, res) => {
     const event = await BarEvent.findOne({ linkedEventId: req.params.linkedEventId });
     if (!event) return res.status(404).json({ message: 'Event bar report not found' });
     if (!canViewEvent(event, req.auth)) {
-      return res.status(403).json({ message: 'Bar access required' });
+      return res.status(403).json({
+        message: isBarCaptain(req.auth)
+          ? 'This event is not assigned to your account in Nowsta'
+          : 'Bar access required',
+      });
     }
     return res.json(serializeBarEvent(event, {
       includeFinancials: canSeeBarFinancials(req.auth),
@@ -1009,7 +1013,11 @@ router.get('/events/:id', async (req, res) => {
     const event = await loadEvent(req, res);
     if (!event) return undefined;
     if (!canViewEvent(event, req.auth)) {
-      return res.status(403).json({ message: 'Bar access required' });
+      return res.status(403).json({
+        message: isBarCaptain(req.auth)
+          ? 'This event is not assigned to your account in Nowsta'
+          : 'Bar access required',
+      });
     }
     return res.json(serializeBarEvent(event, {
       includeFinancials: canSeeBarFinancials(req.auth),

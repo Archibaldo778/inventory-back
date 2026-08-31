@@ -14,10 +14,6 @@ export const nowstaPersonKeys = (value) => {
   return normalized ? [normalized, normalized.replace(/\s+/g, '')] : [];
 };
 
-export const isCaptainShift = (value) => (
-  /\b(captain|ma[iî]tre\s*['’]?\s*d|lead server)\b/i.test(String(value || ''))
-);
-
 export const matchNowstaCaptainUserIds = ({ event, users } = {}) => {
   const captainByName = new Map();
   (Array.isArray(users) ? users : []).forEach((user) => {
@@ -32,7 +28,6 @@ export const matchNowstaCaptainUserIds = ({ event, users } = {}) => {
   const ids = new Set();
   const shifts = Array.isArray(event?.meta?.nowsta?.shifts) ? event.meta.nowsta.shifts : [];
   shifts.forEach((shift) => {
-    if (!isCaptainShift(shift?.position)) return;
     (Array.isArray(shift?.workers) ? shift.workers : []).forEach((worker) => {
       const status = String(worker?.status || '').trim().toLowerCase();
       if (status && !['confirmed', 'assigned'].includes(status)) return;

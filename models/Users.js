@@ -11,6 +11,7 @@ const userSchema = new mongoose.Schema(
   {
     username: { type: String, required: true, unique: true, trim: true },
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+    nowstaName: { type: String, default: '', trim: true },
     role: {
       type: String,
       enum: [

@@ -96,6 +96,7 @@ const serializeUser = (source) => {
     username: user?.username || '',
     name: user?.username || '',
     email: user?.email || '',
+    nowstaName: user?.nowstaName || '',
     role: normalizeRole(user?.role || 'user'),
     seeProposals,
     canSeeProposals: seeProposals,
@@ -121,6 +122,10 @@ const applyUserPayload = async (user, body, { allowPassword = false } = {}) => {
   if (typeof payload.email !== 'undefined') {
     const nextEmail = normalizeEmail(payload.email);
     if (nextEmail) user.email = nextEmail;
+  }
+
+  if (typeof payload.nowstaName !== 'undefined') {
+    user.nowstaName = String(payload.nowstaName || '').trim().slice(0, 240);
   }
 
   if (typeof payload.role !== 'undefined') {
@@ -312,6 +317,7 @@ router.post('/', async (req, res) => {
     const user = await User.create({
       username,
       email,
+      nowstaName: String(body.nowstaName || '').trim().slice(0, 240),
       role,
       seeProposals: nextSeeProposals,
       seeBarFinancials: nextSeeBarFinancials,

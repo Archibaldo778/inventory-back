@@ -7,6 +7,7 @@ import BarTask from '../models/BarTask.js';
 import BeverageItem from '../models/BeverageItem.js';
 import CocktailRecipe from '../models/CocktailRecipe.js';
 import Event from '../models/Event.js';
+import User from '../models/Users.js';
 import DocumentImportRun from '../models/DocumentImportRun.js';
 import { canSeeBarFinancials, isAdminAuth, normalizeRole } from '../middleware/auth.js';
 import {
@@ -28,6 +29,7 @@ import { barItemIdentityKey, mergePackoutDocumentItems, preservePackoutOperation
 import { recognizeDocuments } from '../utils/googleDocumentAi.js';
 import { snapshotBarDocumentImport } from '../utils/documentImportAudit.js';
 import { summarizeBarEventReadiness } from '../utils/barEventReadiness.js';
+import { matchNowstaCaptainUserIds } from '../utils/nowstaCaptainAssignments.js';
 import {
   keepBarAccountingItems,
   matchRecognizedItemsToCatalog,
@@ -95,15 +97,24 @@ const isBarManager = (auth) => (
 );
 
 const isBarWorker = (auth) => BAR_WORKER_ROLES.has(normalizeRole(auth?.role));
+const isBarCaptain = (auth) => normalizeRole(auth?.role) === 'bar captain';
 
-const canViewEvent = (_event, auth) => (
+const eventAssignedToAuth = (event, auth) => {
+  const userId = String(auth?.userId || '');
+  if (!userId) return false;
+  return (Array.isArray(event?.assignedUserIds) ? event.assignedUserIds : [])
+    .some((assignedId) => String(assignedId) === userId);
+};
+
+const canViewEvent = (event, auth) => (
   isBarManager(auth)
   || BAR_VIEWER_ROLES.has(normalizeRole(auth?.role))
-  || isBarWorker(auth)
+  || (isBarCaptain(auth) ? eventAssignedToAuth(event, auth) : isBarWorker(auth))
 );
 
-const canOperateEvent = (_event, auth) => (
-  isBarManager(auth) || isBarWorker(auth)
+const canOperateEvent = (event, auth) => (
+  isBarManager(auth)
+  || (isBarCaptain(auth) ? eventAssignedToAuth(event, auth) : isBarWorker(auth))
 );
 
 const addAudit = (event, auth, action, details = {}) => {
@@ -265,11 +276,14 @@ const syncDashboardEventsToBar = async ({ eventId = null } = {}) => {
   if (!dashboardEvents.length) return [];
   const linkedIds = dashboardEvents.map((event) => event._id);
   const existingReports = await BarEvent.find({ linkedEventId: { $in: linkedIds } })
-    .select('linkedEventId eventNumber name eventDate client venue salesRep guestCount guestCountSource')
+    .select('linkedEventId eventNumber name eventDate client venue salesRep guestCount guestCountSource assignedUserIds')
     .lean();
   const existingByEventId = new Map(
     existingReports.map((report) => [String(report.linkedEventId), report])
   );
+  const captainUsers = await User.find({ role: 'bar captain', isActive: { $ne: false } })
+    .select('_id username email nowstaName')
+    .lean();
   const operations = dashboardEvents.flatMap((event) => {
     const current = existingByEventId.get(String(event._id));
     const next = {
@@ -279,6 +293,7 @@ const syncDashboardEventsToBar = async ({ eventId = null } = {}) => {
       client: cleanString(event.client, 180),
       venue: eventVenue(event),
       salesRep: eventSalesRep(event),
+      assignedUserIds: matchNowstaCaptainUserIds({ event, users: captainUsers }),
     };
     const preserveBarGuestCount = ['manual', 'packout'].includes(String(current?.guestCountSource || ''));
     if (!preserveBarGuestCount) {
@@ -292,6 +307,8 @@ const syncDashboardEventsToBar = async ({ eventId = null } = {}) => {
       && String(current.client || '') === next.client
       && String(current.venue || '') === next.venue
       && String(current.salesRep || '') === next.salesRep
+      && (Array.isArray(current.assignedUserIds) ? current.assignedUserIds.map(String).sort().join(',') : '')
+        === next.assignedUserIds.slice().sort().join(',')
       && (preserveBarGuestCount || (
         (current.guestCount ?? null) === next.guestCount
         && String(current.guestCountSource || 'dashboard') === next.guestCountSource
@@ -662,6 +679,9 @@ router.get('/events', async (req, res) => {
     };
     if (req.query.status && BAR_EVENT_STATUSES.includes(String(req.query.status))) {
       query.status = String(req.query.status);
+    }
+    if (isBarCaptain(req.auth)) {
+      query.assignedUserIds = req.auth.userId;
     }
     const events = await BarEvent.find(query).sort({ eventDate: -1, createdAt: -1 });
     return res.json(events.map((event) => serializeBarEvent(event, {

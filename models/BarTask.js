@@ -13,6 +13,13 @@ const barTaskSchema = new mongoose.Schema(
     eventItemId: { type: mongoose.Schema.Types.ObjectId, default: null },
     cocktailRecipeKey: { type: String, default: '', trim: true },
     cocktailName: { type: String, default: '', trim: true },
+    assigneeStaffId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Staff',
+      default: null,
+      index: true,
+    },
+    assigneeName: { type: String, default: '', trim: true },
     completedAt: { type: Date, default: null },
     completedBy: { type: String, default: '', trim: true },
     createdBy: { type: String, default: '', trim: true },

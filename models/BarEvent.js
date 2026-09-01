@@ -44,6 +44,8 @@ const barPackoutItemSchema = new mongoose.Schema(
       scheduledDate: { type: String, default: '', trim: true },
       scheduledAt: { type: Date, default: null },
       scheduledBy: { type: String, default: '', trim: true },
+      assigneeStaffId: { type: mongoose.Schema.Types.ObjectId, ref: 'Staff', default: null },
+      assigneeName: { type: String, default: '', trim: true },
       completedAt: { type: Date, default: null },
       completedBy: { type: String, default: '', trim: true },
     },

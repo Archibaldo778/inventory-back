@@ -7,6 +7,7 @@ import BarTask from '../models/BarTask.js';
 import BeverageItem from '../models/BeverageItem.js';
 import CocktailRecipe from '../models/CocktailRecipe.js';
 import Event from '../models/Event.js';
+import Staff from '../models/Staff.js';
 import User from '../models/Users.js';
 import DocumentImportRun from '../models/DocumentImportRun.js';
 import { canSeeBarFinancials, isAdminAuth, normalizeRole } from '../middleware/auth.js';
@@ -183,7 +184,21 @@ const serializeBarTask = (source) => {
     ...task,
     eventId: task.eventId ? String(task.eventId) : '',
     eventItemId: task.eventItemId ? String(task.eventItemId) : '',
+    assigneeStaffId: task.assigneeStaffId ? String(task.assigneeStaffId) : '',
     completed: Boolean(task.completedAt),
+  };
+};
+
+const resolveBarTaskAssignee = async (source = {}) => {
+  const requestedStaffId = cleanString(source?.assigneeStaffId, 80);
+  const requestedName = cleanString(source?.assigneeName, 160);
+  if (!requestedStaffId) return { assigneeStaffId: null, assigneeName: requestedName };
+  if (!isObjectId(requestedStaffId)) throw Object.assign(new Error('Invalid responsible staff id'), { status: 400 });
+  const staff = await Staff.findById(requestedStaffId).select('_id firstName lastName').lean();
+  if (!staff) throw Object.assign(new Error('Responsible staff member was not found'), { status: 400 });
+  return {
+    assigneeStaffId: staff._id,
+    assigneeName: requestedName || `${staff.firstName || ''} ${staff.lastName || ''}`.trim(),
   };
 };
 
@@ -598,6 +613,7 @@ router.post('/tasks', requireBarManager, async (req, res) => {
     }
 
     const username = String(req.auth?.username || req.auth?.email || '');
+    const assignee = await resolveBarTaskAssignee(req.body);
     const task = await BarTask.create({
       title,
       scheduledDate,
@@ -605,6 +621,7 @@ router.post('/tasks', requireBarManager, async (req, res) => {
       eventItemId: eventItem?._id || null,
       cocktailRecipeKey: cleanString(req.body?.cocktailRecipeKey, 80) || cleanString(eventItem?.cocktailRecipeKey, 80),
       cocktailName: cleanString(req.body?.cocktailName, 240) || cleanString(eventItem?.name, 240),
+      ...assignee,
       createdBy: username,
       updatedBy: username,
     });
@@ -659,6 +676,11 @@ router.patch('/tasks/:taskId', requireBarManager, async (req, res) => {
     }
     if (req.body?.cocktailName !== undefined) {
       task.cocktailName = cleanString(req.body.cocktailName, 240);
+    }
+    if (req.body?.assigneeStaffId !== undefined || req.body?.assigneeName !== undefined) {
+      const assignee = await resolveBarTaskAssignee(req.body);
+      task.assigneeStaffId = assignee.assigneeStaffId;
+      task.assigneeName = assignee.assigneeName;
     }
     if (req.body?.completed !== undefined) {
       const completed = cleanBoolean(req.body.completed, Boolean(task.completedAt));
@@ -1474,6 +1496,11 @@ router.patch('/events/:id/items/:itemId', requireBarManager, async (req, res) =>
       const username = String(req.auth?.username || req.auth?.email || '');
       const previousDate = String(item.prepTask?.scheduledDate || '');
       item.prepTask.scheduledDate = scheduledDate;
+      if (requestedTask.assigneeStaffId !== undefined || requestedTask.assigneeName !== undefined) {
+        const assignee = await resolveBarTaskAssignee(requestedTask);
+        item.prepTask.assigneeStaffId = assignee.assigneeStaffId;
+        item.prepTask.assigneeName = assignee.assigneeName;
+      }
       if (!scheduledDate) {
         item.prepTask.scheduledAt = null;
         item.prepTask.scheduledBy = '';

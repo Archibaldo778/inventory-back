@@ -634,6 +634,32 @@ router.patch('/tasks/:taskId', requireBarManager, async (req, res) => {
       }
       task.scheduledDate = scheduledDate;
     }
+    if (req.body?.eventId !== undefined || req.body?.eventItemId !== undefined) {
+      const requestedEventId = cleanString(req.body?.eventId, 80);
+      const requestedItemId = cleanString(req.body?.eventItemId, 80);
+      let event = null;
+      let eventItem = null;
+      if (requestedEventId) {
+        if (!isObjectId(requestedEventId)) return res.status(400).json({ message: 'Invalid event id' });
+        event = await BarEvent.findById(requestedEventId);
+        if (!event) return res.status(400).json({ message: 'Event not found' });
+        if (requestedItemId) {
+          if (!isObjectId(requestedItemId)) return res.status(400).json({ message: 'Invalid cocktail id' });
+          eventItem = event.items.id(requestedItemId);
+          if (!eventItem) return res.status(400).json({ message: 'Cocktail was not found in this event' });
+        }
+      } else if (requestedItemId) {
+        return res.status(400).json({ message: 'Choose an event before choosing its cocktail' });
+      }
+      task.eventId = event?._id || null;
+      task.eventItemId = eventItem?._id || null;
+    }
+    if (req.body?.cocktailRecipeKey !== undefined) {
+      task.cocktailRecipeKey = cleanString(req.body.cocktailRecipeKey, 80);
+    }
+    if (req.body?.cocktailName !== undefined) {
+      task.cocktailName = cleanString(req.body.cocktailName, 240);
+    }
     if (req.body?.completed !== undefined) {
       const completed = cleanBoolean(req.body.completed, Boolean(task.completedAt));
       const username = String(req.auth?.username || req.auth?.email || '');

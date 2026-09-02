@@ -10,7 +10,7 @@ import { normalizeBarEventDate } from '../utils/barEventDates.js';
 import { validateBarReturnQuantities } from '../utils/barEventAccounting.js';
 import { recognizeDocuments } from '../utils/googleDocumentAi.js';
 import { matchRecognizedItemsToCatalog, parseRecognizedPackout } from '../utils/barPackoutRecognition.js';
-import { requiresBarReturn } from '../utils/barPackoutScope.js';
+import { isBarAccountingItem, requiresBarReturn } from '../utils/barPackoutScope.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import { applyGuestReceivedRows } from '../utils/barGuestReturns.js';
 import { barEventNumbersMatch, normalizeBarEventNumber } from '../utils/barChargeImport.js';
@@ -207,7 +207,7 @@ export const publicEvent = (event) => ({
   revision: Number(event?.revision || 0),
   pendingReview: event?.guestIntake?.pendingReview === true,
   hasPackout: (Array.isArray(event?.items) && event.items.length > 0) || Boolean(event?.packout?.importedAt),
-  items: (Array.isArray(event?.items) ? event.items : []).map(serializeGuestBarItem),
+  items: (Array.isArray(event?.items) ? event.items : []).filter(isBarAccountingItem).map(serializeGuestBarItem),
 });
 
 const loadEditableEvent = async (req, res) => {

@@ -34,10 +34,17 @@ export const isTrackedBarWater = (item = {}) => (
   /\b(?:acqua\s+)?panna\b|\b(?:s\.?\s*)?pellegrino\b/i.test(String(item?.name || '').trim())
 );
 
+export const isExternalJelloItem = (item = {}) => (
+  /\b(?:jell[\s-]*o|jello)\s*(?:shots?|bar|station|wiggles?)\b/i.test(sourceText(item))
+);
+
 export const isBarAccountingItem = (item = {}) => (
-  String(item?.scope || '') === 'alcohol'
-  || isTrackedBarWater(item)
-  || Boolean(getPreparedBeverageType(item))
+  !isExternalJelloItem(item)
+  && (
+    String(item?.scope || '') === 'alcohol'
+    || isTrackedBarWater(item)
+    || Boolean(getPreparedBeverageType(item))
+  )
 );
 
 export const requiresBarReturn = (item = {}) => !getPreparedBeverageType(item);

@@ -145,7 +145,7 @@ const serializeBarEvent = (source, { includeFinancials = false } = {}) => {
     queuedAt: captainSyncAudit.details?.queuedAt || '',
     deviceId: captainSyncAudit.details?.clientDeviceId || '',
   } : null;
-  event.items = (Array.isArray(event.items) ? event.items : []).map((item) => {
+  event.items = (Array.isArray(event.items) ? event.items : []).filter(isBarAccountingItem).map((item) => {
     const next = {
       ...item,
       accounting: calculateBarItemAccounting(item),
@@ -1435,6 +1435,74 @@ router.post('/events/:id/items', requireBarOperator, async (req, res) => {
     return sendApiError(res, error, {
       context: 'Manual bar item creation failed',
       fallbackMessage: 'Failed to add product to the event',
+    });
+  }
+});
+
+router.patch('/events/:id/items/prep-task', requireBarManager, async (req, res) => {
+  try {
+    const event = await loadEvent(req, res);
+    if (!event) return undefined;
+    const itemIds = [...new Set((Array.isArray(req.body?.itemIds) ? req.body.itemIds : [])
+      .map((value) => cleanString(value, 80))
+      .filter(Boolean))];
+    if (!itemIds.length) return res.status(400).json({ message: 'Choose at least one packout item' });
+    if (itemIds.length > MAX_PACKOUT_ITEMS || itemIds.some((value) => !isObjectId(value))) {
+      return res.status(400).json({ message: 'Invalid packout item selection' });
+    }
+    const items = itemIds.map((itemId) => event.items.id(itemId)).filter(Boolean);
+    if (items.length !== itemIds.length) return res.status(404).json({ message: 'One or more packout items were not found' });
+    const requestedTask = req.body?.prepTask && typeof req.body.prepTask === 'object'
+      ? req.body.prepTask
+      : {};
+    const scheduledDate = cleanString(requestedTask.scheduledDate, 10);
+    if (scheduledDate && !/^\d{4}-\d{2}-\d{2}$/.test(scheduledDate)) {
+      return res.status(400).json({ message: 'Prep date must use YYYY-MM-DD format' });
+    }
+    const priority = requestedTask.priority === undefined
+      ? null
+      : cleanString(requestedTask.priority, 20).toLowerCase();
+    if (priority && !['normal', 'important', 'urgent'].includes(priority)) {
+      return res.status(400).json({ message: 'Task priority must be normal, important or urgent' });
+    }
+    const assignee = requestedTask.assigneeStaffId !== undefined || requestedTask.assigneeName !== undefined
+      ? await resolveBarTaskAssignee(requestedTask)
+      : null;
+    const username = String(req.auth?.username || req.auth?.email || '');
+    const changedAt = new Date();
+    items.forEach((item) => {
+      const previousDate = String(item.prepTask?.scheduledDate || '');
+      item.prepTask.scheduledDate = scheduledDate;
+      if (assignee) {
+        item.prepTask.assigneeStaffId = assignee.assigneeStaffId;
+        item.prepTask.assigneeName = assignee.assigneeName;
+      }
+      if (priority) item.prepTask.priority = priority;
+      if (!scheduledDate) {
+        item.prepTask.scheduledAt = null;
+        item.prepTask.scheduledBy = '';
+        item.prepTask.completedAt = null;
+        item.prepTask.completedBy = '';
+      } else {
+        if (scheduledDate !== previousDate || !item.prepTask.scheduledAt) {
+          item.prepTask.scheduledAt = changedAt;
+          item.prepTask.scheduledBy = username;
+        }
+        const completed = cleanBoolean(requestedTask.completed, Boolean(item.prepTask.completedAt));
+        item.prepTask.completedAt = completed ? (item.prepTask.completedAt || changedAt) : null;
+        item.prepTask.completedBy = completed ? (item.prepTask.completedBy || username) : '';
+      }
+      item.updatedBy = username;
+      item.updatedAt = changedAt;
+    });
+    event.revision += 1;
+    addAudit(event, req.auth, 'bar_prep_task_group_updated', { itemCount: items.length, scheduledDate });
+    await event.save();
+    return res.json(serializeBarEvent(event, { includeFinancials: canSeeBarFinancials(req.auth) }));
+  } catch (error) {
+    return sendApiError(res, error, {
+      context: 'Bar packout task group update failed',
+      fallbackMessage: 'Failed to update packout tasks',
     });
   }
 });

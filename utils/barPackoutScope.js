@@ -4,6 +4,11 @@ export const PREPARED_BEVERAGE_RATES = Object.freeze({
 });
 
 const sourceText = (item = {}) => `${String(item?.section || '')} ${String(item?.name || '')}`.trim();
+const FOOD_MENU_SECTION_PATTERN = /^(?:\d+\s+)?(?:(?:first|second|third|fourth)\s+courses?|plated\s+desserts?|proteins?|sides?|salads?|soups?|appetizers?|hors\s+d[’']?oeuvres?|canap[eé]s?|entr[eé]es?|main\s+courses?|desserts?|breads?|starches?|vegetables?|vendor\s+meals?)\s*:?(?:\s*\([^)]*\))?$/i;
+export const isFoodMenuItem = (item = {}) => (
+  FOOD_MENU_SECTION_PATTERN.test(String(item?.name || '').trim())
+  || FOOD_MENU_SECTION_PATTERN.test(String(item?.section || '').trim())
+);
 const isPreparedBeverageSupportRow = (item = {}) => (
   /\b(?:garnish|ice|water|cups?|glassware|napkins?|straws?|mixers?|juices?|sodas?)\b/i
     .test(String(item?.name || '').trim())
@@ -11,6 +16,7 @@ const isPreparedBeverageSupportRow = (item = {}) => (
 
 export const getPreparedBeverageType = (item = {}) => {
   const section = String(item?.section || '').trim();
+  if (isFoodMenuItem(item)) return '';
   const explicitType = /^\s*mocktails?\s*$/i.test(section)
     ? 'mocktail'
     : (/^\s*(?:specialty\s+)?cocktails?\s*$/i.test(section) ? 'cocktail' : '');
@@ -40,6 +46,7 @@ export const isExternalJelloItem = (item = {}) => (
 
 export const isBarAccountingItem = (item = {}) => (
   !isExternalJelloItem(item)
+  && !isFoodMenuItem(item)
   && (
     String(item?.scope || '') === 'alcohol'
     || isTrackedBarWater(item)

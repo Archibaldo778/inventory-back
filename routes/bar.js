@@ -202,6 +202,15 @@ const resolveBarTaskAssignee = async (source = {}) => {
   };
 };
 
+const resolveBarTaskPriority = (value, fallback = 'normal') => {
+  const priority = cleanString(value, 20).toLowerCase();
+  if (!priority) return fallback;
+  if (!['normal', 'important', 'urgent'].includes(priority)) {
+    throw Object.assign(new Error('Task priority must be normal, important or urgent'), { status: 400 });
+  }
+  return priority;
+};
+
 const requireBarManager = (req, res, next) => {
   if (!isBarManager(req.auth)) return res.status(403).json({ message: 'Bar admin access required' });
   return next();
@@ -622,6 +631,7 @@ router.post('/tasks', requireBarManager, async (req, res) => {
       cocktailRecipeKey: cleanString(req.body?.cocktailRecipeKey, 80) || cleanString(eventItem?.cocktailRecipeKey, 80),
       cocktailName: cleanString(req.body?.cocktailName, 240) || cleanString(eventItem?.name, 240),
       ...assignee,
+      priority: resolveBarTaskPriority(req.body?.priority),
       createdBy: username,
       updatedBy: username,
     });
@@ -681,6 +691,13 @@ router.patch('/tasks/:taskId', requireBarManager, async (req, res) => {
       const assignee = await resolveBarTaskAssignee(req.body);
       task.assigneeStaffId = assignee.assigneeStaffId;
       task.assigneeName = assignee.assigneeName;
+    }
+    if (req.body?.priority !== undefined) {
+      const priority = cleanString(req.body.priority, 20).toLowerCase();
+      if (!['normal', 'important', 'urgent'].includes(priority)) {
+        return res.status(400).json({ message: 'Task priority must be normal, important or urgent' });
+      }
+      task.priority = priority;
     }
     if (req.body?.completed !== undefined) {
       const completed = cleanBoolean(req.body.completed, Boolean(task.completedAt));
@@ -1500,6 +1517,13 @@ router.patch('/events/:id/items/:itemId', requireBarManager, async (req, res) =>
         const assignee = await resolveBarTaskAssignee(requestedTask);
         item.prepTask.assigneeStaffId = assignee.assigneeStaffId;
         item.prepTask.assigneeName = assignee.assigneeName;
+      }
+      if (requestedTask.priority !== undefined) {
+        const priority = cleanString(requestedTask.priority, 20).toLowerCase();
+        if (!['normal', 'important', 'urgent'].includes(priority)) {
+          return res.status(400).json({ message: 'Task priority must be normal, important or urgent' });
+        }
+        item.prepTask.priority = priority;
       }
       if (!scheduledDate) {
         item.prepTask.scheduledAt = null;

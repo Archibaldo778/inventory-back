@@ -20,6 +20,7 @@ const barTaskSchema = new mongoose.Schema(
       index: true,
     },
     assigneeName: { type: String, default: '', trim: true },
+    priority: { type: String, enum: ['normal', 'important', 'urgent'], default: 'normal', index: true },
     completedAt: { type: Date, default: null },
     completedBy: { type: String, default: '', trim: true },
     createdBy: { type: String, default: '', trim: true },

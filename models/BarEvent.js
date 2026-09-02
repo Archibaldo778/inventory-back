@@ -46,6 +46,7 @@ const barPackoutItemSchema = new mongoose.Schema(
       scheduledBy: { type: String, default: '', trim: true },
       assigneeStaffId: { type: mongoose.Schema.Types.ObjectId, ref: 'Staff', default: null },
       assigneeName: { type: String, default: '', trim: true },
+      priority: { type: String, enum: ['normal', 'important', 'urgent'], default: 'normal' },
       completedAt: { type: Date, default: null },
       completedBy: { type: String, default: '', trim: true },
     },

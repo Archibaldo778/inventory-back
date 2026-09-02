@@ -69,18 +69,45 @@ test('updated PO collapses By Ott aliases while preserving confirmed captain ret
   assert.equal(preserved[0].updatedBy, 'Alexander');
 });
 
-test('packout import schedules cocktails and mocktails on the event date without moving existing tasks', () => {
+test('packout import schedules every included bar item on the event date without moving existing tasks', () => {
   const scheduledAt = new Date('2026-08-20T12:00:00Z');
   const items = [
     { name: 'Barefoot in the Grass', section: 'COCKTAIL', scope: 'review', prepTask: {} },
     { name: 'Sunset Sky', section: 'MOCKTAIL', scope: 'review', prepTask: {} },
-    { name: 'Belvedere', section: 'VODKA', scope: 'alcohol', prepTask: {} },
+    { name: 'Belvedere', section: 'VODKA', scope: 'alcohol', included: true, prepTask: {} },
+    { name: 'Kitchen Tray', section: 'KITCHEN', scope: 'non_bar', prepTask: {} },
+    { name: 'Excluded Gin', section: 'GIN', scope: 'alcohol', included: false, prepTask: {} },
     { name: 'Existing Prep', section: 'COCKTAIL', scope: 'review', prepTask: { scheduledDate: '2026-08-25' } },
   ];
   schedulePreparedItemsForEvent(items, '2026-08-26', { at: scheduledAt, by: 'director' });
   assert.equal(items[0].prepTask.scheduledDate, '2026-08-26');
   assert.equal(items[0].prepTask.scheduledBy, 'director');
   assert.equal(items[1].prepTask.scheduledDate, '2026-08-26');
-  assert.equal(items[2].prepTask.scheduledDate, undefined);
-  assert.equal(items[3].prepTask.scheduledDate, '2026-08-25');
+  assert.equal(items[2].prepTask.scheduledDate, '2026-08-26');
+  assert.equal(items[3].prepTask.scheduledDate, undefined);
+  assert.equal(items[4].prepTask.scheduledDate, undefined);
+  assert.equal(items[5].prepTask.scheduledDate, '2026-08-25');
+});
+
+test('reimport preserves an existing pack task assignment, priority and completion', () => {
+  const existing = [{
+    name: 'Belvedere',
+    section: 'VODKA',
+    scope: 'alcohol',
+    prepTask: {
+      scheduledDate: '2026-08-26',
+      assigneeName: 'Aidan Collis',
+      priority: 'important',
+      completedAt: new Date('2026-08-25T12:00:00Z'),
+      completedBy: 'Aidan Collis',
+    },
+  }];
+  const [preserved] = preservePackoutOperationalState(existing, [{
+    name: 'Belvedere', section: 'VODKA', scope: 'alcohol', sentQty: 6,
+  }]);
+  assert.equal(preserved.sentQty, 6);
+  assert.equal(preserved.prepTask.scheduledDate, '2026-08-26');
+  assert.equal(preserved.prepTask.assigneeName, 'Aidan Collis');
+  assert.equal(preserved.prepTask.priority, 'important');
+  assert.equal(preserved.prepTask.completedBy, 'Aidan Collis');
 });

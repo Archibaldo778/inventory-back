@@ -77,6 +77,8 @@ export const mergePackoutDocumentItems = (existingItems, importedItems, document
 
 const operationalStateScore = (item) => (
   (item?.returnConfirmed === true ? 100 : 0)
+  + (item?.prepTask?.completedAt ? 50 : 0)
+  + (item?.prepTask?.scheduledDate ? 20 : 0)
   + (item?.deliveredQty !== null && item?.deliveredQty !== undefined ? 10 : 0)
   + (item?.updatedAt ? 1 : 0)
 );
@@ -102,6 +104,7 @@ export const preservePackoutOperationalState = (existingItems, nextItems) => {
       lostDamagedQty: Number(match.lostDamagedQty ?? item.lostDamagedQty ?? 0),
       returnConfirmed: match.returnConfirmed === true || item.returnConfirmed === true,
       captainNotes: String(match.captainNotes || item.captainNotes || ''),
+      prepTask: match.prepTask || item.prepTask,
       updatedBy: String(match.updatedBy || item.updatedBy || ''),
       updatedAt: match.updatedAt || item.updatedAt || null,
     };
@@ -114,7 +117,9 @@ export const schedulePreparedItemsForEvent = (items, eventDate, { at = new Date(
   const scheduledDate = String(eventDate || '').trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(scheduledDate)) return items;
   (Array.isArray(items) ? items : []).forEach((item) => {
-    if (!getPreparedBeverageType(item) || String(item?.prepTask?.scheduledDate || '').trim()) return;
+    const shouldPack = item?.included !== false
+      && String(item?.scope || '').toLowerCase() !== 'non_bar';
+    if (!shouldPack || String(item?.prepTask?.scheduledDate || '').trim()) return;
     if (!item.prepTask) item.prepTask = {};
     item.prepTask.scheduledDate = scheduledDate;
     item.prepTask.scheduledAt = at;

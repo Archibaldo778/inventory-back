@@ -283,22 +283,23 @@ const syncDashboardEvent = (event) => BarEvent.findOneAndUpdate(
 router.use(requirePin);
 router.post('/verify-pin', (_req, res) => res.json({ ok: true }));
 
-router.post('/offline-events', async (_req, res) => {
+router.post('/offline-events', async (req, res) => {
   try {
-    const today = new Date();
-    const from = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
-    const to = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 30);
-    const dateString = (value) => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
-    const reports = await BarEvent.find({
-      eventDate: { $gte: dateString(from), $lte: dateString(to) },
+    const eventId = clean(req.body?.eventId, 80);
+    if (!isObjectId(eventId)) return res.json({ events: [] });
+    const report = await BarEvent.findOne({
+      _id: eventId,
       status: { $nin: ['reviewed', 'closed'] },
-    }).sort({ eventDate: 1, name: 1 }).limit(200);
-    const linkedIds = [...new Set(reports.map((event) => String(event?.linkedEventId || '')).filter(isObjectId))];
-    const dashboardEvents = linkedIds.length
-      ? await Event.find({ _id: { $in: linkedIds }, status: { $not: /^deleted$/i } }).select('_id').lean()
-      : [];
-    const events = filterGuestBarReportsForActiveEvents(reports, dashboardEvents);
-    return res.json({ events: events.map(publicEvent) });
+    });
+    if (!report) return res.json({ events: [] });
+    if (isObjectId(report.linkedEventId)) {
+      const activeDashboardEvent = await Event.exists({
+        _id: report.linkedEventId,
+        status: { $not: /^deleted$/i },
+      });
+      if (!activeDashboardEvent) return res.json({ events: [] });
+    }
+    return res.json({ events: [publicEvent(report)] });
   } catch (error) {
     return sendApiError(res, error, { context: 'Offline bar events load failed', fallbackMessage: 'Could not prepare offline events' });
   }

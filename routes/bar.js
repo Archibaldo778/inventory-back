@@ -107,15 +107,15 @@ const eventAssignedToAuth = (event, auth) => {
     .some((assignedId) => String(assignedId) === userId);
 };
 
-const canViewEvent = (event, auth) => (
+export const canViewEvent = (event, auth) => (
   isBarManager(auth)
   || BAR_VIEWER_ROLES.has(normalizeRole(auth?.role))
-  || (isBarCaptain(auth) ? eventAssignedToAuth(event, auth) : isBarWorker(auth))
+  || (isBarWorker(auth) && eventAssignedToAuth(event, auth))
 );
 
-const canOperateEvent = (event, auth) => (
+export const canOperateEvent = (event, auth) => (
   isBarManager(auth)
-  || (isBarCaptain(auth) ? eventAssignedToAuth(event, auth) : isBarWorker(auth))
+  || (isBarWorker(auth) && eventAssignedToAuth(event, auth))
 );
 
 const addAudit = (event, auth, action, details = {}) => {
@@ -305,7 +305,10 @@ const syncDashboardEventsToBar = async ({ eventId = null } = {}) => {
   const existingByEventId = new Map(
     existingReports.map((report) => [String(report.linkedEventId), report])
   );
-  const captainUsers = await User.find({ role: 'bar captain', isActive: { $ne: false } })
+  const captainUsers = await User.find({
+    role: { $in: ['bar captain', 'bartender'] },
+    isActive: { $ne: false },
+  })
     .select('_id username email nowstaName')
     .lean();
   const operations = dashboardEvents.flatMap((event) => {
@@ -745,7 +748,7 @@ router.get('/events', async (req, res) => {
     if (req.query.status && BAR_EVENT_STATUSES.includes(String(req.query.status))) {
       query.status = String(req.query.status);
     }
-    if (isBarCaptain(req.auth)) {
+    if (isBarWorker(req.auth)) {
       query.assignedUserIds = req.auth.userId;
     }
     const events = await BarEvent.find(query).sort({ eventDate: -1, createdAt: -1 });
@@ -781,6 +784,9 @@ router.get('/events-readiness', async (req, res) => {
     } else {
       query.eventDate = { $gte: from };
       query.status = { $ne: 'closed' };
+    }
+    if (isBarWorker(req.auth)) {
+      query.assignedUserIds = req.auth.userId;
     }
     const events = await BarEvent.find(query)
       .select('_id linkedEventId items')
@@ -1170,6 +1176,9 @@ router.post('/events/:id/packout/match', requireBarOperator, async (req, res) =>
   try {
     const event = await loadEvent(req, res);
     if (!event) return undefined;
+    if (!canOperateEvent(event, req.auth)) {
+      return res.status(403).json({ message: 'This event is not assigned to your account in Nowsta' });
+    }
     const manager = isBarManager(req.auth);
     if (!manager && event.items.some((item) => item.entrySource !== 'manual')) {
       return res.status(409).json({ message: 'A packout already exists. Ask a bar admin to replace it.' });
@@ -1207,6 +1216,9 @@ router.post(
     try {
       const event = await loadEvent(req, res);
       if (!event) return undefined;
+      if (!canOperateEvent(event, req.auth)) {
+        return res.status(403).json({ message: 'This event is not assigned to your account in Nowsta' });
+      }
       const manager = isBarManager(req.auth);
       if (!manager && event.items.some((item) => item.entrySource !== 'manual')) {
         return res.status(409).json({ message: 'A packout already exists. Ask a bar admin to replace it.' });
@@ -1250,6 +1262,9 @@ router.post('/events/:id/packout', async (req, res) => {
   try {
     const event = await loadEvent(req, res);
     if (!event) return undefined;
+    if (!canOperateEvent(event, req.auth)) {
+      return res.status(403).json({ message: 'This event is not assigned to your account in Nowsta' });
+    }
     const documentImportBatchId = cleanString(req.body?.documentImportBatchId, 120);
     const beforeBarEvent = documentImportBatchId ? snapshotBarDocumentImport(event) : null;
     const manager = isBarManager(req.auth);

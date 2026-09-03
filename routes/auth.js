@@ -8,7 +8,7 @@ import { sendApiError } from '../utils/apiErrors.js';
 const router = Router();
 const ACCESS_TOKEN_TTL = '15m';
 const REFRESH_TOKEN_TTL_REMEMBERED = '90d';
-const REFRESH_TOKEN_TTL_DEFAULT = '30d';
+const REFRESH_TOKEN_TTL_DEFAULT = '1d';
 const LOGIN_RATE_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_RATE_MAX = 10;
 const LOGIN_RATE_BUCKET_MAX = 10_000;
@@ -16,14 +16,15 @@ const loginRateBuckets = new Map();
 
 function setRefreshCookie(res, token, remember = false) {
   const isProd = process.env.NODE_ENV === 'production';
-  const maxAge = (remember ? 90 : 30) * 24 * 60 * 60 * 1000;
-  res.cookie('rt', token, {
+  const options = {
     httpOnly: true,
     sameSite: isProd ? 'none' : 'lax',
     secure: isProd,
     path: '/api/auth',
-    maxAge,
-  });
+  };
+  // Without “remember me” this remains a browser-session cookie.
+  if (remember) options.maxAge = 90 * 24 * 60 * 60 * 1000;
+  res.cookie('rt', token, options);
 }
 
 function readCookie(req, name) {

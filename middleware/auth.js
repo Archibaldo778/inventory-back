@@ -2,8 +2,17 @@ import jwt from 'jsonwebtoken';
 import User from '../models/Users.js';
 
 export const ADMIN_ROLES = Object.freeze(['admin', 'super admin']);
+export const WORKSPACE_ROLES = Object.freeze([
+  'user',
+  'manager',
+  'sales rep',
+  'admin',
+  'super admin',
+  'bar admin',
+]);
 
 const ADMIN_ROLE_SET = new Set(ADMIN_ROLES);
+const WORKSPACE_ROLE_SET = new Set(WORKSPACE_ROLES);
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 export const normalizeRole = (value) => {
@@ -102,6 +111,7 @@ const buildAuthContext = (payload) => {
 };
 
 export const isAdminAuth = (auth) => ADMIN_ROLE_SET.has(normalizeRole(auth?.role));
+export const canAccessWorkspace = (auth) => WORKSPACE_ROLE_SET.has(normalizeRole(auth?.role));
 
 export const canAccessProposals = (auth) => isAdminAuth(auth) || resolveSeeProposals(auth);
 export const canSeeBarFinancials = (auth) => (
@@ -109,6 +119,7 @@ export const canSeeBarFinancials = (auth) => (
 );
 
 export const requireAuth = async (req, res, next) => {
+  res.setHeader?.('Cache-Control', 'private, no-store');
   const token = getRequestToken(req);
   if (!token) {
     return res.status(401).json({ message: 'Authentication required' });
@@ -188,6 +199,11 @@ export const requireRoles = (roles = []) => {
 export const requireAdmin = createAccessGuard(
   (auth) => isAdminAuth(auth),
   'Admin access required'
+);
+
+export const requireWorkspaceAccess = createAccessGuard(
+  (auth) => canAccessWorkspace(auth),
+  'Workspace access required'
 );
 
 export const requireProposalAccess = createAccessGuard(

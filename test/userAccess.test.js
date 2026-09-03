@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { requireAdmin, requireProposalAccess } from '../middleware/auth.js';
+import {
+  requireAdmin,
+  requireProposalAccess,
+  requireWorkspaceAccess,
+} from '../middleware/auth.js';
 import { resolveUsersGuard } from '../server.js';
 
 const ownId = '507f1f77bcf86cd799439011';
@@ -36,4 +40,37 @@ test('users access guard limits directory reads and allows self password changes
     path: `/${ownId}`,
     auth: { userId: ownId, role: 'user' },
   }), requireAdmin);
+});
+
+test('workspace guard blocks bar-only accounts from workspace APIs', () => {
+  const runGuard = (role) => {
+    const result = { status: null, body: null, next: false };
+    const res = {
+      status(code) {
+        result.status = code;
+        return this;
+      },
+      json(body) {
+        result.body = body;
+        return this;
+      },
+    };
+    requireWorkspaceAccess({ auth: { role } }, res, () => {
+      result.next = true;
+    });
+    return result;
+  };
+
+  assert.equal(runGuard('user').next, true);
+  assert.equal(runGuard('manager').next, true);
+  assert.equal(runGuard('sales rep').next, true);
+  assert.equal(runGuard('bar admin').next, true);
+  assert.equal(runGuard('admin').next, true);
+  assert.equal(runGuard('super admin').next, true);
+  assert.deepEqual(runGuard('bar captain'), {
+    status: 403,
+    body: { message: 'Workspace access required' },
+    next: false,
+  });
+  assert.equal(runGuard('bartender').status, 403);
 });

@@ -286,12 +286,32 @@ router.patch('/:id', async (req, res) => {
 // Delete page
 router.delete('/:id', async (req, res) => {
   try {
+    const expectedRevision = Number(req.query?.expectedRevision);
+    if (!Number.isInteger(expectedRevision) || expectedRevision < 0) {
+      return res.status(428).json({
+        error: 'expectedRevision is required before deleting a page',
+        code: 'PAGE_REVISION_REQUIRED',
+      });
+    }
     const deleted = await Page.findOneAndUpdate(
-      { _id: req.params.id, deletedAt: null },
+      { _id: req.params.id, deletedAt: null, revision: expectedRevision },
       { $set: { deletedAt: new Date() }, $inc: { revision: 1 } },
       { new: true }
     );
-    if (!deleted) return res.status(404).json({ error: 'Not found' });
+    if (!deleted) {
+      const current = await Page.findOne({ _id: req.params.id, deletedAt: null })
+        .select('_id revision updatedAt')
+        .lean();
+      if (current) {
+        return res.status(409).json({
+          error: 'Page was changed by another session. Reload before deleting it.',
+          code: 'PAGE_REVISION_CONFLICT',
+          currentRevision: current.revision,
+          updatedAt: current.updatedAt,
+        });
+      }
+      return res.status(404).json({ error: 'Not found' });
+    }
     res.json({ ok: true, recoverable: true });
     clearCache();
   } catch (e) {

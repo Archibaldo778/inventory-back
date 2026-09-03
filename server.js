@@ -21,6 +21,7 @@ import {
   requireMethodGuards,
   requireProposalAccess,
   requireRoles,
+  requireWorkspaceAccess,
 } from './middleware/auth.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -427,18 +428,18 @@ import barRoutes from './routes/bar.js';
 import publicBarReturnsRoutes from './routes/publicBarReturns.js';
 
 app.use('/api/auth', authRoutes);
-app.use('/api/products', requireAuth, requireAdminForMutations, productRoutes);
+app.use('/api/products', requireAuth, requireWorkspaceAccess, requireAdminForMutations, productRoutes);
 app.use('/api/users', requireAuth, requireUsersAccess, userRoutes);
 app.use('/users', requireAuth, requireUsersAccess, userRoutes);
-app.use('/api/events', requireAuth, eventRoutes);
-app.use('/api/decor-packouts', requireAuth, decorPackoutRoutes);
-app.use('/api/decks', requireAuth, deckRoutes);
-app.use('/api/pages', requireAuth, pageRoutes);
-app.use('/api/staff', requireAuth, requireAdminForMutations, staffRoutes);
-app.use('/api/kitchen-items', requireAuth, requireAdminForMutations, kitchenRoutes);
+app.use('/api/events', requireAuth, requireWorkspaceAccess, eventRoutes);
+app.use('/api/decor-packouts', requireAuth, requireWorkspaceAccess, decorPackoutRoutes);
+app.use('/api/decks', requireAuth, requireWorkspaceAccess, deckRoutes);
+app.use('/api/pages', requireAuth, requireWorkspaceAccess, pageRoutes);
+app.use('/api/staff', requireAuth, requireWorkspaceAccess, requireAdminForMutations, staffRoutes);
+app.use('/api/kitchen-items', requireAuth, requireWorkspaceAccess, requireAdminForMutations, kitchenRoutes);
 app.use('/api/beverage-items', requireAuth, requireBeverageManagerForMutations, beverageRoutes);
 app.use('/api/cocktail-recipes', requireAuth, requireBeverageManagerForMutations, cocktailRecipeRoutes);
-app.use('/api/clients', requireAuth, requireAdminForPatchDelete, clientRoutes);
+app.use('/api/clients', requireAuth, requireWorkspaceAccess, requireAdminForPatchDelete, clientRoutes);
 app.use('/api/proposals', requireAuth, requireProposalAccess, proposalRoutes);
 app.use('/api/proposal-templates', requireAuth, requireProposalTemplateAccess, proposalTemplateRoutes);
 app.use('/api/tools', requireAuth, requireAdmin, toolsRoutes);

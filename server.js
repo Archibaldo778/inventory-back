@@ -80,7 +80,7 @@ const applyCorsHeaders = (req, res) => {
   if (!origin || !isAllowedCorsOrigin(origin)) return false;
   res.setHeader('Access-Control-Allow-Origin', origin);
   res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Allow-Headers', 'Authorization,Content-Type,X-Bar-Returns-Pin');
+  res.setHeader('Access-Control-Allow-Headers', 'Authorization,Content-Type,X-Bar-Returns-Pin,X-Bar-Returns-Session');
   res.setHeader('Access-Control-Allow-Methods', 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS');
   res.append('Vary', 'Origin');
   return true;
@@ -92,7 +92,7 @@ const corsOptions = {
   },
   credentials: true,
   optionsSuccessStatus: 204,
-  allowedHeaders: ['Authorization', 'Content-Type', 'X-Bar-Returns-Pin'],
+  allowedHeaders: ['Authorization', 'Content-Type', 'X-Bar-Returns-Pin', 'X-Bar-Returns-Session'],
 };
 
 const requireAdminForPatchDelete = requireMethodGuards((req) => {

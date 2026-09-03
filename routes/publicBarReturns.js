@@ -19,6 +19,12 @@ import {
   isAllowedPackoutDocumentUpload,
 } from '../utils/imageSignature.js';
 import { createMemoryRateLimiter } from '../middleware/rateLimit.js';
+import {
+  issueGuestBarSession,
+  logGuestSecurityEvent,
+  readGuestBarSession,
+  verifyGuestBarSession,
+} from '../utils/guestBarAccess.js';
 
 const router = Router();
 const WINDOW_MS = 10 * 60 * 1000;
@@ -163,6 +169,7 @@ export const buildGuestEventDedupeKey = dedupeKey;
 const requirePin = (req, res, next) => {
   const key = ipKey(req);
   if (increment(requestBuckets, key) > MAX_REQUESTS) {
+    logGuestSecurityEvent(req, 'request_rate_limited');
     return res.status(429).json({ message: 'Too many requests. Wait a few minutes and try again.' });
   }
   const configured = clean(process.env.PUBLIC_BAR_RETURNS_PIN, 64);
@@ -170,13 +177,41 @@ const requirePin = (req, res, next) => {
   const provided = clean(req.get('X-Bar-Returns-Pin'), 64);
   if (!equalPin(provided, configured)) {
     if (increment(badPinBuckets, key) > MAX_BAD_PINS) {
+      logGuestSecurityEvent(req, 'pin_rate_limited');
       return res.status(429).json({ message: 'Too many attempts. Wait a few minutes and try again.' });
     }
+    logGuestSecurityEvent(req, 'pin_rejected');
     return res.status(401).json({ message: 'Incorrect PIN' });
   }
   badPinBuckets.delete(key);
   res.setHeader('Cache-Control', 'no-store');
   return next();
+};
+
+const requireGuestSession = (req, res, next) => {
+  const token = readGuestBarSession(req);
+  if (!token) {
+    // Keep already-open clients working while the frontend deployment rolls out.
+    // New clients exchange the PIN once and never send it again.
+    if (clean(req.get('X-Bar-Returns-Pin'), 64)) {
+      return requirePin(req, res, () => {
+        res.setHeader('Deprecation', 'true');
+        logGuestSecurityEvent(req, 'legacy_pin_request');
+        return next();
+      });
+    }
+    return res.status(401).json({ message: 'Guest session required' });
+  }
+  try {
+    req.guestAccess = verifyGuestBarSession(token);
+    res.setHeader('Cache-Control', 'no-store');
+    return next();
+  } catch (error) {
+    logGuestSecurityEvent(req, 'session_rejected', {
+      reason: /revoked/i.test(String(error?.message || '')) ? 'revoked' : 'invalid_or_expired',
+    });
+    return res.status(401).json({ message: 'Guest session expired. Enter the PIN again.' });
+  }
 };
 
 const scanUpload = multer({
@@ -291,8 +326,17 @@ const syncDashboardEvent = (event) => BarEvent.findOneAndUpdate(
   { upsert: true, new: true, setDefaultsOnInsert: true }
 );
 
-router.use(requirePin);
-router.post('/verify-pin', (_req, res) => res.json({ ok: true }));
+router.post('/verify-pin', requirePin, (req, res) => {
+  try {
+    const session = issueGuestBarSession();
+    logGuestSecurityEvent(req, 'pin_verified');
+    return res.json({ ok: true, sessionToken: session.token, expiresIn: session.expiresIn });
+  } catch (error) {
+    return sendApiError(res, error, { context: 'Guest session creation failed', fallbackMessage: 'Could not start guest session' });
+  }
+});
+router.post('/verify-session', requireGuestSession, (_req, res) => res.json({ ok: true }));
+router.use(requireGuestSession);
 
 router.post('/offline-events', async (req, res) => {
   try {

@@ -4,13 +4,17 @@ const isPlainObject = (value) => Boolean(
   && !Array.isArray(value)
 );
 
-const stripUndefinedDeep = (value) => {
+const MAX_SNAPSHOT_DEPTH = 64;
+const UNSAFE_OBJECT_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
+
+const stripUndefinedDeep = (value, depth = 0) => {
   if (value === undefined) return undefined;
+  if (depth > MAX_SNAPSHOT_DEPTH) return null;
 
   if (Array.isArray(value)) {
     let changed = false;
     const nextArray = value.map((entry) => {
-      const nextEntry = stripUndefinedDeep(entry);
+      const nextEntry = stripUndefinedDeep(entry, depth + 1);
       if (nextEntry !== entry) changed = true;
       return nextEntry === undefined ? null : nextEntry;
     });
@@ -22,7 +26,11 @@ const stripUndefinedDeep = (value) => {
   let changed = false;
   const nextObject = {};
   Object.entries(value).forEach(([key, entry]) => {
-    const nextEntry = stripUndefinedDeep(entry);
+    if (UNSAFE_OBJECT_KEYS.has(key)) {
+      changed = true;
+      return;
+    }
+    const nextEntry = stripUndefinedDeep(entry, depth + 1);
     if (nextEntry === undefined) {
       changed = true;
       return;

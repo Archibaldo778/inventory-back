@@ -11,6 +11,7 @@ import { sanitizeBoardCanvas } from '../utils/boardSnapshotSanitizer.js';
 import { INVALID_IMAGE_UPLOAD_RESPONSE, isAllowedImageUpload } from '../utils/imageSignature.js';
 import { clearApiCacheGroups } from '../utils/apiCache.js';
 import { sendApiError } from '../utils/apiErrors.js';
+import { createMemoryRateLimiter } from '../middleware/rateLimit.js';
 import { v2 as cloudinary } from 'cloudinary';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -24,6 +25,11 @@ cloudinary.config({
 
 const router = Router();
 const clearCache = () => clearApiCacheGroups('pages', 'decks');
+const boardImageUploadRateLimit = createMemoryRateLimiter({
+  windowMs: 10 * 60 * 1000,
+  max: 240,
+  message: 'Too many board image uploads. Wait a few minutes and try again.',
+});
 
 const ensureUploadsDir = async () => {
   const target = path.join(__dirname, '..', 'uploads', 'board');
@@ -183,7 +189,7 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-router.post('/upload-image', imageUpload.single('image'), async (req, res) => {
+router.post('/upload-image', boardImageUploadRateLimit, imageUpload.single('image'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'image file is required' });

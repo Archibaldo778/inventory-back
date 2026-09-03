@@ -11,8 +11,10 @@ const REFRESH_TOKEN_TTL_REMEMBERED = '90d';
 const REFRESH_TOKEN_TTL_DEFAULT = '1d';
 const LOGIN_RATE_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_RATE_MAX = 10;
+const LOGIN_IP_RATE_MAX = 100;
 const LOGIN_RATE_BUCKET_MAX = 10_000;
 const loginRateBuckets = new Map();
+const loginIpRateBuckets = new Map();
 
 function setRefreshCookie(res, token, remember = false) {
   const isProd = process.env.NODE_ENV === 'production';
@@ -126,37 +128,48 @@ function getLoginRateKey(req) {
   return `${ip}:${identity}`;
 }
 
-function enforceLoginRateLimit(req, res, next) {
-  const now = Date.now();
-  const key = getLoginRateKey(req);
-  const current = loginRateBuckets.get(key);
+const getLoginIpRateKey = (req) => String(req.ip || req.socket?.remoteAddress || 'unknown');
 
-  if (!current && loginRateBuckets.size >= LOGIN_RATE_BUCKET_MAX) {
-    for (const [bucketKey, bucket] of loginRateBuckets) {
-      if (bucket.resetAt <= now) loginRateBuckets.delete(bucketKey);
+const consumeLoginRateBucket = (buckets, key, maximum, now) => {
+  const current = buckets.get(key);
+  if (!current && buckets.size >= LOGIN_RATE_BUCKET_MAX) {
+    for (const [bucketKey, bucket] of buckets) {
+      if (bucket.resetAt <= now) buckets.delete(bucketKey);
     }
-    if (loginRateBuckets.size >= LOGIN_RATE_BUCKET_MAX) {
-      res.setHeader('Retry-After', String(Math.ceil(LOGIN_RATE_WINDOW_MS / 1000)));
-      return res.status(429).json({ message: 'Too many login attempts' });
+    if (buckets.size >= LOGIN_RATE_BUCKET_MAX) {
+      return { blocked: true, count: maximum + 1, resetAt: now + LOGIN_RATE_WINDOW_MS };
     }
   }
-
   const bucket = !current || current.resetAt <= now
     ? { count: 0, resetAt: now + LOGIN_RATE_WINDOW_MS }
     : current;
   bucket.count += 1;
-  loginRateBuckets.set(key, bucket);
-  req.loginRateKey = key;
+  buckets.set(key, bucket);
+  return { ...bucket, blocked: bucket.count > maximum };
+};
+
+export function enforceLoginRateLimit(req, res, next) {
+  const now = Date.now();
+  const identityKey = getLoginRateKey(req);
+  const identityBucket = consumeLoginRateBucket(loginRateBuckets, identityKey, LOGIN_RATE_MAX, now);
+  const ipBucket = consumeLoginRateBucket(loginIpRateBuckets, getLoginIpRateKey(req), LOGIN_IP_RATE_MAX, now);
+  req.loginRateKey = identityKey;
 
   res.setHeader('RateLimit-Limit', String(LOGIN_RATE_MAX));
-  res.setHeader('RateLimit-Remaining', String(Math.max(0, LOGIN_RATE_MAX - bucket.count)));
-  res.setHeader('RateLimit-Reset', String(Math.ceil(bucket.resetAt / 1000)));
-  if (bucket.count > LOGIN_RATE_MAX) {
-    res.setHeader('Retry-After', String(Math.ceil((bucket.resetAt - now) / 1000)));
+  res.setHeader('RateLimit-Remaining', String(Math.max(0, LOGIN_RATE_MAX - identityBucket.count)));
+  res.setHeader('RateLimit-Reset', String(Math.ceil(identityBucket.resetAt / 1000)));
+  if (identityBucket.blocked || ipBucket.blocked) {
+    const resetAt = Math.max(identityBucket.resetAt, ipBucket.resetAt);
+    res.setHeader('Retry-After', String(Math.max(1, Math.ceil((resetAt - now) / 1000))));
     return res.status(429).json({ message: 'Too many login attempts' });
   }
   return next();
 }
+
+export const resetLoginRateLimitsForTests = () => {
+  loginRateBuckets.clear();
+  loginIpRateBuckets.clear();
+};
 
 router.post('/login', enforceLoginRateLimit, async (req, res) => {
   try {

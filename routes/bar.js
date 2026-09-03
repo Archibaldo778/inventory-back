@@ -24,6 +24,10 @@ import {
   prepareBarChargeImport,
 } from '../utils/barChargeImport.js';
 import { sendApiError } from '../utils/apiErrors.js';
+import {
+  INVALID_PACKOUT_UPLOAD_RESPONSE,
+  isAllowedPackoutDocumentUpload,
+} from '../utils/imageSignature.js';
 import { clearApiCacheGroups } from '../utils/apiCache.js';
 import { cocktailServingsForGuests, resolveCocktailRecipeKey } from '../utils/cocktailRecipes.js';
 import { barItemIdentityKey, mergePackoutDocumentItems, preservePackoutOperationalState, schedulePreparedItemsForEvent } from '../utils/barManualItems.js';
@@ -1225,6 +1229,9 @@ router.post(
       }
       const files = Array.isArray(req.files) ? req.files : [];
       if (!files.length) return res.status(400).json({ message: 'Add at least one packout photo or PDF' });
+      if (files.some((file) => !isAllowedPackoutDocumentUpload(file))) {
+        return res.status(400).json(INVALID_PACKOUT_UPLOAD_RESPONSE);
+      }
       const totalBytes = files.reduce((sum, file) => sum + Number(file?.size || 0), 0);
       if (totalBytes > MAX_SCAN_TOTAL_BYTES) {
         return res.status(413).json({ message: 'Packout scan files are too large in total' });

@@ -14,6 +14,11 @@ import { isBarAccountingItem, requiresBarReturn } from '../utils/barPackoutScope
 import { sendApiError } from '../utils/apiErrors.js';
 import { applyGuestReceivedRows } from '../utils/barGuestReturns.js';
 import { barEventNumbersMatch, normalizeBarEventNumber } from '../utils/barChargeImport.js';
+import {
+  INVALID_PACKOUT_UPLOAD_RESPONSE,
+  isAllowedPackoutDocumentUpload,
+} from '../utils/imageSignature.js';
+import { createMemoryRateLimiter } from '../middleware/rateLimit.js';
 
 const router = Router();
 const WINDOW_MS = 10 * 60 * 1000;
@@ -34,6 +39,12 @@ const normalizedName = (value) => clean(value, 240).toLowerCase().normalize('NFK
   .replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
 const dedupeKey = (name, date) => `${normalizeBarEventDate(date)}:${normalizedName(name)}`;
 const ipKey = (req) => clean(req.ip || req.socket?.remoteAddress || 'unknown', 120);
+const pendingReportRateLimit = createMemoryRateLimiter({
+  windowMs: WINDOW_MS,
+  max: 5,
+  keyGenerator: ipKey,
+  message: 'Too many pending reports. Wait a few minutes and try again.',
+});
 const MIN_EVENT_NAME_SIMILARITY = 0.6;
 const AMBIGUOUS_SCORE_GAP = 0.05;
 
@@ -382,7 +393,7 @@ router.post('/select-event', async (req, res) => {
   }
 });
 
-router.post('/pending', async (req, res) => {
+router.post('/pending', pendingReportRateLimit, async (req, res) => {
   try {
     const name = clean(req.body?.name, 240);
     const eventDate = normalizeBarEventDate(req.body?.eventDate);
@@ -424,6 +435,9 @@ router.post('/:eventId/recognize', (req, res, next) => {
     if (event.items.length) return res.status(409).json({ message: 'This event already has a packout' });
     const files = Array.isArray(req.files) ? req.files : [];
     if (!files.length) return res.status(400).json({ message: 'Add a packout photo or PDF' });
+    if (files.some((file) => !isAllowedPackoutDocumentUpload(file))) {
+      return res.status(400).json(INVALID_PACKOUT_UPLOAD_RESPONSE);
+    }
     if (files.reduce((sum, file) => sum + Number(file?.size || 0), 0) > MAX_TOTAL_BYTES) {
       return res.status(413).json({ message: 'Packout files are too large in total' });
     }

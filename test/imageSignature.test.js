@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { detectImageType, isAllowedImageUpload } from '../utils/imageSignature.js';
+import {
+  detectImageType,
+  detectPackoutDocumentType,
+  isAllowedImageUpload,
+  isAllowedPackoutDocumentUpload,
+} from '../utils/imageSignature.js';
 
 const padded = (...bytes) => Buffer.from([...bytes, ...new Array(32).fill(0)]);
 
@@ -11,6 +16,8 @@ test('detectImageType recognizes supported image signatures', () => {
     'png'
   );
   assert.equal(detectImageType(Buffer.from('GIF89a0000000000')), 'gif');
+  assert.equal(detectImageType(Buffer.concat([Buffer.from('BM'), Buffer.alloc(20)])), 'bmp');
+  assert.equal(detectImageType(padded(0x49, 0x49, 0x2a, 0x00)), 'tiff');
   assert.equal(detectImageType(Buffer.from('RIFF0000WEBP00000000')), 'webp');
 
   const heif = Buffer.alloc(32);
@@ -34,4 +41,18 @@ test('isAllowedImageUpload ignores spoofed MIME type and file name', () => {
   };
   assert.equal(isAllowedImageUpload(jpeg, ['jpeg']), true);
   assert.equal(isAllowedImageUpload(jpeg, ['png']), false);
+});
+
+test('packout document validation uses file content instead of the extension', () => {
+  const pdf = { originalname: 'packout.bin', buffer: Buffer.from('%PDF-1.7\nvalid content') };
+  assert.equal(detectPackoutDocumentType(pdf.buffer), 'pdf');
+  assert.equal(isAllowedPackoutDocumentUpload(pdf), true);
+
+  const spoofed = {
+    mimetype: 'application/pdf',
+    originalname: 'packout.pdf',
+    buffer: Buffer.from('MZ executable content'),
+  };
+  assert.equal(detectPackoutDocumentType(spoofed.buffer), '');
+  assert.equal(isAllowedPackoutDocumentUpload(spoofed), false);
 });

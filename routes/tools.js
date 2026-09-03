@@ -3,6 +3,7 @@ import multer from 'multer';
 import { Readable } from 'stream';
 import { v2 as cloudinary } from 'cloudinary';
 import { sendApiError } from '../utils/apiErrors.js';
+import { createMemoryRateLimiter } from '../middleware/rateLimit.js';
 import {
   fetchWithTimeout,
   normalizeFetchResponseLimit,
@@ -14,6 +15,11 @@ import { INVALID_IMAGE_UPLOAD_RESPONSE, isAllowedImageUpload } from '../utils/im
 const router = Router();
 const TOOL_UPSTREAM_TIMEOUT_MS = normalizeFetchTimeout(process.env.TOOL_UPSTREAM_TIMEOUT_MS);
 const TOOL_UPSTREAM_MAX_BYTES = normalizeFetchResponseLimit(process.env.TOOL_UPSTREAM_MAX_BYTES);
+const imageToolRateLimit = createMemoryRateLimiter({
+  windowMs: 10 * 60 * 1000,
+  max: 30,
+  message: 'Too many image processing requests. Wait a few minutes and try again.',
+});
 
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -110,7 +116,7 @@ const tryCleanupUpload = async (result) => {
   }
 };
 
-router.post('/heif-to-jpg', upload.single('image'), async (req, res) => {
+router.post('/heif-to-jpg', imageToolRateLimit, upload.single('image'), async (req, res) => {
   if (!hasCloudinaryConfig) {
     return res.status(503).json({ error: 'HEIF conversion service is unavailable' });
   }
@@ -160,7 +166,7 @@ router.post('/heif-to-jpg', upload.single('image'), async (req, res) => {
   }
 });
 
-router.post('/remove-background', imageUpload.single('image'), async (req, res) => {
+router.post('/remove-background', imageToolRateLimit, imageUpload.single('image'), async (req, res) => {
   const photoRoomApiKey = getPhotoRoomApiKey();
   if (!hasPhotoRoomConfig()) {
     return res.status(503).json({ error: 'Background removal service is unavailable' });

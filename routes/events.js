@@ -17,6 +17,7 @@ import BeverageItem from '../models/BeverageItem.js';
 import ImportRun from '../models/ImportRun.js';
 import DocumentImportRun from '../models/DocumentImportRun.js';
 import { requireAdmin, requireRoles } from '../middleware/auth.js';
+import { createMemoryRateLimiter } from '../middleware/rateLimit.js';
 import { clearApiCacheGroups, createGroupedApiCache } from '../utils/apiCache.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import { runWithTransactionFallback } from '../utils/mongoTransaction.js';
@@ -35,6 +36,11 @@ import {
 } from '../utils/documentImportAudit.js';
 
 const router = Router();
+const eventDocumentUploadRateLimit = createMemoryRateLimiter({
+  windowMs: 10 * 60 * 1000,
+  max: 120,
+  message: 'Too many event document uploads. Wait a few minutes and try again.',
+});
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const CACHE_GROUP = 'events';
@@ -1069,6 +1075,7 @@ router.get('/', cacheWithGroup('5 minutes', CACHE_GROUP), async (req, res) => {
 router.post(
   '/:id/documents',
   requireRoles(['admin', 'super admin', 'bar admin']),
+  eventDocumentUploadRateLimit,
   eventDocumentUpload.single('file'),
   async (req, res) => {
   let stored = null;

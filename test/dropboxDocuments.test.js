@@ -127,6 +127,23 @@ test('Dropbox proposal paths recognize ISO and US dates', () => {
   assert.equal(inferDropboxPathDate('/Proposals/2026/2026-10-02 Event/KM.docx'), '2026-10-02');
 });
 
+test('Dropbox series folders use each document filename date instead of the parent event date', () => {
+  const sharedFolder = '/Proposals/2026/September/09-04-26 THSS27 VIP Backstage Catering - Day 1/KM';
+  assert.equal(
+    inferDropboxPathDate(`${sharedFolder}/09-09-26 THSS27 VIP Backstage Catering - Day 6 KM.docx`),
+    '2026-09-09',
+  );
+  assert.equal(
+    classifyDropboxEntry({
+      '.tag': 'file',
+      id: 'id:series-day-six',
+      name: '09-09-26 THSS27 VIP Backstage Catering - Day 6 KM.docx',
+      path_display: `${sharedFolder}/09-09-26 THSS27 VIP Backstage Catering - Day 6 KM.docx`,
+    }, { today: '2026-09-04' }).inferredDate,
+    '2026-09-09',
+  );
+});
+
 test('Dropbox discovery never queues files before the current New York date', () => {
   const oldEntry = {
     '.tag': 'file', id: 'id:old', name: 'PO.docx', path_display: '/Proposals/2026/August/08-31-2026 Event/PO.docx',

@@ -195,6 +195,12 @@ const attachDiscoveredDropboxDocuments = async () => {
         },
       ];
       await event.save();
+      if (document.importedEventId && String(document.importedEventId) !== String(event._id)) {
+        await Event.updateOne(
+          { _id: document.importedEventId },
+          { $pull: { documents: { sourceProvider: 'dropbox', sourceId: String(document.dropboxId) } } }
+        );
+      }
       await DropboxDocument.updateOne({ _id: document._id }, {
         $set: { status: 'imported', reason: 'Attached to event', importedAt: new Date(), importedEventId: event._id },
       });
@@ -270,7 +276,7 @@ export const runDropboxDiscoverySync = async () => {
           .filter(({ dropboxId }) => dropboxId);
         const existingRows = await DropboxDocument.find({
           dropboxId: { $in: entries.map(({ dropboxId }) => dropboxId) },
-        }).select('dropboxId rev contentHash status importedAt').lean();
+        }).select('dropboxId rev contentHash status importedAt inferredDate documentType eventId revisionGroupKey').lean();
         const existingById = new Map(existingRows.map((row) => [String(row.dropboxId), row]));
         const operations = [];
         for (const { entry, dropboxId } of entries) {
@@ -284,12 +290,19 @@ export const runDropboxDiscoverySync = async () => {
             String(existing.rev || '') !== String(entry.rev || '')
             || String(existing.contentHash || '') !== String(entry.content_hash || '')
           );
+          const classificationChanged = Boolean(existing) && (
+            String(existing.inferredDate || '') !== String(classification.inferredDate || '')
+            || String(existing.documentType || '') !== String(classification.documentType || '')
+            || String(existing.eventId || '') !== String(revision.eventId || '')
+            || String(existing.revisionGroupKey || '') !== String(revision.revisionGroupKey || '')
+          );
           if (!existing) stats.new += 1;
-          else if (revisionChanged) stats.updated += 1;
+          else if (revisionChanged || classificationChanged) stats.updated += 1;
           else stats.unchanged += 1;
           const unchangedImported = existing?.status === 'imported'
             && String(existing.rev || '') === String(entry.rev || '')
-            && String(existing.contentHash || '') === String(entry.content_hash || '');
+            && String(existing.contentHash || '') === String(entry.content_hash || '')
+            && !classificationChanged;
           const nextStatus = unchangedImported ? 'imported' : classification.status;
           operations.push({
             updateOne: {

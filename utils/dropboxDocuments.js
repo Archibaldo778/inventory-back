@@ -220,10 +220,17 @@ export const buildDropboxRevisionPlan = (documents) => {
 
 export const inferDropboxPathDate = (path) => {
   const source = clean(path);
-  const iso = source.match(/\b(20\d{2})[-_.\/](\d{1,2})[-_.\/](\d{1,2})\b/);
-  if (iso) return `${iso[1]}-${iso[2].padStart(2, '0')}-${iso[3].padStart(2, '0')}`;
-  const us = source.match(/\b(\d{1,2})[-_.](\d{1,2})[-_.](20\d{2}|\d{2})\b/);
-  if (us) return `${us[3].length === 2 ? `20${us[3]}` : us[3]}-${us[1].padStart(2, '0')}-${us[2].padStart(2, '0')}`;
+  const matches = [
+    ...[...source.matchAll(/\b(20\d{2})[-_.\/](\d{1,2})[-_.\/](\d{1,2})\b/g)].map((match) => ({
+      index: match.index,
+      value: `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}`,
+    })),
+    ...[...source.matchAll(/\b(\d{1,2})[-_.](\d{1,2})[-_.](20\d{2}|\d{2})\b/g)].map((match) => ({
+      index: match.index,
+      value: `${match[3].length === 2 ? `20${match[3]}` : match[3]}-${match[1].padStart(2, '0')}-${match[2].padStart(2, '0')}`,
+    })),
+  ].sort((left, right) => right.index - left.index);
+  if (matches.length) return matches[0].value;
   return '';
 };
 

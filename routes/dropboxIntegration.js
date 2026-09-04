@@ -21,6 +21,7 @@ import { classifyDropboxEntry } from '../utils/dropboxDocuments.js';
 const router = Router();
 const syncRateLimit = createMemoryRateLimiter({ windowMs: 10 * 60 * 1000, max: 8, message: 'Too many Dropbox sync requests' });
 let syncPromise = null;
+let syncProgress = null;
 
 const requireDropboxAdmin = [requireAuth, requireAdmin];
 
@@ -57,29 +58,57 @@ export const runDropboxDiscoverySync = async () => {
     integration.lastSyncError = '';
     await integration.save();
     try {
+      syncProgress = { processed: 0, pages: 0, startedAt: new Date() };
       const accessToken = await refreshDropboxAccessToken(decryptDropboxSecret(integration.refreshToken));
       let page = await listDropboxFolder(accessToken, {
         path: integration.rootPath,
         cursor: integration.cursor || '',
       });
-      const stats = { seen: 0, discovered: 0, review: 0, skippedOld: 0, ignored: 0, deleted: 0 };
+      const stats = {
+        seen: 0,
+        new: 0,
+        updated: 0,
+        unchanged: 0,
+        discovered: 0,
+        review: 0,
+        skippedOld: 0,
+        ignored: 0,
+        deleted: 0,
+      };
       let latestCursor = page.cursor || integration.cursor || '';
       while (page) {
-        for (const entry of (Array.isArray(page.entries) ? page.entries : [])) {
+        const entries = (Array.isArray(page.entries) ? page.entries : [])
+          .map((entry) => ({
+            entry,
+            dropboxId: String(entry.id || entry.path_lower || entry.path_display || ''),
+          }))
+          .filter(({ dropboxId }) => dropboxId);
+        const existingRows = await DropboxDocument.find({
+          dropboxId: { $in: entries.map(({ dropboxId }) => dropboxId) },
+        }).select('dropboxId rev contentHash status importedAt').lean();
+        const existingById = new Map(existingRows.map((row) => [String(row.dropboxId), row]));
+        const operations = [];
+        for (const { entry, dropboxId } of entries) {
           stats.seen += 1;
           const classification = classifyDropboxEntry(entry);
           const statusKey = { discovered: 'discovered', review: 'review', skipped_old: 'skippedOld', ignored: 'ignored', deleted: 'deleted' }[classification.status];
           if (statusKey) stats[statusKey] += 1;
-          const dropboxId = String(entry.id || entry.path_lower || entry.path_display || '');
-          if (!dropboxId) continue;
-          const existing = await DropboxDocument.findOne({ dropboxId }).select('rev contentHash status importedAt');
+          const existing = existingById.get(dropboxId);
+          const revisionChanged = Boolean(existing) && (
+            String(existing.rev || '') !== String(entry.rev || '')
+            || String(existing.contentHash || '') !== String(entry.content_hash || '')
+          );
+          if (!existing) stats.new += 1;
+          else if (revisionChanged) stats.updated += 1;
+          else stats.unchanged += 1;
           const unchangedImported = existing?.status === 'imported'
             && String(existing.rev || '') === String(entry.rev || '')
             && String(existing.contentHash || '') === String(entry.content_hash || '');
           const nextStatus = unchangedImported ? 'imported' : classification.status;
-          await DropboxDocument.updateOne(
-            { dropboxId },
-            {
+          operations.push({
+            updateOne: {
+              filter: { dropboxId },
+              update: {
               $set: {
                 path: String(entry.path_display || entry.path_lower || ''),
                 name: String(entry.name || ''),
@@ -95,10 +124,18 @@ export const runDropboxDiscoverySync = async () => {
                 lastSeenAt: new Date(),
               },
               $setOnInsert: { firstSeenAt: new Date() },
+              },
+              upsert: true,
             },
-            { upsert: true, runValidators: true }
-          );
+          });
         }
+        if (operations.length) await DropboxDocument.bulkWrite(operations, { ordered: false });
+        syncProgress = {
+          ...syncProgress,
+          processed: stats.seen,
+          pages: Number(syncProgress?.pages || 0) + 1,
+          summary: { ...stats },
+        };
         latestCursor = page.cursor || latestCursor;
         page = page.has_more ? await listDropboxFolder(accessToken, { cursor: latestCursor }) : null;
       }
@@ -113,7 +150,7 @@ export const runDropboxDiscoverySync = async () => {
       throw error;
     }
   })();
-  try { return await syncPromise; } finally { syncPromise = null; }
+  try { return await syncPromise; } finally { syncPromise = null; syncProgress = null; }
 };
 
 router.get('/connect-url', ...requireDropboxAdmin, (req, res) => {
@@ -164,6 +201,7 @@ router.get('/status', ...requireDropboxAdmin, async (_req, res) => {
       configured: Boolean(getDropboxConfig().appKey && getDropboxConfig().appSecret && String(process.env.DROPBOX_TOKEN_ENCRYPTION_KEY || '').length >= 32),
       connected: Boolean(integration?.connectedAt),
       syncing: Boolean(syncPromise),
+      progress: syncProgress,
       integration: integration ? {
         accountEmail: integration.accountEmail,
         rootPath: integration.rootPath,

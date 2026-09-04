@@ -289,8 +289,13 @@ router.get('/callback', async (req, res) => {
 router.get('/status', ...requireDropboxAdmin, async (_req, res) => {
   try {
     const integration = await DropboxIntegration.findOne({ provider: 'dropbox' }).lean();
-    const [counts, reviewDocuments] = await Promise.all([
+    const [counts, readyDocuments, reviewDocuments] = await Promise.all([
       DropboxDocument.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }]),
+      DropboxDocument.find({ status: 'discovered' })
+        .select('dropboxId path name documentType inferredDate eventId revisionNumber revisionLabel reason serverModifiedAt')
+        .sort({ inferredDate: 1, serverModifiedAt: -1 })
+        .limit(200)
+        .lean(),
       DropboxDocument.find({ status: 'review' })
         .select('dropboxId path name documentType inferredDate eventId revisionNumber revisionLabel reason serverModifiedAt')
         .sort({ inferredDate: 1, serverModifiedAt: -1 })
@@ -313,6 +318,7 @@ router.get('/status', ...requireDropboxAdmin, async (_req, res) => {
         enabled: integration.enabled,
       } : null,
       counts: Object.fromEntries(counts.map((entry) => [entry._id, entry.count])),
+      readyDocuments,
       reviewDocuments,
     });
   } catch (error) {

@@ -131,30 +131,49 @@ export const refreshDropboxAccessToken = async (refreshToken) => {
   return clean(result.access_token);
 };
 
-const dropboxRpc = (endpoint, accessToken, body) => fetchJson(`${DROPBOX_API_URL}/${endpoint}`, {
+const pathRootHeader = (namespaceId) => clean(namespaceId)
+  ? { 'Dropbox-API-Path-Root': JSON.stringify({ '.tag': 'root', root: clean(namespaceId) }) }
+  : {};
+
+const dropboxRpc = (endpoint, accessToken, body, { namespaceId = '' } = {}) => fetchJson(`${DROPBOX_API_URL}/${endpoint}`, {
   method: 'POST',
-  headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+  headers: {
+    Authorization: `Bearer ${accessToken}`,
+    'Content-Type': 'application/json',
+    ...pathRootHeader(namespaceId),
+  },
   body: JSON.stringify(body),
 });
 
 export const getDropboxCurrentAccount = (accessToken) => dropboxRpc('users/get_current_account', accessToken, null);
 
-export const listDropboxFolder = (accessToken, { path, cursor = '' } = {}) => (
+export const getDropboxMetadata = (accessToken, path, { namespaceId = '' } = {}) => dropboxRpc(
+  'files/get_metadata',
+  accessToken,
+  { path: normalizeDropboxRootPath(path), include_deleted: false },
+  { namespaceId }
+);
+
+export const listDropboxFolder = (accessToken, { path, cursor = '', namespaceId = '' } = {}) => (
   cursor
-    ? dropboxRpc('files/list_folder/continue', accessToken, { cursor })
+    ? dropboxRpc('files/list_folder/continue', accessToken, { cursor }, { namespaceId })
     : dropboxRpc('files/list_folder', accessToken, {
         path: normalizeDropboxRootPath(path),
         recursive: true,
         include_deleted: true,
         include_mounted_folders: true,
         limit: 2000,
-      })
+      }, { namespaceId })
 );
 
-export const downloadDropboxFile = async (accessToken, path) => {
+export const downloadDropboxFile = async (accessToken, path, { namespaceId = '' } = {}) => {
   const response = await fetch(`${DROPBOX_CONTENT_URL}/files/download`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${accessToken}`, 'Dropbox-API-Arg': JSON.stringify({ path }) },
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Dropbox-API-Arg': JSON.stringify({ path }),
+      ...pathRootHeader(namespaceId),
+    },
     signal: AbortSignal.timeout(60_000),
   });
   if (!response.ok) throw createHttpError(response.status, `Dropbox download failed (${response.status})`);

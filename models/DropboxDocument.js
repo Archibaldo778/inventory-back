@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 
 const dropboxDocumentSchema = new mongoose.Schema({
   provider: { type: String, default: 'dropbox', index: true },
+  namespaceId: { type: String, trim: true, default: '', index: true },
   dropboxId: { type: String, required: true, trim: true, unique: true },
   path: { type: String, required: true, trim: true },
   name: { type: String, required: true, trim: true },

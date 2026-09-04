@@ -23,6 +23,7 @@ import {
   exchangeDropboxAuthorizationCode,
   getDropboxConfig,
   getDropboxCurrentAccount,
+  getDropboxMetadata,
   downloadDropboxFile,
   listDropboxFolder,
   refreshDropboxAccessToken,
@@ -44,8 +45,8 @@ let syncProgress = null;
 
 const requireDropboxAdmin = [requireAuth, requireAdmin];
 
-const reclassifyStoredDropboxReviews = async () => {
-  const documents = await DropboxDocument.find({ status: 'review' })
+const reclassifyStoredDropboxReviews = async (namespaceId) => {
+  const documents = await DropboxDocument.find({ namespaceId, status: 'review' })
     .select('dropboxId path name rev contentInspectedRev status documentType inferredDate eventId revisionNumber revisionLabel revisionSeries revisionGroupKey reason')
     .lean();
   if (!documents.length) return { total: 0, skippedOld: 0, discovered: 0, ignored: 0 };
@@ -113,8 +114,9 @@ const reclassifyStoredDropboxReviews = async () => {
   return stats;
 };
 
-const inspectDropboxDocumentContents = async (accessToken) => {
+const inspectDropboxDocumentContents = async (accessToken, namespaceId) => {
   const documents = await DropboxDocument.find({
+    namespaceId,
     status: { $in: ['discovered', 'review', 'imported'] },
     $expr: { $ne: ['$contentInspectedRev', '$rev'] },
   })
@@ -129,7 +131,7 @@ const inspectDropboxDocumentContents = async (accessToken) => {
       nextIndex += 1;
       try {
         const metadata = await readDropboxDocxMetadata(
-          await downloadDropboxFile(accessToken, document.path),
+          await downloadDropboxFile(accessToken, document.path, { namespaceId }),
           { documentType: document.documentType }
         );
         const inferredDate = metadata.eventDate || document.inferredDate || '';
@@ -189,8 +191,9 @@ const inspectDropboxDocumentContents = async (accessToken) => {
   return stats;
 };
 
-const reconcileDropboxRevisions = async () => {
+const reconcileDropboxRevisions = async (namespaceId) => {
   const documents = await DropboxDocument.find({
+    namespaceId,
     status: { $in: ['discovered', 'review', 'superseded', 'imported'] },
   }).lean();
   const plan = buildDropboxRevisionPlan(documents);
@@ -291,8 +294,8 @@ const syncDropboxBarItems = async (event) => {
   return true;
 };
 
-const attachDiscoveredDropboxDocuments = async () => {
-  const documents = await DropboxDocument.find({ status: 'discovered' })
+const attachDiscoveredDropboxDocuments = async (namespaceId) => {
+  const documents = await DropboxDocument.find({ namespaceId, status: 'discovered' })
     .sort({ inferredDate: 1, serverModifiedAt: 1 })
     .limit(200)
     .lean();
@@ -413,6 +416,36 @@ const callbackHtml = (ok, message, returnTo = '') => {
 const loadIntegrationWithSecrets = () => DropboxIntegration.findOne({ provider: 'dropbox' })
   .select('+refreshToken.ciphertext +refreshToken.iv +refreshToken.tag +cursor');
 
+const joinDropboxPath = (...parts) => `/${parts
+  .map((part) => String(part || '').replace(/^\/+|\/+$/g, ''))
+  .filter(Boolean)
+  .join('/')}`;
+
+const resolveDropboxTeamRoot = async (accessToken, account, configuredRootPath) => {
+  const namespaceId = String(account?.root_info?.root_namespace_id || '');
+  const homeNamespaceId = String(account?.root_info?.home_namespace_id || '');
+  const homePath = String(account?.root_info?.home_path || '');
+  const candidates = [...new Set([
+    configuredRootPath,
+    homePath ? joinDropboxPath(homePath, configuredRootPath) : '',
+  ].filter(Boolean))];
+  let lastError = null;
+  for (const path of candidates) {
+    try {
+      const metadata = await getDropboxMetadata(accessToken, path, { namespaceId });
+      if (metadata?.['.tag'] === 'folder') {
+        return { namespaceId, homeNamespaceId, homePath, resolvedRootPath: path };
+      }
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw Object.assign(
+    new Error(`Dropbox Team Space folder was not found: ${configuredRootPath}${lastError?.message ? ` (${lastError.message})` : ''}`),
+    { statusCode: 404 }
+  );
+};
+
 export const runDropboxDiscoverySync = async () => {
   if (syncPromise) return syncPromise;
   syncPromise = (async () => {
@@ -424,9 +457,20 @@ export const runDropboxDiscoverySync = async () => {
     try {
       syncProgress = { processed: 0, pages: 0, startedAt: new Date() };
       const accessToken = await refreshDropboxAccessToken(decryptDropboxSecret(integration.refreshToken));
+      const account = await getDropboxCurrentAccount(accessToken);
+      const root = await resolveDropboxTeamRoot(accessToken, account, integration.rootPath);
+      const rootChanged = String(integration.namespaceId || '') !== root.namespaceId
+        || String(integration.resolvedRootPath || '') !== root.resolvedRootPath;
+      integration.namespaceId = root.namespaceId;
+      integration.homeNamespaceId = root.homeNamespaceId;
+      integration.homePath = root.homePath;
+      integration.resolvedRootPath = root.resolvedRootPath;
+      if (rootChanged) integration.cursor = '';
+      await integration.save();
       let page = await listDropboxFolder(accessToken, {
-        path: integration.rootPath,
+        path: root.resolvedRootPath,
         cursor: integration.cursor || '',
+        namespaceId: root.namespaceId,
       });
       const stats = {
         seen: 0,
@@ -504,6 +548,7 @@ export const runDropboxDiscoverySync = async () => {
               filter: { dropboxId },
               update: {
               $set: {
+                namespaceId: root.namespaceId,
                 path: String(entry.path_display || entry.path_lower || ''),
                 name: String(entry.name || ''),
                 rev: String(entry.rev || ''),
@@ -536,19 +581,22 @@ export const runDropboxDiscoverySync = async () => {
           summary: { ...stats },
         };
         latestCursor = page.cursor || latestCursor;
-        page = page.has_more ? await listDropboxFolder(accessToken, { cursor: latestCursor }) : null;
+        page = page.has_more ? await listDropboxFolder(accessToken, {
+          cursor: latestCursor,
+          namespaceId: root.namespaceId,
+        }) : null;
       }
-      const reclassified = await reclassifyStoredDropboxReviews();
+      const reclassified = await reclassifyStoredDropboxReviews(root.namespaceId);
       stats.reclassified = reclassified.total;
       stats.skippedOld += reclassified.skippedOld;
       stats.discovered += reclassified.discovered;
       stats.ignored += reclassified.ignored;
-      const inspected = await inspectDropboxDocumentContents(accessToken);
+      const inspected = await inspectDropboxDocumentContents(accessToken, root.namespaceId);
       stats.contentInspected = inspected.inspected;
       stats.contentEnriched = inspected.enriched;
       stats.contentInspectionFailed = inspected.failed;
-      await reconcileDropboxRevisions();
-      const attachments = await attachDiscoveredDropboxDocuments();
+      await reconcileDropboxRevisions(root.namespaceId);
+      const attachments = await attachDiscoveredDropboxDocuments(root.namespaceId);
       stats.attached = attachments.attached;
       stats.attachmentUnchanged = attachments.unchanged;
       stats.attachmentReview = attachments.review;
@@ -590,6 +638,10 @@ router.get('/callback', async (req, res) => {
         $set: {
           accountId: String(account?.account_id || ''),
           accountEmail: String(account?.email || '').toLowerCase(),
+          namespaceId: String(account?.root_info?.root_namespace_id || ''),
+          homeNamespaceId: String(account?.root_info?.home_namespace_id || ''),
+          homePath: String(account?.root_info?.home_path || ''),
+          resolvedRootPath: '',
           rootPath: config.rootPath,
           refreshToken: encryptDropboxSecret(token.refresh_token),
           cursor: '',
@@ -610,20 +662,21 @@ router.get('/callback', async (req, res) => {
 router.get('/status', ...requireDropboxAdmin, async (_req, res) => {
   try {
     const integration = await DropboxIntegration.findOne({ provider: 'dropbox' }).lean();
+    const namespaceQuery = integration?.namespaceId ? { namespaceId: integration.namespaceId } : {};
     const [counts, readyDocuments, attachedDocuments, reviewDocuments] = await Promise.all([
-      DropboxDocument.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }]),
-      DropboxDocument.find({ status: 'discovered' })
+      DropboxDocument.aggregate([{ $match: namespaceQuery }, { $group: { _id: '$status', count: { $sum: 1 } } }]),
+      DropboxDocument.find({ ...namespaceQuery, status: 'discovered' })
         .select('dropboxId path name documentType inferredDate eventId revisionNumber revisionLabel reason serverModifiedAt contentEventTitle contentInspectedAt contentInspectionError')
         .sort({ inferredDate: 1, serverModifiedAt: -1 })
         .limit(200)
         .lean(),
-      DropboxDocument.find({ status: 'imported' })
+      DropboxDocument.find({ ...namespaceQuery, status: 'imported' })
         .select('dropboxId path name documentType inferredDate eventId revisionNumber revisionLabel reason importedAt importedEventId contentEventTitle contentInspectedAt contentInspectionError')
         .sort({ importedAt: -1 })
         .limit(200)
         .populate('importedEventId', 'title date externalId')
         .lean(),
-      DropboxDocument.find({ status: 'review' })
+      DropboxDocument.find({ ...namespaceQuery, status: 'review' })
         .select('dropboxId path name documentType inferredDate eventId revisionNumber revisionLabel reason serverModifiedAt contentEventTitle contentInspectedAt contentInspectionError')
         .sort({ inferredDate: 1, serverModifiedAt: -1 })
         .limit(100)
@@ -637,6 +690,7 @@ router.get('/status', ...requireDropboxAdmin, async (_req, res) => {
       integration: integration ? {
         accountEmail: integration.accountEmail,
         rootPath: integration.rootPath,
+        resolvedRootPath: integration.resolvedRootPath,
         connectedAt: integration.connectedAt,
         lastSyncStartedAt: integration.lastSyncStartedAt,
         lastSyncCompletedAt: integration.lastSyncCompletedAt,
@@ -675,7 +729,9 @@ router.get('/documents/:dropboxId/download', requireAuth, downloadRateLimit, asy
       return res.status(409).json({ error: 'Dropbox is not connected' });
     }
     const accessToken = await refreshDropboxAccessToken(decryptDropboxSecret(integration.refreshToken));
-    const buffer = await downloadDropboxFile(accessToken, document.path);
+    const buffer = await downloadDropboxFile(accessToken, document.path, {
+      namespaceId: document.namespaceId || integration.namespaceId,
+    });
     res.setHeader('Cache-Control', 'private, no-store');
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
     res.attachment(document.name || 'event-document.docx');

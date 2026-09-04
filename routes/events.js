@@ -20,6 +20,7 @@ import { requireAdmin, requireRoles } from '../middleware/auth.js';
 import { createMemoryRateLimiter } from '../middleware/rateLimit.js';
 import { clearApiCacheGroups, createGroupedApiCache } from '../utils/apiCache.js';
 import { sendApiError } from '../utils/apiErrors.js';
+import { fetchNowstaImportRows, resolveNowstaSyncRange } from '../utils/nowstaApi.js';
 import { runWithTransactionFallback } from '../utils/mongoTransaction.js';
 import {
   importedEventMatchesSnapshot,
@@ -41,6 +42,15 @@ const eventDocumentUploadRateLimit = createMemoryRateLimiter({
   max: 120,
   message: 'Too many event document uploads. Wait a few minutes and try again.',
 });
+const nowstaSyncRateLimit = createMemoryRateLimiter({
+  windowMs: 10 * 60 * 1000,
+  max: 6,
+  message: 'Too many Nowsta sync requests. Wait a few minutes and try again.',
+});
+let nowstaSyncPromise = null;
+let lastNowstaSyncError = '';
+let lastNowstaSyncAttemptAt = null;
+let lastNowstaSyncCompletedAt = null;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const CACHE_GROUP = 'events';
@@ -433,6 +443,8 @@ export const normalizeImportedMeta = (source) => {
   const nowstaSource = source.nowsta;
   const nowsta = nowstaSource && typeof nowstaSource === 'object' && !Array.isArray(nowstaSource)
     ? {
+        apiEventId: trimImportValue(nowstaSource.apiEventId, 120),
+        companyId: trimImportValue(nowstaSource.companyId, 120),
         department: trimImportValue(nowstaSource.department, 160),
         venue: trimImportValue(nowstaSource.venue, 300),
         address: trimImportValue(nowstaSource.address, 600),
@@ -440,6 +452,7 @@ export const normalizeImportedMeta = (source) => {
         uniform: trimImportValue(nowstaSource.uniform, 300),
         adminNotes: trimImportValue(nowstaSource.adminNotes, 2_000),
         staffTotals: trimImportValue(nowstaSource.staffTotals, 100),
+        updatedAt: trimImportValue(nowstaSource.updatedAt, 100),
         shifts: (Array.isArray(nowstaSource.shifts) ? nowstaSource.shifts : [])
           .slice(0, 500)
           .map(normalizeNowstaShift)
@@ -494,6 +507,181 @@ const ensureClientRecord = async (value) => {
     // Concurrent upserts may race on the unique normalized index. In that
     // case the desired client already exists and the event can proceed.
     if (error?.code !== 11000) throw error;
+  }
+};
+
+const applyNowstaApiRows = async (sourceRows, actor = {}) => {
+  const { normalizedRows, uniqueRows } = prepareImportedRows(sourceRows);
+  const clientNames = [...new Set(uniqueRows.map((event) => event.client).filter(Boolean))];
+  for (const client of clientNames) await ensureClientRecord(client);
+
+  const stats = {
+    processed: 0,
+    created: 0,
+    updated: 0,
+    unchanged: 0,
+    eventIdsAssigned: 0,
+    duplicatesMerged: 0,
+    failed: 0,
+    skipped: sourceRows.length - normalizedRows.length,
+  };
+  const failures = [];
+  const operations = [];
+
+  for (const { identity: _identity, meta, ...event } of uniqueRows) {
+    try {
+      const apiEventId = trimImportValue(meta?.nowsta?.apiEventId, 120);
+      const identityConditions = [{ externalId: event.externalId }];
+      if (apiEventId) identityConditions.push({ 'meta.nowsta.apiEventId': apiEventId });
+      const existing = await Event.findOne({
+        $or: identityConditions,
+        status: { $not: /^deleted$/i },
+      }).lean();
+
+      if (!existing) {
+        const titleDateMatches = await findEventTitleDateMatches(event);
+        if (titleDateMatches.length) {
+          stats.skipped += 1;
+          operations.push({
+            action: 'skipped',
+            externalId: event.externalId,
+            title: event.title,
+            date: event.date,
+            message: 'A same-name event exists on this date but has a different Event ID. Review it manually; automatic sync changed nothing.',
+            undoable: false,
+          });
+          continue;
+        }
+      }
+
+      if (existing) {
+        const currentComparable = {
+          externalId: String(existing.externalId || ''),
+          importSource: String(existing.importSource || ''),
+          title: String(existing.title || ''),
+          date: String(existing.date || ''),
+          client: String(existing.client || ''),
+          nowsta: existing.meta?.nowsta || {},
+          venue: String(existing.meta?.venue || ''),
+          address: String(existing.meta?.address || ''),
+          eventTime: String(existing.meta?.eventTime || ''),
+          guestCount: existing.meta?.guestCount ?? null,
+        };
+        const incomingComparable = {
+          externalId: event.externalId,
+          importSource: 'nowsta',
+          title: event.title,
+          date: event.date,
+          client: event.client,
+          nowsta: meta?.nowsta || {},
+          venue: meta?.venue || '',
+          address: meta?.address || '',
+          eventTime: meta?.eventTime || '',
+          guestCount: meta?.guestCount ?? currentComparable.guestCount,
+        };
+        if (JSON.stringify(currentComparable) === JSON.stringify(incomingComparable)) {
+          stats.unchanged += 1;
+          continue;
+        }
+      }
+
+      const before = existing ? snapshotImportedEvent(existing) : null;
+      const setFields = {
+        externalId: event.externalId,
+        importSource: 'nowsta',
+        title: event.title,
+        date: event.date,
+        client: event.client,
+        'meta.nowsta': meta?.nowsta || {},
+        'meta.venue': meta?.venue || '',
+        'meta.address': meta?.address || '',
+        'meta.eventTime': meta?.eventTime || '',
+      };
+      if (meta?.guestCount !== null && meta?.guestCount !== undefined) {
+        setFields['meta.guestCount'] = meta.guestCount;
+      }
+      const result = await Event.updateOne(
+        existing ? { _id: existing._id } : { externalId: event.externalId },
+        { $set: setFields, $setOnInsert: { status: 'draft' } },
+        { upsert: true, runValidators: true }
+      );
+      const eventId = existing?._id || result.upsertedId;
+      const savedEvent = eventId ? await Event.findById(eventId).lean() : null;
+      const action = result.upsertedCount ? 'created' : 'updated';
+      stats.processed += 1;
+      stats[action] += 1;
+      operations.push({
+        action,
+        eventId: savedEvent?._id || eventId || null,
+        externalId: event.externalId,
+        title: event.title,
+        date: event.date,
+        message: action === 'created'
+          ? 'Event created from Nowsta API.'
+          : 'Exact Event ID match refreshed from Nowsta API.',
+        before,
+        after: savedEvent ? snapshotImportedEvent(savedEvent) : null,
+        undoable: true,
+      });
+    } catch (rowError) {
+      stats.failed += 1;
+      const message = importedEventFailureMessage(rowError);
+      failures.push({ externalId: event.externalId, title: event.title, date: event.date, error: message });
+      operations.push({
+        action: 'failed',
+        externalId: event.externalId,
+        title: event.title,
+        date: event.date,
+        message,
+        undoable: false,
+      });
+      console.error('Nowsta API event sync row failed', {
+        externalId: event.externalId,
+        title: event.title,
+        error: rowError?.message || rowError,
+      });
+    }
+  }
+  stats.skipped += normalizedRows.length - uniqueRows.length;
+
+  const shouldRecordRun = stats.created > 0 || stats.updated > 0 || stats.failed > 0;
+  const importRun = shouldRecordRun ? await ImportRun.create({
+      kind: 'event_calendar',
+      source: 'nowsta_api',
+      fileName: 'Automatic Nowsta API sync',
+      createdBy: trimImportValue(actor?.username || actor?.email || 'automatic sync', 180),
+      createdById: trimImportValue(actor?.userId, 120),
+      summary: { totalRows: sourceRows.length, ...stats },
+      operations,
+    }) : null;
+  clearRelatedCaches();
+  return {
+    ok: true,
+    totalRows: sourceRows.length,
+    stats,
+    failures,
+    importRunId: importRun ? String(importRun._id) : '',
+    rows: operations.map(({ before: _before, after: _after, ...operation }) => operation),
+  };
+};
+
+export const runNowstaSync = async ({ from, to, actor } = {}) => {
+  if (nowstaSyncPromise) return nowstaSyncPromise;
+  lastNowstaSyncAttemptAt = new Date();
+  nowstaSyncPromise = (async () => {
+    const fetched = await fetchNowstaImportRows({ from, to });
+    const result = await applyNowstaApiRows(fetched.events, actor);
+    lastNowstaSyncError = '';
+    lastNowstaSyncCompletedAt = new Date();
+    return { ...result, range: fetched.range, fetched: fetched.counts };
+  })();
+  try {
+    return await nowstaSyncPromise;
+  } catch (error) {
+    lastNowstaSyncError = String(error?.message || 'Nowsta sync failed').slice(0, 500);
+    throw error;
+  } finally {
+    nowstaSyncPromise = null;
   }
 };
 
@@ -574,6 +762,48 @@ router.post('/', async (req, res) => {
     sendApiError(res, e, {
       context: 'Event creation failed',
       fallbackMessage: 'Failed to create event',
+    });
+  }
+});
+
+router.get('/nowsta/status', requireAdmin, async (req, res) => {
+  try {
+    const latestRun = await ImportRun.findOne({ kind: 'event_calendar', source: 'nowsta_api' })
+      .sort({ createdAt: -1 })
+      .select('createdAt createdBy summary status')
+      .lean();
+    return res.json({
+      configured: Boolean(String(process.env.NOWSTA_API_KEY || '').trim()),
+      syncing: Boolean(nowstaSyncPromise),
+      range: resolveNowstaSyncRange(),
+      lastAttemptAt: lastNowstaSyncAttemptAt,
+      lastCompletedAt: lastNowstaSyncCompletedAt,
+      lastError: lastNowstaSyncError,
+      lastRun: latestRun || null,
+    });
+  } catch (error) {
+    return sendApiError(res, error, {
+      context: 'Nowsta sync status failed',
+      fallbackMessage: 'Failed to load Nowsta sync status',
+    });
+  }
+});
+
+router.post('/nowsta/sync', requireAdmin, nowstaSyncRateLimit, async (req, res) => {
+  try {
+    if (!String(process.env.NOWSTA_API_KEY || '').trim()) {
+      return res.status(503).json({ error: 'NOWSTA_API_KEY is not configured' });
+    }
+    const result = await runNowstaSync({
+      from: req.body?.from,
+      to: req.body?.to,
+      actor: req.auth,
+    });
+    return res.json(result);
+  } catch (error) {
+    return sendApiError(res, error, {
+      context: 'Nowsta API sync failed',
+      fallbackMessage: 'Nowsta sync failed',
     });
   }
 });

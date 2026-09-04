@@ -413,7 +413,7 @@ app.get('/api/image-proxy', enforceImageProxyRateLimit, async (req, res) => {
 import productRoutes from './routes/products.js';
 import userRoutes from './routes/users.js';
 import authRoutes from './routes/auth.js';
-import eventRoutes from './routes/events.js';
+import eventRoutes, { runNowstaSync } from './routes/events.js';
 import deckRoutes from './routes/decks.js';
 import pageRoutes from './routes/pages.js';
 import staffRoutes from './routes/staff.js';
@@ -563,11 +563,37 @@ export const startServer = async () => {
     console.log(`Сервер запущен на порту ${PORT}`);
   });
 
+  let nowstaSyncTimer = null;
+  let nowstaStartupTimer = null;
+  if (String(process.env.NOWSTA_API_KEY || '').trim()) {
+    const configuredMinutes = Number(process.env.NOWSTA_SYNC_INTERVAL_MINUTES);
+    const intervalMinutes = Number.isFinite(configuredMinutes)
+      ? Math.max(5, Math.min(180, Math.trunc(configuredMinutes)))
+      : 15;
+    const sync = () => runNowstaSync().then((result) => {
+      console.log('✅ Nowsta sync completed', {
+        processed: result?.stats?.processed || 0,
+        created: result?.stats?.created || 0,
+        updated: result?.stats?.updated || 0,
+        skipped: result?.stats?.skipped || 0,
+      });
+    }).catch((error) => {
+      console.error('Nowsta automatic sync failed:', error?.message || error);
+    });
+    nowstaStartupTimer = setTimeout(sync, 15_000);
+    nowstaStartupTimer.unref?.();
+    nowstaSyncTimer = setInterval(sync, intervalMinutes * 60_000);
+    nowstaSyncTimer.unref?.();
+    console.log(`Nowsta automatic sync enabled every ${intervalMinutes} minutes`);
+  }
+
   let shuttingDown = false;
   const shutdown = (signal) => {
     if (shuttingDown) return;
     shuttingDown = true;
     console.log(`${signal} received, shutting down`);
+    if (nowstaStartupTimer) clearTimeout(nowstaStartupTimer);
+    if (nowstaSyncTimer) clearInterval(nowstaSyncTimer);
 
     const forceExit = setTimeout(() => {
       console.error('Forced shutdown after timeout');

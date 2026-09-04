@@ -426,6 +426,7 @@ import proposalTemplateRoutes from './routes/proposalTemplates.js';
 import toolsRoutes from './routes/tools.js';
 import barRoutes from './routes/bar.js';
 import publicBarReturnsRoutes from './routes/publicBarReturns.js';
+import dropboxIntegrationRoutes, { runDropboxDiscoverySync } from './routes/dropboxIntegration.js';
 
 app.use('/api/auth', authRoutes);
 app.use('/api/products', requireAuth, requireWorkspaceAccess, requireAdminForMutations, productRoutes);
@@ -445,6 +446,7 @@ app.use('/api/proposal-templates', requireAuth, requireProposalTemplateAccess, p
 app.use('/api/tools', requireAuth, requireAdmin, toolsRoutes);
 app.use('/api/public/bar-returns', publicBarReturnsRoutes);
 app.use('/api/bar', requireAuth, barRoutes);
+app.use('/api/integrations/dropbox', dropboxIntegrationRoutes);
 
 // подключение к Mongo
 const configuredMongoUri = String(process.env.MONGO_URI || '').trim();
@@ -587,6 +589,25 @@ export const startServer = async () => {
     console.log(`Nowsta automatic sync enabled every ${intervalMinutes} minutes`);
   }
 
+  let dropboxSyncTimer = null;
+  let dropboxStartupTimer = null;
+  if (String(process.env.DROPBOX_APP_KEY || '').trim() && String(process.env.DROPBOX_APP_SECRET || '').trim()) {
+    const configuredMinutes = Number(process.env.DROPBOX_SYNC_INTERVAL_MINUTES);
+    const intervalMinutes = Number.isFinite(configuredMinutes)
+      ? Math.max(5, Math.min(180, Math.trunc(configuredMinutes)))
+      : 15;
+    const syncDropbox = () => runDropboxDiscoverySync().then((summary) => {
+      console.log('✅ Dropbox discovery completed', summary);
+    }).catch((error) => {
+      if (Number(error?.statusCode) !== 409) console.error('Dropbox automatic sync failed:', error?.message || error);
+    });
+    dropboxStartupTimer = setTimeout(syncDropbox, 30_000);
+    dropboxStartupTimer.unref?.();
+    dropboxSyncTimer = setInterval(syncDropbox, intervalMinutes * 60_000);
+    dropboxSyncTimer.unref?.();
+    console.log(`Dropbox automatic discovery enabled every ${intervalMinutes} minutes`);
+  }
+
   let shuttingDown = false;
   const shutdown = (signal) => {
     if (shuttingDown) return;
@@ -594,6 +615,8 @@ export const startServer = async () => {
     console.log(`${signal} received, shutting down`);
     if (nowstaStartupTimer) clearTimeout(nowstaStartupTimer);
     if (nowstaSyncTimer) clearInterval(nowstaSyncTimer);
+    if (dropboxStartupTimer) clearTimeout(dropboxStartupTimer);
+    if (dropboxSyncTimer) clearInterval(dropboxSyncTimer);
 
     const forceExit = setTimeout(() => {
       console.error('Forced shutdown after timeout');

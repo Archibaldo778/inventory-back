@@ -11,6 +11,7 @@ import { INVALID_IMAGE_UPLOAD_RESPONSE, isAllowedImageUpload } from '../utils/im
 import { clearApiCacheGroups, createGroupedApiCache } from '../utils/apiCache.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import { buildProductLocationPayload } from '../utils/productLocations.js';
+import { MAX_PRODUCT_IMAGES, normalizeProductImages } from '../utils/productImages.js';
 import {
   allocateDecorInventoryCode,
   ensureDecorInventoryCodes,
@@ -166,6 +167,21 @@ const upload = multer({
     const ok = isAcceptedImageUpload(file);
     if (ok) return cb(null, true);
     cb(new multer.MulterError('LIMIT_UNEXPECTED_FILE', 'image'));
+  },
+});
+
+const galleryUpload = multer({
+  storage,
+  limits: {
+    fileSize: 10 * 1024 * 1024,
+    files: MAX_PRODUCT_IMAGES,
+    fields: 10,
+    parts: MAX_PRODUCT_IMAGES + 10,
+  },
+  fileFilter: (_req, file, cb) => {
+    const ok = isAcceptedImageUpload(file);
+    if (ok) return cb(null, true);
+    cb(new multer.MulterError('LIMIT_UNEXPECTED_FILE', 'images'));
   },
 });
 
@@ -420,6 +436,7 @@ router.post('/', upload.single('image'), async (req, res) => {
       color: color || '',
       description: description || '',
       image,
+      images: image ? [image] : [],
       ...(sizeMeta.hasAnyInput ? sizeMeta.payload : {}),
     });
 
@@ -544,6 +561,12 @@ router.patch('/:id', upload.single('image'), async (req, res) => {
         }
       }
       uploadedImage = updates.image || '';
+      // Replacing the primary image must not discard the previous photo. It
+      // becomes a secondary gallery image until an administrator removes it.
+      updates.images = [
+        updates.image,
+        ...normalizeProductImages(currentDoc).filter((value) => value !== updates.image),
+      ].slice(0, MAX_PRODUCT_IMAGES);
     }
 
     const doc = await Product.findByIdAndUpdate(req.params.id, updates, {
@@ -556,13 +579,6 @@ router.patch('/:id', upload.single('image'), async (req, res) => {
         uploadedImage = '';
       }
       return res.status(404).json({ error: 'Not found' });
-    }
-    if (
-      Object.prototype.hasOwnProperty.call(updates, 'image')
-      && currentDoc.image
-      && String(currentDoc.image) !== String(updates.image || '')
-    ) {
-      await cleanupManagedImageSafely(currentDoc.image, 'product image');
     }
     const out = doc.toObject();
     out.qty = out.quantity;
@@ -577,12 +593,110 @@ router.patch('/:id', upload.single('image'), async (req, res) => {
   }
 });
 
+// Add secondary product photos without changing the image used by boards.
+router.post('/:id/images', galleryUpload.array('images', MAX_PRODUCT_IMAGES), async (req, res) => {
+  const uploadedImages = [];
+  try {
+    const product = await Product.findById(req.params.id);
+    if (!product) return res.status(404).json({ error: 'Not found' });
+    const files = Array.isArray(req.files) ? req.files : [];
+    if (!files.length) return res.status(400).json({ error: 'At least one image is required' });
+
+    const existingImages = normalizeProductImages(product);
+    const availableSlots = Math.max(0, MAX_PRODUCT_IMAGES - existingImages.length);
+    if (!availableSlots) {
+      return res.status(409).json({ error: `A product can have up to ${MAX_PRODUCT_IMAGES} photos` });
+    }
+    if (files.length > availableSlots) {
+      return res.status(409).json({ error: `You can add ${availableSlots} more photo${availableSlots === 1 ? '' : 's'} to this product` });
+    }
+    for (const file of files) {
+      if (!isAllowedImageUpload(file, ['jpeg', 'png', 'webp', 'heif'])) {
+        throw Object.assign(new Error(INVALID_IMAGE_UPLOAD_RESPONSE.error || 'Invalid image upload'), { statusCode: 400 });
+      }
+      let imageUrl = '';
+      try {
+        imageUrl = await uploadImageToCloudinary(file, product.category);
+      } catch (uploadError) {
+        if (!shouldFallbackToLocalUpload()) throw uploadError;
+        imageUrl = await writeLocalDecorImage(file);
+      }
+      if (!imageUrl) throw new Error('Image storage did not return a URL');
+      uploadedImages.push(imageUrl);
+    }
+
+    product.images = normalizeProductImages(product, uploadedImages);
+    if (!product.image && product.images.length) product.image = product.images[0];
+    await product.save();
+    clearCache();
+    return res.status(201).json({ ...product.toObject(), qty: product.quantity });
+  } catch (error) {
+    await Promise.all(uploadedImages.map((imageUrl) => cleanupManagedImageSafely(imageUrl, 'orphaned product gallery image')));
+    return sendApiError(res, error, {
+      context: 'Product gallery upload failed',
+      fallbackMessage: 'Failed to add product photos',
+    });
+  }
+});
+
+// Choose which gallery photo is exposed as the single primary `image`.
+router.patch('/:id/images/primary', async (req, res) => {
+  try {
+    const product = await Product.findById(req.params.id);
+    if (!product) return res.status(404).json({ error: 'Not found' });
+    const imageUrl = String(req.body?.imageUrl || '').trim();
+    const images = normalizeProductImages(product);
+    if (!imageUrl || !images.includes(imageUrl)) {
+      return res.status(400).json({ error: 'Choose a photo from this product gallery' });
+    }
+    product.image = imageUrl;
+    product.imageUrl = imageUrl;
+    product.images = [imageUrl, ...images.filter((value) => value !== imageUrl)];
+    await product.save();
+    clearCache();
+    return res.json({ ...product.toObject(), qty: product.quantity });
+  } catch (error) {
+    return sendApiError(res, error, {
+      context: 'Product primary image update failed',
+      fallbackMessage: 'Failed to change the main product photo',
+    });
+  }
+});
+
+router.delete('/:id/images', async (req, res) => {
+  try {
+    const product = await Product.findById(req.params.id);
+    if (!product) return res.status(404).json({ error: 'Not found' });
+    const imageUrl = String(req.body?.imageUrl || '').trim();
+    const images = normalizeProductImages(product);
+    if (!imageUrl || !images.includes(imageUrl)) {
+      return res.status(404).json({ error: 'Photo not found in this product gallery' });
+    }
+    const remaining = images.filter((value) => value !== imageUrl);
+    product.images = remaining;
+    if (String(product.image || '') === imageUrl) {
+      product.image = remaining[0] || '';
+      product.imageUrl = remaining[0] || '';
+    }
+    await product.save();
+    await cleanupManagedImageSafely(imageUrl, 'product gallery image');
+    clearCache();
+    return res.json({ ...product.toObject(), qty: product.quantity });
+  } catch (error) {
+    return sendApiError(res, error, {
+      context: 'Product gallery image deletion failed',
+      fallbackMessage: 'Failed to delete product photo',
+    });
+  }
+});
+
 // DELETE
 router.delete('/:id', async (req, res) => {
   try {
     const deleted = await Product.findByIdAndDelete(req.params.id);
     if (!deleted) return res.status(404).json({ error: 'Not found' });
-    await cleanupManagedImageSafely(deleted.image || deleted.imageUrl, 'product image');
+    const images = normalizeProductImages(deleted);
+    await Promise.all(images.map((imageUrl) => cleanupManagedImageSafely(imageUrl, 'product image')));
     res.json({ ok: true });
     clearCache();
   } catch (err) {

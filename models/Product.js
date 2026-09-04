@@ -55,6 +55,9 @@ const productSchema = new mongoose.Schema(
     image: { type: String, trim: true },
     imageUrl: { type: String, trim: true },        // Cloudinary secure URL
     imagePublicId: { type: String, trim: true },   // Cloudinary public_id
+    // `image` remains the primary image used by boards and catalog thumbnails.
+    // `images` contains the complete product gallery, including the primary image.
+    images: [{ type: String, trim: true }],
 
     createdAt: { type: Date, default: Date.now }
   },

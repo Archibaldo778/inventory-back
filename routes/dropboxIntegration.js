@@ -220,8 +220,15 @@ router.get('/status', ...requireDropboxAdmin, async (_req, res) => {
 });
 
 router.post('/sync', ...requireDropboxAdmin, syncRateLimit, async (_req, res) => {
-  try { return res.json({ ok: true, summary: await runDropboxDiscoverySync() }); }
-  catch (error) { return sendApiError(res, error, { context: 'Dropbox sync failed', defaultStatus: 502, fallbackMessage: 'Dropbox sync failed' }); }
+  try {
+    if (syncPromise) return res.status(202).json({ ok: true, started: false, syncing: true });
+    void runDropboxDiscoverySync().catch((error) => {
+      console.error('Dropbox background sync failed:', error?.message || error);
+    });
+    return res.status(202).json({ ok: true, started: true, syncing: true });
+  } catch (error) {
+    return sendApiError(res, error, { context: 'Dropbox sync failed', defaultStatus: 502, fallbackMessage: 'Dropbox sync failed' });
+  }
 });
 
 router.get('/documents', ...requireDropboxAdmin, async (req, res) => {

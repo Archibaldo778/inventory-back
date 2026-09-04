@@ -21,6 +21,11 @@ const eventDocumentSchema = new mongoose.Schema(
     version: { type: Number, default: 1, min: 1 },
     uploadedAt: { type: Date, default: Date.now },
     uploadedBy: { type: String, trim: true },
+    sourceProvider: { type: String, trim: true },
+    sourceId: { type: String, trim: true },
+    sourcePath: { type: String, trim: true },
+    sourceSeries: { type: String, trim: true },
+    sourceRevision: { type: String, trim: true },
     kitchenItems: { type: [eventDocumentItemSchema], default: undefined },
   },
   { _id: true }

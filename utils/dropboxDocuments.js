@@ -46,6 +46,62 @@ export const inferDropboxDocumentSeries = (value) => clean(value)
   .filter(Boolean)
   .join('/');
 
+export const inferDropboxEventTitle = (value) => clean(value)
+  .replace(/\.[^.]+$/, '')
+  .replace(/\b20\d{2}[-_.\/]\d{1,2}[-_.\/]\d{1,2}\b/g, ' ')
+  .replace(/\b\d{1,2}[-_.]\d{1,2}[-_.](?:20\d{2}|\d{2})\b/g, ' ')
+  .replace(/\bE\s*[-_ ]?\s*\d{2,}(?:\s*[-_ ]\s*S\s*[-_ ]?\s*\d{2,})?\b/gi, ' ')
+  .replace(/\b(?:revision|rev(?:ision)?|version|ver)\s*[-_.#:]?\s*\d{1,4}\b/gi, ' ')
+  .replace(/(?:^|[\s._-])v\s*[-_.#:]?\s*\d{1,4}(?=$|[\s._-])/gi, ' ')
+  .replace(/\b(?:kitchen\s*menu|km|purchase\s*order|pack\s*out|packout|po)\b/gi, ' ')
+  .replace(/[_-]+/g, ' ')
+  .replace(/\s+/g, ' ')
+  .replace(/\s+(?:beverage|staff\s+holding|vendor\s+meal|dinner\s+kitchen|hds\s+(?:and|&)\s+station)\s*$/i, '')
+  .trim();
+
+const normalizedEventName = (value) => clean(value)
+  .normalize('NFKD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .toLowerCase()
+  .replace(/&/g, ' and ')
+  .replace(/[^a-z0-9]+/g, ' ')
+  .replace(/\s+/g, ' ')
+  .trim();
+
+const normalizedEventNumber = (value) => clean(value).toUpperCase().replace(/[^A-Z0-9]/g, '');
+const baseEventNumber = (value) => normalizedEventNumber(value).match(/^E\d+/)?.[0] || normalizedEventNumber(value);
+
+export const findDropboxEventMatch = (document, events = []) => {
+  const candidates = (Array.isArray(events) ? events : []).filter((event) => event?._id || event?.id);
+  const eventId = normalizedEventNumber(document?.eventId);
+  if (eventId) {
+    const numbered = candidates.filter((event) => {
+      const candidate = normalizedEventNumber(event?.externalId || event?.eventId);
+      return candidate && (candidate === eventId || baseEventNumber(candidate) === baseEventNumber(eventId));
+    });
+    if (numbered.length === 1) return { status: 'matched', event: numbered[0], reason: 'event_id' };
+    if (numbered.length > 1) return { status: 'ambiguous', events: numbered, reason: 'event_id' };
+  }
+
+  const date = clean(document?.inferredDate);
+  const title = normalizedEventName(inferDropboxEventTitle(document?.name));
+  const dated = candidates.filter((event) => clean(event?.date).slice(0, 10) === date);
+  const exact = dated.filter((event) => normalizedEventName(event?.title || event?.name) === title);
+  if (title && exact.length === 1) return { status: 'matched', event: exact[0], reason: 'name_date' };
+  const similar = title.length >= 6
+    ? dated.filter((event) => {
+      const candidate = normalizedEventName(event?.title || event?.name);
+      return candidate && (candidate.includes(title) || title.includes(candidate));
+    })
+    : [];
+  if (similar.length === 1) return { status: 'matched', event: similar[0], reason: 'similar_name_date' };
+  return {
+    status: exact.length > 1 || similar.length > 1 ? 'ambiguous' : 'unmatched',
+    events: exact.length ? exact : similar,
+    reason: 'name_date',
+  };
+};
+
 export const getDropboxRevisionMetadata = (entry) => {
   const path = clean(entry?.path_display || entry?.path || entry?.path_lower);
   const name = clean(entry?.name);
@@ -59,8 +115,8 @@ export const getDropboxRevisionMetadata = (entry) => {
     revisionNumber: revision.number,
     revisionLabel: revision.label,
     revisionSeries,
-    revisionGroupKey: eventId && inferredDate && documentType !== 'review'
-      ? `${eventId}|${inferredDate}|${documentType}|${revisionSeries}`
+    revisionGroupKey: inferredDate && documentType !== 'review'
+      ? `${eventId || 'no-event-id'}|${inferredDate}|${documentType}|${revisionSeries}`
       : '',
   };
 };

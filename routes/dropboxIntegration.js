@@ -1,9 +1,12 @@
 import { Router } from 'express';
 import DropboxIntegration from '../models/DropboxIntegration.js';
 import DropboxDocument from '../models/DropboxDocument.js';
+import Event from '../models/Event.js';
 import { requireAdmin, requireAuth } from '../middleware/auth.js';
 import { createMemoryRateLimiter } from '../middleware/rateLimit.js';
 import { sendApiError } from '../utils/apiErrors.js';
+import { clearApiCacheGroups } from '../utils/apiCache.js';
+import { mergeEventDocumentHistory } from '../utils/documentImportAudit.js';
 import {
   buildDropboxAuthorizeUrl,
   createDropboxOauthState,
@@ -12,14 +15,22 @@ import {
   exchangeDropboxAuthorizationCode,
   getDropboxConfig,
   getDropboxCurrentAccount,
+  downloadDropboxFile,
   listDropboxFolder,
   refreshDropboxAccessToken,
   verifyDropboxOauthState,
 } from '../utils/dropboxApi.js';
-import { buildDropboxRevisionPlan, classifyDropboxEntry, getDropboxRevisionMetadata } from '../utils/dropboxDocuments.js';
+import {
+  buildDropboxRevisionPlan,
+  classifyDropboxEntry,
+  findDropboxEventMatch,
+  getDropboxRevisionMetadata,
+  nyToday,
+} from '../utils/dropboxDocuments.js';
 
 const router = Router();
 const syncRateLimit = createMemoryRateLimiter({ windowMs: 10 * 60 * 1000, max: 8, message: 'Too many Dropbox sync requests' });
+const downloadRateLimit = createMemoryRateLimiter({ windowMs: 60 * 1000, max: 60, message: 'Too many Dropbox document downloads' });
 let syncPromise = null;
 let syncProgress = null;
 
@@ -104,6 +115,99 @@ const reconcileDropboxRevisions = async () => {
     }
     return { updateOne: { filter: { dropboxId: entry.dropboxId }, update: { $set: set } } };
   }), { ordered: false });
+};
+
+const nextSeriesVersion = (event, sourceSeries) => Math.max(0, ...[
+  ...(Array.isArray(event?.documents) ? event.documents : []),
+  ...(Array.isArray(event?.documentHistory) ? event.documentHistory : []),
+].filter((document) => String(document?.sourceSeries || '') === sourceSeries)
+  .map((document) => Number(document?.version) || 0)) + 1;
+
+const attachDiscoveredDropboxDocuments = async () => {
+  const documents = await DropboxDocument.find({ status: 'discovered' })
+    .sort({ inferredDate: 1, serverModifiedAt: 1 })
+    .limit(200)
+    .lean();
+  if (!documents.length) return { attached: 0, unchanged: 0, review: 0, failed: 0 };
+
+  const events = await Event.find({ date: { $gte: nyToday() } })
+    .select('externalId title date documents documentHistory');
+  const stats = { attached: 0, unchanged: 0, review: 0, failed: 0 };
+
+  for (const document of documents) {
+    try {
+      const match = findDropboxEventMatch(document, events);
+      if (match.status !== 'matched') {
+        stats.review += 1;
+        await DropboxDocument.updateOne({ _id: document._id }, {
+          $set: {
+            status: 'review',
+            reason: match.status === 'ambiguous'
+              ? 'More than one event matches this document'
+              : 'No event matched this document by Event ID or by name and date',
+          },
+        });
+        continue;
+      }
+
+      const event = match.event;
+      const sourceSeries = String(document.revisionGroupKey || document.revisionSeries || document.dropboxId);
+      const currentDocuments = Array.isArray(event.documents) ? event.documents : [];
+      const existing = currentDocuments.find((entry) => (
+        String(entry?.sourceProvider || '') === 'dropbox'
+        && String(entry?.sourceSeries || '') === sourceSeries
+      ));
+      if (
+        existing
+        && String(existing.sourceId || '') === String(document.dropboxId)
+        && String(existing.sourceRevision || '') === String(document.rev || '')
+      ) {
+        stats.unchanged += 1;
+        await DropboxDocument.updateOne({ _id: document._id }, {
+          $set: { status: 'imported', reason: 'Attached to event', importedAt: new Date(), importedEventId: event._id },
+        });
+        continue;
+      }
+
+      const version = nextSeriesVersion(event, sourceSeries);
+      const replaced = currentDocuments.filter((entry) => (
+        String(entry?.sourceProvider || '') === 'dropbox'
+        && String(entry?.sourceSeries || '') === sourceSeries
+      ));
+      event.documentHistory = mergeEventDocumentHistory(event.documentHistory, replaced);
+      event.documents = [
+        ...currentDocuments.filter((entry) => !replaced.includes(entry)),
+        {
+          type: document.documentType,
+          fileName: document.name,
+          contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          size: Number(document.size || 0),
+          checksum: String(document.contentHash || ''),
+          url: `/api/integrations/dropbox/documents/${encodeURIComponent(document.dropboxId)}/download`,
+          version,
+          uploadedAt: new Date(),
+          uploadedBy: 'Dropbox automatic sync',
+          sourceProvider: 'dropbox',
+          sourceId: String(document.dropboxId),
+          sourcePath: String(document.path || ''),
+          sourceSeries,
+          sourceRevision: String(document.rev || ''),
+        },
+      ];
+      await event.save();
+      await DropboxDocument.updateOne({ _id: document._id }, {
+        $set: { status: 'imported', reason: 'Attached to event', importedAt: new Date(), importedEventId: event._id },
+      });
+      stats.attached += 1;
+    } catch (error) {
+      stats.failed += 1;
+      await DropboxDocument.updateOne({ _id: document._id }, {
+        $set: { status: 'failed', reason: String(error?.message || 'Could not attach document').slice(0, 500) },
+      }).catch(() => null);
+    }
+  }
+  if (stats.attached) clearApiCacheGroups('events');
+  return stats;
 };
 
 const safeReturnUrl = (value) => {
@@ -232,6 +336,11 @@ export const runDropboxDiscoverySync = async () => {
       stats.discovered += reclassified.discovered;
       stats.ignored += reclassified.ignored;
       await reconcileDropboxRevisions();
+      const attachments = await attachDiscoveredDropboxDocuments();
+      stats.attached = attachments.attached;
+      stats.attachmentUnchanged = attachments.unchanged;
+      stats.attachmentReview = attachments.review;
+      stats.attachmentFailed = attachments.failed;
       integration.cursor = latestCursor;
       integration.lastSyncCompletedAt = new Date();
       integration.lastSyncSummary = stats;
@@ -289,12 +398,18 @@ router.get('/callback', async (req, res) => {
 router.get('/status', ...requireDropboxAdmin, async (_req, res) => {
   try {
     const integration = await DropboxIntegration.findOne({ provider: 'dropbox' }).lean();
-    const [counts, readyDocuments, reviewDocuments] = await Promise.all([
+    const [counts, readyDocuments, attachedDocuments, reviewDocuments] = await Promise.all([
       DropboxDocument.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }]),
       DropboxDocument.find({ status: 'discovered' })
         .select('dropboxId path name documentType inferredDate eventId revisionNumber revisionLabel reason serverModifiedAt')
         .sort({ inferredDate: 1, serverModifiedAt: -1 })
         .limit(200)
+        .lean(),
+      DropboxDocument.find({ status: 'imported' })
+        .select('dropboxId path name documentType inferredDate eventId revisionNumber revisionLabel reason importedAt importedEventId')
+        .sort({ importedAt: -1 })
+        .limit(200)
+        .populate('importedEventId', 'title date externalId')
         .lean(),
       DropboxDocument.find({ status: 'review' })
         .select('dropboxId path name documentType inferredDate eventId revisionNumber revisionLabel reason serverModifiedAt')
@@ -319,6 +434,7 @@ router.get('/status', ...requireDropboxAdmin, async (_req, res) => {
       } : null,
       counts: Object.fromEntries(counts.map((entry) => [entry._id, entry.count])),
       readyDocuments,
+      attachedDocuments,
       reviewDocuments,
     });
   } catch (error) {
@@ -335,6 +451,25 @@ router.post('/sync', ...requireDropboxAdmin, syncRateLimit, async (_req, res) =>
     return res.status(202).json({ ok: true, started: true, syncing: true });
   } catch (error) {
     return sendApiError(res, error, { context: 'Dropbox sync failed', defaultStatus: 502, fallbackMessage: 'Dropbox sync failed' });
+  }
+});
+
+router.get('/documents/:dropboxId/download', requireAuth, downloadRateLimit, async (req, res) => {
+  try {
+    const document = await DropboxDocument.findOne({ dropboxId: String(req.params.dropboxId || '') }).lean();
+    if (!document) return res.status(404).json({ error: 'Dropbox document not found' });
+    const integration = await loadIntegrationWithSecrets();
+    if (!integration?.enabled || !integration?.refreshToken?.ciphertext) {
+      return res.status(409).json({ error: 'Dropbox is not connected' });
+    }
+    const accessToken = await refreshDropboxAccessToken(decryptDropboxSecret(integration.refreshToken));
+    const buffer = await downloadDropboxFile(accessToken, document.path);
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    res.attachment(document.name || 'event-document.docx');
+    return res.send(buffer);
+  } catch (error) {
+    return sendApiError(res, error, { context: 'Dropbox document download failed', fallbackMessage: 'Failed to download Dropbox document' });
   }
 });
 

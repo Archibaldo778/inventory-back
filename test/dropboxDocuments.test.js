@@ -3,8 +3,10 @@ import assert from 'node:assert/strict';
 import {
   classifyDropboxEntry,
   buildDropboxRevisionPlan,
+  findDropboxEventMatch,
   inferDropboxDocumentType,
   inferDropboxEventId,
+  inferDropboxEventTitle,
   inferDropboxDocumentSeries,
   inferDropboxPathDate,
   inferDropboxRevision,
@@ -22,6 +24,21 @@ test('Dropbox revision metadata recognizes event ids and common revision labels'
   assert.deepEqual(inferDropboxRevision('Kitchen Menu REV-02.docx'), { number: 2, label: 'Revision 2' });
   assert.deepEqual(inferDropboxRevision('E22825 PO v4.docx'), { number: 4, label: 'Revision 4' });
   assert.deepEqual(inferDropboxRevision('E22825 PO.docx'), { number: null, label: '' });
+});
+
+test('Dropbox filenames expose a clean event title and match by title plus date', () => {
+  assert.equal(inferDropboxEventTitle('09-05-26 James & Merry KM REV1.docx'), 'James & Merry');
+  assert.equal(inferDropboxEventTitle('09-05-26 Merryl Tisch Dinner PO.docx'), 'Merryl Tisch Dinner');
+  assert.equal(inferDropboxEventTitle('09-05-26 Merryl Tisch Dinner Staff Holding PO.docx'), 'Merryl Tisch Dinner');
+  const match = findDropboxEventMatch({
+    name: '09-05-26 Merryl Tisch Dinner PO.docx',
+    inferredDate: '2026-09-05',
+  }, [
+    { _id: 'one', title: 'Other Event', date: '2026-09-05' },
+    { _id: 'two', title: 'Merryl Tisch Dinner', date: '2026-09-05' },
+  ]);
+  assert.equal(match.status, 'matched');
+  assert.equal(match.event._id, 'two');
 });
 
 test('Dropbox revision grouping uses the stable base event id and document type from folders', () => {

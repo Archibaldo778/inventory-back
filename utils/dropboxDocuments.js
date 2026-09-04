@@ -176,6 +176,9 @@ export const classifyDropboxEntry = (entry, { today = nyToday() } = {}) => {
     return { status: 'skipped_old', reason: 'Before the current New York date', inferredDate, documentType: inferDropboxDocumentType(name) };
   }
   const documentType = inferDropboxDocumentType(`${path}/${name}`);
+  if (!inferredDate && !folderDatePrefix) {
+    return { status: 'ignored', reason: 'Outside the dated Caterease folder structure', inferredDate: '', documentType };
+  }
   if (!inferredDate) return { status: 'review', reason: 'Event date could not be confirmed from the path or filename', inferredDate: '', documentType };
   if (documentType === 'review') return { status: 'review', reason: 'Document type could not be confirmed from the filename', inferredDate, documentType };
   const revision = getDropboxRevisionMetadata({ ...entry, documentType, inferredDate });

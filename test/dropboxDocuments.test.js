@@ -126,3 +126,14 @@ test('Dropbox discovery sends missing dates to review instead of importing', () 
   assert.match(result.reason, /date/i);
   assert.match(nyToday(new Date('2026-09-04T15:00:00Z')), /^2026-09-04$/);
 });
+
+test('Dropbox discovery ignores loose DOCX files outside dated Caterease folders', () => {
+  const result = classifyDropboxEntry({
+    '.tag': 'file',
+    id: 'id:loose',
+    name: 'Cartier Wine Costs.docx',
+    path_display: '/Proposals/Cartier Wine Costs.docx',
+  }, { today: '2026-09-04' });
+  assert.equal(result.status, 'ignored');
+  assert.match(result.reason, /dated Caterease folder/i);
+});

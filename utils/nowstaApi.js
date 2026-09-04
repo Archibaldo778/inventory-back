@@ -142,7 +142,7 @@ export const isNowstaOperationalEventTitle = (value) => {
   return /^office help\b/i.test(title)
     || /^deliver(?:y|ies)$/i.test(title)
     || /^ops$/i.test(title)
-    || /^hermes\b.*\bteam\b/i.test(title);
+    || /^hermes\b.*\bhospitality\b/i.test(title);
 };
 
 const nowstaExternalId = (event) => {

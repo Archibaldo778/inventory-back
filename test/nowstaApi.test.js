@@ -75,6 +75,7 @@ test('Nowsta operational schedule names are matched narrowly', () => {
   assert.equal(isNowstaOperationalEventTitle('Deliveries'), true);
   assert.equal(isNowstaOperationalEventTitle('OPS'), true);
   assert.equal(isNowstaOperationalEventTitle('Office Help - PM'), true);
+  assert.equal(isNowstaOperationalEventTitle('Hermes Hospitality'), true);
   assert.equal(isNowstaOperationalEventTitle('Hermes 706 Madison Hospitality Team'), true);
   assert.equal(isNowstaOperationalEventTitle('Hermes Williamsburg Opening Dinner'), false);
   assert.equal(isNowstaOperationalEventTitle('Sono Bello - Delivery Day'), false);

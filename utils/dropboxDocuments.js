@@ -30,6 +30,22 @@ export const inferDropboxRevision = (value) => {
   return Number.isSafeInteger(number) ? { number, label: `Revision ${number}` } : { number: null, label: '' };
 };
 
+export const inferDropboxDocumentSeries = (value) => clean(value)
+  .toLowerCase()
+  .normalize('NFKD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .replace(/\.docx\b/g, '')
+  .replace(/\b(?:revision|rev(?:ision)?|version|ver)\s*[-_.#:]?\s*\d{1,4}\b/g, ' ')
+  .replace(/(?:^|[\s._-])v\s*[-_.#:]?\s*\d{1,4}(?=$|[\s._-])/g, ' ')
+  .replace(/\bE\s*[-_ ]?\s*\d{2,}(?:\s*[-_ ]\s*S\s*[-_ ]?\s*\d{2,})?\b/gi, ' event ')
+  .replace(/\b20\d{2}[-_.\/]\d{1,2}[-_.\/]\d{1,2}\b/g, ' date ')
+  .replace(/\b\d{1,2}[-_.]\d{1,2}[-_.](?:20\d{2}|\d{2})\b/g, ' date ')
+  .replace(/\b(?:kitchen\s*menu|km|purchase\s*order|pack\s*out|packout|po)\b/g, ' document ')
+  .split('/')
+  .map((segment) => segment.replace(/[^a-z0-9]+/g, ' ').trim())
+  .filter(Boolean)
+  .join('/');
+
 export const getDropboxRevisionMetadata = (entry) => {
   const path = clean(entry?.path_display || entry?.path || entry?.path_lower);
   const name = clean(entry?.name);
@@ -37,12 +53,14 @@ export const getDropboxRevisionMetadata = (entry) => {
   const inferredDate = entry?.inferredDate || inferDropboxPathDate(path);
   const eventId = inferDropboxEventId(`${path}/${name}`);
   const revision = inferDropboxRevision(`${path}/${name}`);
+  const revisionSeries = inferDropboxDocumentSeries(path || name);
   return {
     eventId,
     revisionNumber: revision.number,
     revisionLabel: revision.label,
+    revisionSeries,
     revisionGroupKey: eventId && inferredDate && documentType !== 'review'
-      ? `${eventId}|${inferredDate}|${documentType}`
+      ? `${eventId}|${inferredDate}|${documentType}|${revisionSeries}`
       : '',
   };
 };
@@ -72,6 +90,7 @@ export const buildDropboxRevisionPlan = (documents) => {
       eventId: row.eventId,
       revisionNumber: row.revisionNumber,
       revisionLabel: row.revisionLabel,
+      revisionSeries: row.revisionSeries,
       revisionGroupKey: row.revisionGroupKey,
       isLatestRevision: false,
       supersededByDropboxId: '',

@@ -15,6 +15,7 @@ const dropboxDocumentSchema = new mongoose.Schema({
   eventId: { type: String, trim: true, default: '', index: true },
   revisionNumber: { type: Number, default: null },
   revisionLabel: { type: String, trim: true, default: '' },
+  revisionSeries: { type: String, trim: true, default: '' },
   revisionGroupKey: { type: String, trim: true, default: '', index: true },
   isLatestRevision: { type: Boolean, default: false, index: true },
   supersededByDropboxId: { type: String, trim: true, default: '' },

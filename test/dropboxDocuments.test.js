@@ -5,6 +5,7 @@ import {
   buildDropboxRevisionPlan,
   inferDropboxDocumentType,
   inferDropboxEventId,
+  inferDropboxDocumentSeries,
   inferDropboxPathDate,
   inferDropboxRevision,
   nyToday,
@@ -33,7 +34,15 @@ test('Dropbox revision grouping uses the stable base event id and document type 
   assert.equal(result.documentType, 'kitchen_menu');
   assert.equal(result.eventId, 'E22825');
   assert.equal(result.revisionNumber, 2);
-  assert.equal(result.revisionGroupKey, 'E22825|2026-09-18|kitchen_menu');
+  assert.match(result.revisionGroupKey, /^E22825\|2026-09-18\|kitchen_menu\|/);
+});
+
+test('Dropbox document series removes revision noise but keeps hall and floor identity', () => {
+  const first = inferDropboxDocumentSeries('/Proposals/2026/September/09-18-2026 E22825/Second Floor/KM Revision 1.docx');
+  const next = inferDropboxDocumentSeries('/Proposals/2026/September/09-18-2026 E22825/Second Floor/Kitchen Menu Revision 2.docx');
+  const otherFloor = inferDropboxDocumentSeries('/Proposals/2026/September/09-18-2026 E22825/Third Floor/KM Revision 2.docx');
+  assert.equal(first, next);
+  assert.notEqual(first, otherFloor);
 });
 
 test('Dropbox revision plan keeps only the highest explicit revision active', () => {
@@ -55,6 +64,29 @@ test('Dropbox revision plan sends ambiguous unnumbered duplicates to review', ()
     { dropboxId: 'b', path: `${base}/E22825 Kitchen Menu.docx`, name: 'E22825 Kitchen Menu.docx', documentType: 'kitchen_menu', inferredDate: '2026-09-18' },
   ]);
   assert.equal(plan.every((row) => row.status === 'review'), true);
+});
+
+test('Dropbox revision plan preserves multiple PO and Kitchen Menu series for one event', () => {
+  const base = '/Proposals/2026/September/09-18-2026 Event E22825';
+  const documents = [
+    ['hall-a-1', 'Grand Hall', 'PO', 1, 'po'],
+    ['hall-a-2', 'Grand Hall', 'PO', 2, 'po'],
+    ['hall-b-1', 'Terrace', 'PO', 1, 'po'],
+    ['hall-b-2', 'Terrace', 'PO', 2, 'po'],
+    ['kitchen-a', 'Main Kitchen', 'Kitchen Menu', 1, 'kitchen_menu'],
+    ['kitchen-b', 'Satellite Kitchen', 'Kitchen Menu', 1, 'kitchen_menu'],
+  ].map(([dropboxId, area, label, revision, documentType]) => ({
+    dropboxId,
+    path: `${base}/${area}/${label} Revision ${revision}.docx`,
+    name: `${label} Revision ${revision}.docx`,
+    documentType,
+    inferredDate: '2026-09-18',
+  }));
+  const plan = buildDropboxRevisionPlan(documents);
+  const active = plan.filter((row) => row.isLatestRevision);
+  assert.deepEqual(new Set(active.map((row) => row.dropboxId)), new Set(['hall-a-2', 'hall-b-2', 'kitchen-a', 'kitchen-b']));
+  assert.equal(plan.find((row) => row.dropboxId === 'hall-a-1').supersededByDropboxId, 'hall-a-2');
+  assert.equal(plan.find((row) => row.dropboxId === 'hall-b-1').supersededByDropboxId, 'hall-b-2');
 });
 
 test('Dropbox proposal paths recognize ISO and US dates', () => {

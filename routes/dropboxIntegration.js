@@ -27,7 +27,13 @@ const requireDropboxAdmin = [requireAuth, requireAdmin];
 const safeReturnUrl = (value) => {
   try {
     const url = new URL(String(value || ''));
-    if (!['https://ocdecks.com', 'https://www.ocdecks.com', 'http://localhost:5173'].includes(url.origin)) return '';
+    if (![
+      'https://occdecks.com',
+      'https://www.occdecks.com',
+      'https://ocdecks.com',
+      'https://www.ocdecks.com',
+      'http://localhost:5173',
+    ].includes(url.origin)) return '';
     return url.toString();
   } catch { return ''; }
 };

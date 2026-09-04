@@ -13,6 +13,106 @@ export const inferDropboxDocumentType = (name) => {
   return 'review';
 };
 
+export const inferDropboxEventId = (value) => {
+  const source = clean(value).toUpperCase();
+  const primary = source.match(/\bE\s*[-_ ]?\s*(\d{2,})\b/);
+  if (!primary) return '';
+  return `E${primary[1]}`;
+};
+
+export const inferDropboxRevision = (value) => {
+  const source = clean(value);
+  const matches = [...source.matchAll(/\b(?:revision|rev(?:ision)?|version|ver)\s*[-_.#:]?\s*(\d{1,4})\b/gi)];
+  const shortMatches = [...source.matchAll(/(?:^|[\s._-])v\s*[-_.#:]?\s*(\d{1,4})(?=$|[\s._-])/gi)];
+  const match = matches.at(-1) || shortMatches.at(-1);
+  if (!match) return { number: null, label: '' };
+  const number = Number(match[1]);
+  return Number.isSafeInteger(number) ? { number, label: `Revision ${number}` } : { number: null, label: '' };
+};
+
+export const getDropboxRevisionMetadata = (entry) => {
+  const path = clean(entry?.path_display || entry?.path || entry?.path_lower);
+  const name = clean(entry?.name);
+  const documentType = entry?.documentType || inferDropboxDocumentType(`${path}/${name}`);
+  const inferredDate = entry?.inferredDate || inferDropboxPathDate(path);
+  const eventId = inferDropboxEventId(`${path}/${name}`);
+  const revision = inferDropboxRevision(`${path}/${name}`);
+  return {
+    eventId,
+    revisionNumber: revision.number,
+    revisionLabel: revision.label,
+    revisionGroupKey: eventId && inferredDate && documentType !== 'review'
+      ? `${eventId}|${inferredDate}|${documentType}`
+      : '',
+  };
+};
+
+const documentTimestamp = (document) => {
+  const value = document?.serverModifiedAt || document?.clientModifiedAt || document?.lastSeenAt || document?.createdAt;
+  const timestamp = new Date(value || 0).getTime();
+  return Number.isFinite(timestamp) ? timestamp : 0;
+};
+
+export const buildDropboxRevisionPlan = (documents) => {
+  const rows = (Array.isArray(documents) ? documents : []).map((document) => ({
+    document,
+    ...getDropboxRevisionMetadata(document),
+  }));
+  const groups = new Map();
+  rows.forEach((row) => {
+    if (!row.revisionGroupKey) return;
+    const group = groups.get(row.revisionGroupKey) || [];
+    group.push(row);
+    groups.set(row.revisionGroupKey, group);
+  });
+  const plan = [];
+  rows.forEach((row) => {
+    const base = {
+      dropboxId: clean(row.document?.dropboxId),
+      eventId: row.eventId,
+      revisionNumber: row.revisionNumber,
+      revisionLabel: row.revisionLabel,
+      revisionGroupKey: row.revisionGroupKey,
+      isLatestRevision: false,
+      supersededByDropboxId: '',
+    };
+    if (!row.revisionGroupKey) {
+      plan.push(base);
+      return;
+    }
+    const group = groups.get(row.revisionGroupKey) || [];
+    if (group.length === 1) {
+      plan.push({ ...base, isLatestRevision: true });
+      return;
+    }
+    const numbered = group.filter((candidate) => candidate.revisionNumber !== null);
+    if (!numbered.length) {
+      plan.push({ ...base, status: 'review', reason: 'Multiple files exist for this event and document type, but no revision number could be confirmed' });
+      return;
+    }
+    const latest = [...numbered].sort((a, b) => (
+      b.revisionNumber - a.revisionNumber
+      || documentTimestamp(b.document) - documentTimestamp(a.document)
+      || clean(b.document?.dropboxId).localeCompare(clean(a.document?.dropboxId))
+    ))[0];
+    if (row.revisionNumber === null) {
+      plan.push({ ...base, status: 'review', reason: `Revision number is missing; ${latest.revisionLabel} exists for this event` });
+      return;
+    }
+    if (clean(row.document?.dropboxId) === clean(latest.document?.dropboxId)) {
+      plan.push({ ...base, isLatestRevision: true });
+      return;
+    }
+    plan.push({
+      ...base,
+      status: 'superseded',
+      reason: `Superseded by ${latest.revisionLabel}`,
+      supersededByDropboxId: clean(latest.document?.dropboxId),
+    });
+  });
+  return plan;
+};
+
 export const inferDropboxPathDate = (path) => {
   const source = clean(path);
   const iso = source.match(/\b(20\d{2})[-_.\/](\d{1,2})[-_.\/](\d{1,2})\b/);
@@ -52,8 +152,9 @@ export const classifyDropboxEntry = (entry, { today = nyToday() } = {}) => {
   if ((inferredDate && inferredDate < today) || (datePrefix.length === 7 && datePrefix < todayMonth) || (datePrefix.length === 4 && datePrefix < today.slice(0, 4))) {
     return { status: 'skipped_old', reason: 'Before the current New York date', inferredDate, documentType: inferDropboxDocumentType(name) };
   }
-  const documentType = inferDropboxDocumentType(name);
+  const documentType = inferDropboxDocumentType(`${path}/${name}`);
   if (!inferredDate) return { status: 'review', reason: 'Event date could not be confirmed from the path or filename', inferredDate: '', documentType };
   if (documentType === 'review') return { status: 'review', reason: 'Document type could not be confirmed from the filename', inferredDate, documentType };
-  return { status: 'discovered', reason: 'Ready for safe matching', inferredDate, documentType };
+  const revision = getDropboxRevisionMetadata({ ...entry, documentType, inferredDate });
+  return { status: 'discovered', reason: 'Ready for safe matching', inferredDate, documentType, ...revision };
 };

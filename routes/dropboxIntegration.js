@@ -16,7 +16,7 @@ import {
   refreshDropboxAccessToken,
   verifyDropboxOauthState,
 } from '../utils/dropboxApi.js';
-import { classifyDropboxEntry } from '../utils/dropboxDocuments.js';
+import { buildDropboxRevisionPlan, classifyDropboxEntry, getDropboxRevisionMetadata } from '../utils/dropboxDocuments.js';
 
 const router = Router();
 const syncRateLimit = createMemoryRateLimiter({ windowMs: 10 * 60 * 1000, max: 8, message: 'Too many Dropbox sync requests' });
@@ -24,6 +24,34 @@ let syncPromise = null;
 let syncProgress = null;
 
 const requireDropboxAdmin = [requireAuth, requireAdmin];
+
+const reconcileDropboxRevisions = async () => {
+  const documents = await DropboxDocument.find({
+    status: { $in: ['discovered', 'review', 'superseded', 'imported'] },
+  }).lean();
+  const plan = buildDropboxRevisionPlan(documents);
+  if (!plan.length) return;
+  const byId = new Map(documents.map((document) => [String(document.dropboxId), document]));
+  await DropboxDocument.bulkWrite(plan.filter((entry) => entry.dropboxId).map((entry) => {
+    const current = byId.get(entry.dropboxId);
+    const set = {
+      eventId: entry.eventId,
+      revisionNumber: entry.revisionNumber,
+      revisionLabel: entry.revisionLabel,
+      revisionGroupKey: entry.revisionGroupKey,
+      isLatestRevision: entry.isLatestRevision,
+      supersededByDropboxId: entry.supersededByDropboxId,
+    };
+    if (entry.status) {
+      set.status = entry.status;
+      set.reason = entry.reason;
+    } else if (current?.status === 'superseded') {
+      set.status = current.importedAt ? 'imported' : 'discovered';
+      set.reason = current.importedAt ? 'Latest revision; already imported' : 'Latest revision; ready for safe matching';
+    }
+    return { updateOne: { filter: { dropboxId: entry.dropboxId }, update: { $set: set } } };
+  }), { ordered: false });
+};
 
 const safeReturnUrl = (value) => {
   try {
@@ -91,6 +119,7 @@ export const runDropboxDiscoverySync = async () => {
         for (const { entry, dropboxId } of entries) {
           stats.seen += 1;
           const classification = classifyDropboxEntry(entry);
+          const revision = getDropboxRevisionMetadata({ ...entry, ...classification });
           const statusKey = { discovered: 'discovered', review: 'review', skipped_old: 'skippedOld', ignored: 'ignored', deleted: 'deleted' }[classification.status];
           if (statusKey) stats[statusKey] += 1;
           const existing = existingById.get(dropboxId);
@@ -119,6 +148,10 @@ export const runDropboxDiscoverySync = async () => {
                 serverModifiedAt: entry.server_modified || null,
                 documentType: classification.documentType,
                 inferredDate: classification.inferredDate,
+                eventId: revision.eventId,
+                revisionNumber: revision.revisionNumber,
+                revisionLabel: revision.revisionLabel,
+                revisionGroupKey: revision.revisionGroupKey,
                 status: nextStatus,
                 reason: unchangedImported ? 'Already imported; Dropbox revision is unchanged' : classification.reason,
                 lastSeenAt: new Date(),
@@ -139,6 +172,7 @@ export const runDropboxDiscoverySync = async () => {
         latestCursor = page.cursor || latestCursor;
         page = page.has_more ? await listDropboxFolder(accessToken, { cursor: latestCursor }) : null;
       }
+      await reconcileDropboxRevisions();
       integration.cursor = latestCursor;
       integration.lastSyncCompletedAt = new Date();
       integration.lastSyncSummary = stats;
@@ -235,7 +269,7 @@ router.get('/documents', ...requireDropboxAdmin, async (req, res) => {
   try {
     const limit = Math.max(1, Math.min(200, Number(req.query?.limit) || 100));
     const status = String(req.query?.status || '').trim();
-    const query = status ? { status } : { status: { $in: ['discovered', 'review', 'failed'] } };
+    const query = status ? { status } : { status: { $in: ['discovered', 'review', 'superseded', 'failed'] } };
     const documents = await DropboxDocument.find(query).sort({ inferredDate: 1, serverModifiedAt: -1 }).limit(limit).lean();
     return res.json({ items: documents });
   } catch (error) {

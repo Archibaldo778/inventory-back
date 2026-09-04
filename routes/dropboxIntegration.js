@@ -230,7 +230,14 @@ router.get('/callback', async (req, res) => {
 router.get('/status', ...requireDropboxAdmin, async (_req, res) => {
   try {
     const integration = await DropboxIntegration.findOne({ provider: 'dropbox' }).lean();
-    const counts = await DropboxDocument.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }]);
+    const [counts, reviewDocuments] = await Promise.all([
+      DropboxDocument.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }]),
+      DropboxDocument.find({ status: 'review' })
+        .select('dropboxId path name documentType inferredDate eventId revisionNumber revisionLabel reason serverModifiedAt')
+        .sort({ inferredDate: 1, serverModifiedAt: -1 })
+        .limit(100)
+        .lean(),
+    ]);
     return res.json({
       configured: Boolean(getDropboxConfig().appKey && getDropboxConfig().appSecret && String(process.env.DROPBOX_TOKEN_ENCRYPTION_KEY || '').length >= 32),
       connected: Boolean(integration?.connectedAt),
@@ -247,6 +254,7 @@ router.get('/status', ...requireDropboxAdmin, async (_req, res) => {
         enabled: integration.enabled,
       } : null,
       counts: Object.fromEntries(counts.map((entry) => [entry._id, entry.count])),
+      reviewDocuments,
     });
   } catch (error) {
     return sendApiError(res, error, { context: 'Dropbox status failed', fallbackMessage: 'Failed to load Dropbox status' });

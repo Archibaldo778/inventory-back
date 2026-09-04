@@ -89,7 +89,7 @@ const GENERIC_PATH_SEGMENTS = new Set([
 export const inferDropboxEventTitles = (document = {}) => {
   const path = clean(document?.path || document?.path_display || document?.path_lower);
   const name = clean(document?.name) || path.split('/').filter(Boolean).at(-1) || '';
-  const candidates = [name, ...path.split('/').filter(Boolean).slice(0, -1).reverse()];
+  const candidates = [document?.contentEventTitle, name, ...path.split('/').filter(Boolean).slice(0, -1).reverse()];
   const seen = new Set();
   return candidates.map((candidate) => inferDropboxEventTitle(candidate))
     .map((candidate) => candidate.replace(/\s+/g, ' ').trim())
@@ -137,7 +137,7 @@ export const getDropboxRevisionMetadata = (entry) => {
   const name = clean(entry?.name);
   const documentType = entry?.documentType || inferDropboxDocumentType(`${path}/${name}`);
   const inferredDate = entry?.inferredDate || inferDropboxPathDate(path);
-  const eventId = inferDropboxEventId(`${path}/${name}`);
+  const eventId = clean(entry?.eventId || entry?.contentEventId) || inferDropboxEventId(`${path}/${name}`);
   const revision = inferDropboxRevision(`${path}/${name}`);
   const revisionSeries = inferDropboxDocumentSeries(path || name);
   return {

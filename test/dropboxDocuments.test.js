@@ -57,6 +57,20 @@ test('Dropbox documents match the event folder even when the filename is abbrevi
   assert.equal(match.event._id, 'two');
 });
 
+test('Dropbox documents match DOCX metadata when folders and filenames are generic', () => {
+  const match = findDropboxEventMatch({
+    name: 'Revision 4.docx',
+    path: '/Proposals/2026/Mess/New Folder/KM/Revision 4.docx',
+    inferredDate: '2026-09-09',
+    contentEventTitle: 'THSS27 VIP Backstage Catering - Day 6',
+  }, [
+    { _id: 'day-five', title: 'THSS27 VIP Backstage Catering - Day 5', date: '2026-09-08' },
+    { _id: 'day-six', title: 'THSS27 VIP Backstage Catering - Day 6', date: '2026-09-09' },
+  ]);
+  assert.equal(match.status, 'matched');
+  assert.equal(match.event._id, 'day-six');
+});
+
 test('Dropbox revision grouping uses the stable base event id and document type from folders', () => {
   const result = classifyDropboxEntry({
     '.tag': 'file',

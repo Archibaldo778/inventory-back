@@ -2,11 +2,19 @@ import { Router } from 'express';
 import DropboxIntegration from '../models/DropboxIntegration.js';
 import DropboxDocument from '../models/DropboxDocument.js';
 import Event from '../models/Event.js';
+import BarEvent from '../models/BarEvent.js';
 import { requireAdmin, requireAuth } from '../middleware/auth.js';
 import { createMemoryRateLimiter } from '../middleware/rateLimit.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import { clearApiCacheGroups } from '../utils/apiCache.js';
 import { mergeEventDocumentHistory } from '../utils/documentImportAudit.js';
+import { readDropboxDocxMetadata } from '../utils/dropboxDocxMetadata.js';
+import {
+  mergePackoutDocumentItems,
+  preservePackoutOperationalState,
+  schedulePreparedItemsForEvent,
+} from '../utils/barManualItems.js';
+import { normalizePackoutItems } from './bar.js';
 import {
   buildDropboxAuthorizeUrl,
   createDropboxOauthState,
@@ -38,13 +46,30 @@ const requireDropboxAdmin = [requireAuth, requireAdmin];
 
 const reclassifyStoredDropboxReviews = async () => {
   const documents = await DropboxDocument.find({ status: 'review' })
-    .select('dropboxId path name status documentType inferredDate eventId revisionNumber revisionLabel revisionSeries revisionGroupKey reason')
+    .select('dropboxId path name rev contentInspectedRev status documentType inferredDate eventId revisionNumber revisionLabel revisionSeries revisionGroupKey reason')
     .lean();
   if (!documents.length) return { total: 0, skippedOld: 0, discovered: 0, ignored: 0 };
 
   const stats = { total: 0, skippedOld: 0, discovered: 0, ignored: 0 };
   const operations = [];
   documents.forEach((document) => {
+    if (document.contentInspectedRev && String(document.contentInspectedRev) === String(document.rev || '')) {
+      if (
+        document.inferredDate >= nyToday()
+        && ['po', 'kitchen_menu'].includes(document.documentType)
+        && /(?:No event matched|More than one event matches)/i.test(String(document.reason || ''))
+      ) {
+        stats.total += 1;
+        stats.discovered += 1;
+        operations.push({
+          updateOne: {
+            filter: { dropboxId: document.dropboxId, status: 'review' },
+            update: { $set: { status: 'discovered', reason: 'Retrying event match with inspected DOCX metadata' } },
+          },
+        });
+      }
+      return;
+    }
     const classification = classifyDropboxEntry({
       '.tag': 'file',
       name: document.name,
@@ -88,6 +113,82 @@ const reclassifyStoredDropboxReviews = async () => {
   return stats;
 };
 
+const inspectDropboxDocumentContents = async (accessToken) => {
+  const documents = await DropboxDocument.find({
+    status: { $in: ['discovered', 'review', 'imported'] },
+    $expr: { $ne: ['$contentInspectedRev', '$rev'] },
+  })
+    .sort({ serverModifiedAt: -1 })
+    .limit(100)
+    .lean();
+  const stats = { inspected: 0, enriched: 0, failed: 0 };
+  let nextIndex = 0;
+  const inspectNext = async () => {
+    while (nextIndex < documents.length) {
+      const document = documents[nextIndex];
+      nextIndex += 1;
+      try {
+        const metadata = await readDropboxDocxMetadata(
+          await downloadDropboxFile(accessToken, document.path),
+          { documentType: document.documentType }
+        );
+        const inferredDate = metadata.eventDate || document.inferredDate || '';
+        const documentType = metadata.documentType !== 'review' ? metadata.documentType : document.documentType;
+        const eventId = metadata.eventId || document.eventId || '';
+        const revision = getDropboxRevisionMetadata({
+          ...document,
+          inferredDate,
+          documentType,
+          eventId,
+          contentEventId: metadata.eventId,
+        });
+        let status = 'discovered';
+        let reason = 'Ready for safe matching from DOCX metadata';
+        if (inferredDate && inferredDate < nyToday()) {
+          status = 'skipped_old';
+          reason = 'Before the current New York date';
+        } else if (!inferredDate || !['po', 'kitchen_menu'].includes(documentType)) {
+          status = 'review';
+          reason = 'Event date or document type could not be confirmed from the DOCX content';
+        }
+        await DropboxDocument.updateOne({ _id: document._id }, { $set: {
+          inferredDate,
+          documentType,
+          eventId: revision.eventId,
+          revisionNumber: revision.revisionNumber,
+          revisionLabel: revision.revisionLabel,
+          revisionSeries: revision.revisionSeries,
+          revisionGroupKey: revision.revisionGroupKey,
+          contentEventId: metadata.eventId,
+          contentEventTitle: metadata.eventTitle,
+          contentEventDate: metadata.eventDate,
+          contentDocumentType: metadata.documentType,
+          contentInspectedRev: String(document.rev || ''),
+          contentInspectedAt: new Date(),
+          contentInspectionError: '',
+          kitchenItems: metadata.kitchenItems,
+          barItems: metadata.barItems,
+          packoutType: metadata.packoutType,
+          status,
+          reason,
+        } });
+        stats.inspected += 1;
+        if (metadata.eventId || metadata.eventTitle || metadata.eventDate || metadata.documentType !== 'review') stats.enriched += 1;
+      } catch (error) {
+        stats.inspected += 1;
+        stats.failed += 1;
+        await DropboxDocument.updateOne({ _id: document._id }, { $set: {
+          contentInspectedRev: String(document.rev || ''),
+          contentInspectedAt: new Date(),
+          contentInspectionError: String(error?.message || 'DOCX inspection failed').slice(0, 500),
+        } }).catch(() => null);
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(4, documents.length) }, () => inspectNext()));
+  return stats;
+};
+
 const reconcileDropboxRevisions = async () => {
   const documents = await DropboxDocument.find({
     status: { $in: ['discovered', 'review', 'superseded', 'imported'] },
@@ -123,6 +224,73 @@ const nextSeriesVersion = (event, sourceSeries) => Math.max(0, ...[
 ].filter((document) => String(document?.sourceSeries || '') === sourceSeries)
   .map((document) => Number(document?.version) || 0)) + 1;
 
+const documentContentSignature = (document) => JSON.stringify({
+  kitchenItems: Array.isArray(document?.kitchenItems) ? document.kitchenItems : [],
+  barItems: Array.isArray(document?.barItems) ? document.barItems : [],
+});
+
+const dashboardEventGuestCount = (event) => {
+  const value = event?.meta?.guestCount ?? event?.meta?.guest_count ?? event?.meta?.guests;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+};
+
+const syncDropboxBarItems = async (event) => {
+  const sourceDocuments = (Array.isArray(event?.documents) ? event.documents : [])
+    .filter((document) => String(document?.sourceProvider || '') === 'dropbox');
+  const rawItems = sourceDocuments.flatMap((document) => (
+    Array.isArray(document?.barItems) ? document.barItems : []
+  ));
+  if (!rawItems.length) return false;
+
+  const documentTypes = [...new Set(sourceDocuments
+    .filter((document) => Array.isArray(document?.barItems) && document.barItems.length)
+    .map((document) => String(document?.type || ''))
+    .filter(Boolean))];
+  const guestCount = dashboardEventGuestCount(event);
+  const importedItems = await normalizePackoutItems(rawItems, { allowFinancials: false, guestCount });
+  let barEvent = await BarEvent.findOne({ linkedEventId: event._id });
+  if (!barEvent) {
+    barEvent = new BarEvent({
+      linkedEventId: event._id,
+      eventNumber: String(event.externalId || ''),
+      name: String(event.title || 'Untitled event'),
+      eventDate: String(event.date || ''),
+      client: String(event.client || ''),
+      salesRep: String(event.managerId || ''),
+      guestCount,
+      guestCountSource: 'dashboard',
+      status: 'draft',
+    });
+  }
+  const existingItems = Array.isArray(barEvent.items) ? barEvent.items : [];
+  barEvent.items = schedulePreparedItemsForEvent(
+    preservePackoutOperationalState(
+      existingItems,
+      mergePackoutDocumentItems(existingItems, importedItems, documentTypes)
+    ),
+    String(event.date || ''),
+    { by: 'Dropbox automatic sync' }
+  );
+  barEvent.packout = {
+    fileName: sourceDocuments.map((document) => document.fileName).filter(Boolean).join(', ').slice(0, 500),
+    contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    packoutType: sourceDocuments.some((document) => document.type === 'po') ? 'general' : 'bar_only',
+    importedAt: new Date(),
+    importedBy: 'Dropbox automatic sync',
+  };
+  if (barEvent.status === 'draft') barEvent.status = 'ready';
+  barEvent.revision = Number(barEvent.revision || 0) + 1;
+  barEvent.audit = [...(Array.isArray(barEvent.audit) ? barEvent.audit : []), {
+    action: 'dropbox_documents_synced',
+    username: 'Dropbox automatic sync',
+    at: new Date(),
+    details: { documents: sourceDocuments.length, items: importedItems.length },
+  }].slice(-200);
+  await barEvent.save();
+  return true;
+};
+
 const attachDiscoveredDropboxDocuments = async () => {
   const documents = await DropboxDocument.find({ status: 'discovered' })
     .sort({ inferredDate: 1, serverModifiedAt: 1 })
@@ -131,7 +299,7 @@ const attachDiscoveredDropboxDocuments = async () => {
   if (!documents.length) return { attached: 0, unchanged: 0, review: 0, failed: 0 };
 
   const events = await Event.find({ date: { $gte: nyToday() } })
-    .select('externalId title date documents documentHistory');
+    .select('externalId title date client managerId meta documents documentHistory');
   const stats = { attached: 0, unchanged: 0, review: 0, failed: 0 };
 
   for (const document of documents) {
@@ -161,7 +329,9 @@ const attachDiscoveredDropboxDocuments = async () => {
         existing
         && String(existing.sourceId || '') === String(document.dropboxId)
         && String(existing.sourceRevision || '') === String(document.rev || '')
+        && documentContentSignature(existing) === documentContentSignature(document)
       ) {
+        await syncDropboxBarItems(event);
         stats.unchanged += 1;
         await DropboxDocument.updateOne({ _id: document._id }, {
           $set: { status: 'imported', reason: 'Attached to event', importedAt: new Date(), importedEventId: event._id },
@@ -192,9 +362,12 @@ const attachDiscoveredDropboxDocuments = async () => {
           sourcePath: String(document.path || ''),
           sourceSeries,
           sourceRevision: String(document.rev || ''),
+          kitchenItems: document.documentType === 'kitchen_menu' ? document.kitchenItems : undefined,
+          barItems: Array.isArray(document.barItems) ? document.barItems : undefined,
         },
       ];
       await event.save();
+      await syncDropboxBarItems(event);
       if (document.importedEventId && String(document.importedEventId) !== String(event._id)) {
         await Event.updateOne(
           { _id: document.importedEventId },
@@ -212,7 +385,7 @@ const attachDiscoveredDropboxDocuments = async () => {
       }).catch(() => null);
     }
   }
-  if (stats.attached) clearApiCacheGroups('events');
+  if (stats.attached) clearApiCacheGroups('events', 'bar');
   return stats;
 };
 
@@ -276,16 +449,38 @@ export const runDropboxDiscoverySync = async () => {
           .filter(({ dropboxId }) => dropboxId);
         const existingRows = await DropboxDocument.find({
           dropboxId: { $in: entries.map(({ dropboxId }) => dropboxId) },
-        }).select('dropboxId rev contentHash status importedAt inferredDate documentType eventId revisionGroupKey').lean();
+        }).select('dropboxId rev contentHash status importedAt inferredDate documentType eventId revisionGroupKey contentEventId contentEventDate contentDocumentType contentInspectedRev contentInspectionError').lean();
         const existingById = new Map(existingRows.map((row) => [String(row.dropboxId), row]));
         const operations = [];
         for (const { entry, dropboxId } of entries) {
           stats.seen += 1;
-          const classification = classifyDropboxEntry(entry);
-          const revision = getDropboxRevisionMetadata({ ...entry, ...classification });
+          const pathClassification = classifyDropboxEntry(entry);
+          const existing = existingById.get(dropboxId);
+          const contentCurrent = Boolean(existing)
+            && String(existing.contentInspectedRev || '') === String(entry.rev || '')
+            && !existing.contentInspectionError;
+          const classification = contentCurrent ? {
+            ...pathClassification,
+            inferredDate: existing.contentEventDate || pathClassification.inferredDate,
+            documentType: existing.contentDocumentType && existing.contentDocumentType !== 'review'
+              ? existing.contentDocumentType
+              : pathClassification.documentType,
+          } : pathClassification;
+          if (
+            classification.status === 'review'
+            && classification.inferredDate
+            && ['po', 'kitchen_menu'].includes(classification.documentType)
+          ) {
+            classification.status = 'discovered';
+            classification.reason = 'Ready for safe matching from DOCX metadata';
+          }
+          const revision = getDropboxRevisionMetadata({
+            ...entry,
+            ...classification,
+            eventId: contentCurrent ? existing.contentEventId || existing.eventId : '',
+          });
           const statusKey = { discovered: 'discovered', review: 'review', skipped_old: 'skippedOld', ignored: 'ignored', deleted: 'deleted' }[classification.status];
           if (statusKey) stats[statusKey] += 1;
-          const existing = existingById.get(dropboxId);
           const revisionChanged = Boolean(existing) && (
             String(existing.rev || '') !== String(entry.rev || '')
             || String(existing.contentHash || '') !== String(entry.content_hash || '')
@@ -348,6 +543,10 @@ export const runDropboxDiscoverySync = async () => {
       stats.skippedOld += reclassified.skippedOld;
       stats.discovered += reclassified.discovered;
       stats.ignored += reclassified.ignored;
+      const inspected = await inspectDropboxDocumentContents(accessToken);
+      stats.contentInspected = inspected.inspected;
+      stats.contentEnriched = inspected.enriched;
+      stats.contentInspectionFailed = inspected.failed;
       await reconcileDropboxRevisions();
       const attachments = await attachDiscoveredDropboxDocuments();
       stats.attached = attachments.attached;
@@ -414,18 +613,18 @@ router.get('/status', ...requireDropboxAdmin, async (_req, res) => {
     const [counts, readyDocuments, attachedDocuments, reviewDocuments] = await Promise.all([
       DropboxDocument.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }]),
       DropboxDocument.find({ status: 'discovered' })
-        .select('dropboxId path name documentType inferredDate eventId revisionNumber revisionLabel reason serverModifiedAt')
+        .select('dropboxId path name documentType inferredDate eventId revisionNumber revisionLabel reason serverModifiedAt contentEventTitle contentInspectedAt contentInspectionError')
         .sort({ inferredDate: 1, serverModifiedAt: -1 })
         .limit(200)
         .lean(),
       DropboxDocument.find({ status: 'imported' })
-        .select('dropboxId path name documentType inferredDate eventId revisionNumber revisionLabel reason importedAt importedEventId')
+        .select('dropboxId path name documentType inferredDate eventId revisionNumber revisionLabel reason importedAt importedEventId contentEventTitle contentInspectedAt contentInspectionError')
         .sort({ importedAt: -1 })
         .limit(200)
         .populate('importedEventId', 'title date externalId')
         .lean(),
       DropboxDocument.find({ status: 'review' })
-        .select('dropboxId path name documentType inferredDate eventId revisionNumber revisionLabel reason serverModifiedAt')
+        .select('dropboxId path name documentType inferredDate eventId revisionNumber revisionLabel reason serverModifiedAt contentEventTitle contentInspectedAt contentInspectionError')
         .sort({ inferredDate: 1, serverModifiedAt: -1 })
         .limit(100)
         .lean(),

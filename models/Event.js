@@ -27,6 +27,7 @@ const eventDocumentSchema = new mongoose.Schema(
     sourceSeries: { type: String, trim: true },
     sourceRevision: { type: String, trim: true },
     kitchenItems: { type: [eventDocumentItemSchema], default: undefined },
+    barItems: { type: [mongoose.Schema.Types.Mixed], default: undefined },
   },
   { _id: true }
 );

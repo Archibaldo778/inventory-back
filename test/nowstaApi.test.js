@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildNowstaImportRows,
+  classifyNowstaSourceEvents,
   createNowstaClient,
+  isNowstaOperationalEventTitle,
   resolveNowstaSyncRange,
 } from '../utils/nowstaApi.js';
 
@@ -67,4 +69,47 @@ test('Nowsta default sync range is bounded and valid', () => {
   assert.ok(range.from < range.to);
   assert.match(range.from, /^2026-/);
   assert.match(range.to, /^2027-/);
+});
+
+test('Nowsta operational schedule names are matched narrowly', () => {
+  assert.equal(isNowstaOperationalEventTitle('Deliveries'), true);
+  assert.equal(isNowstaOperationalEventTitle('OPS'), true);
+  assert.equal(isNowstaOperationalEventTitle('Office Help - PM'), true);
+  assert.equal(isNowstaOperationalEventTitle('Hermes 706 Madison Hospitality Team'), true);
+  assert.equal(isNowstaOperationalEventTitle('Hermes Williamsburg Opening Dinner'), false);
+  assert.equal(isNowstaOperationalEventTitle('Sono Bello - Delivery Day'), false);
+});
+
+test('Nowsta classifier excludes service, archived, missing-ID, and recurring schedules', () => {
+  const event = (id, name, date, externalId, extra = {}) => ({
+    id,
+    name,
+    occurs_at: `${date}T16:00:00Z`,
+    time_zone: 'UTC',
+    external_id: externalId,
+    ...extra,
+  });
+  const result = classifyNowstaSourceEvents([
+    event(1, 'Client Dinner', '2026-09-05', 'E1'),
+    event(2, 'Deliveries', '2026-09-05', 'E2'),
+    event(3, 'Hermes Williamsburg Opening Dinner', '2026-09-05', 'E3'),
+    event(4, 'Hermes 706 Madison Hospitality Team', '2026-09-05', 'E4'),
+    event(5, 'Weekly Schedule', '2026-09-05', 'E5'),
+    event(6, 'Weekly Schedule', '2026-09-06', 'E5'),
+    event(7, 'No identifier', '2026-09-05', ''),
+    event(8, 'Archived Dinner', '2026-09-05', 'E8', { archived_at: '2026-09-01' }),
+  ]);
+
+  assert.deepEqual(result.included.map((item) => item.id), [1, 3]);
+  assert.deepEqual(
+    Object.fromEntries(result.excluded.map((item) => [item.apiEventId, item.reason])),
+    {
+      2: 'operational_schedule',
+      4: 'operational_schedule',
+      5: 'recurring_schedule',
+      6: 'recurring_schedule',
+      7: 'missing_external_id',
+      8: 'archived',
+    }
+  );
 });

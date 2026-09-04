@@ -531,6 +531,12 @@ const applyNowstaApiRows = async (sourceRows, actor = {}) => {
   for (const { identity: _identity, meta, ...event } of uniqueRows) {
     try {
       const apiEventId = trimImportValue(meta?.nowsta?.apiEventId, 120);
+      const incomingNowsta = {
+        ...(meta?.nowsta || {}),
+        excluded: false,
+        exclusionReason: '',
+        excludedAt: null,
+      };
       const identityConditions = [{ externalId: event.externalId }];
       if (apiEventId) identityConditions.push({ 'meta.nowsta.apiEventId': apiEventId });
       const existing = await Event.findOne({
@@ -573,7 +579,7 @@ const applyNowstaApiRows = async (sourceRows, actor = {}) => {
           title: event.title,
           date: event.date,
           client: event.client,
-          nowsta: meta?.nowsta || {},
+          nowsta: incomingNowsta,
           venue: meta?.venue || '',
           address: meta?.address || '',
           eventTime: meta?.eventTime || '',
@@ -592,7 +598,7 @@ const applyNowstaApiRows = async (sourceRows, actor = {}) => {
         title: event.title,
         date: event.date,
         client: event.client,
-        'meta.nowsta': meta?.nowsta || {},
+        'meta.nowsta': incomingNowsta,
         'meta.venue': meta?.venue || '',
         'meta.address': meta?.address || '',
         'meta.eventTime': meta?.eventTime || '',
@@ -665,15 +671,65 @@ const applyNowstaApiRows = async (sourceRows, actor = {}) => {
   };
 };
 
+const markExcludedNowstaEvents = async (excludedEvents = []) => {
+  const operations = (Array.isArray(excludedEvents) ? excludedEvents : [])
+    .map((event) => {
+      const apiEventId = trimImportValue(event?.apiEventId, 120);
+      const externalId = trimImportValue(event?.externalId, 120);
+      const reason = trimImportValue(event?.reason, 80);
+      const identities = [];
+      if (apiEventId) identities.push({ 'meta.nowsta.apiEventId': apiEventId });
+      if (externalId) identities.push({ externalId });
+      if (!identities.length) return null;
+      return {
+        updateOne: {
+          filter: {
+            $and: [
+              { $or: identities },
+              {
+                $or: [
+                  { 'meta.nowsta.excluded': { $ne: true } },
+                  { 'meta.nowsta.exclusionReason': { $ne: reason } },
+                ],
+              },
+            ],
+            status: { $not: /^deleted$/i },
+          },
+          update: {
+            $set: {
+              'meta.nowsta.excluded': true,
+              'meta.nowsta.exclusionReason': reason,
+              'meta.nowsta.excludedAt': new Date(),
+            },
+          },
+        },
+      };
+    })
+    .filter(Boolean);
+  if (!operations.length) return { matchedCount: 0, modifiedCount: 0 };
+  return Event.bulkWrite(operations, { ordered: false });
+};
+
 export const runNowstaSync = async ({ from, to, actor } = {}) => {
   if (nowstaSyncPromise) return nowstaSyncPromise;
   lastNowstaSyncAttemptAt = new Date();
   nowstaSyncPromise = (async () => {
     const fetched = await fetchNowstaImportRows({ from, to });
     const result = await applyNowstaApiRows(fetched.events, actor);
+    const excludedResult = await markExcludedNowstaEvents(fetched.excludedEvents);
+    clearRelatedCaches();
     lastNowstaSyncError = '';
     lastNowstaSyncCompletedAt = new Date();
-    return { ...result, range: fetched.range, fetched: fetched.counts };
+    return {
+      ...result,
+      range: fetched.range,
+      fetched: fetched.counts,
+      excluded: {
+        total: fetched.excludedEvents.length,
+        matched: excludedResult.matchedCount || 0,
+        hidden: excludedResult.modifiedCount || 0,
+      },
+    };
   })();
   try {
     return await nowstaSyncPromise;
@@ -1250,7 +1306,10 @@ router.post('/import', requireAdmin, async (req, res) => {
 // List (optionally by manager)
 router.get('/', cacheWithGroup('5 minutes', CACHE_GROUP), async (req, res) => {
   try {
-    const q = { status: { $not: /^deleted$/i } };
+    const q = {
+      status: { $not: /^deleted$/i },
+      'meta.nowsta.excluded': { $ne: true },
+    };
     if (req.query.managerId) q.managerId = req.query.managerId;
     if (String(req.query.calendar || '') === '1') {
       const from = trimImportValue(req.query.from, 10);

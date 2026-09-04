@@ -137,6 +137,14 @@ const eventAddress = (event) => clean([
   event?.zip,
 ].filter(Boolean).join(', '), 600);
 
+export const isNowstaOperationalEventTitle = (value) => {
+  const title = clean(value, 300);
+  return /^office help\b/i.test(title)
+    || /^deliver(?:y|ies)$/i.test(title)
+    || /^ops$/i.test(title)
+    || /^hermes\b.*\bteam\b/i.test(title);
+};
+
 const nowstaExternalId = (event) => {
   const primary = clean(event?.primary_external_id, 120);
   const secondary = clean(event?.external_id, 120);
@@ -148,6 +156,50 @@ const nowstaExternalId = (event) => {
     return `${primary} - ${secondary}`.slice(0, 120);
   }
   return primary || secondary || `nowsta:${String(event?.id ?? '')}`;
+};
+
+export const classifyNowstaSourceEvents = (events = []) => {
+  const candidates = (Array.isArray(events) ? events : []).filter(Boolean);
+  const datesByExternalId = new Map();
+  candidates.forEach((event) => {
+    if (event.archived_at || isNowstaOperationalEventTitle(event.name)) return;
+    const hasExternalId = clean(event.primary_external_id || event.external_id, 120);
+    if (!hasExternalId) return;
+    const externalId = nowstaExternalId(event);
+    const date = zonedDate(event.occurs_at, event.time_zone);
+    if (!externalId || !date) return;
+    const dates = datesByExternalId.get(externalId) || new Set();
+    dates.add(date);
+    datesByExternalId.set(externalId, dates);
+  });
+  const recurringIds = new Set(
+    [...datesByExternalId.entries()]
+      .filter(([, dates]) => dates.size > 1)
+      .map(([externalId]) => externalId)
+  );
+  const included = [];
+  const excluded = [];
+  candidates.forEach((event) => {
+    let reason = '';
+    const hasExternalId = clean(event.primary_external_id || event.external_id, 120);
+    const externalId = nowstaExternalId(event);
+    if (event.archived_at) reason = 'archived';
+    else if (isNowstaOperationalEventTitle(event.name)) reason = 'operational_schedule';
+    else if (!hasExternalId) reason = 'missing_external_id';
+    else if (recurringIds.has(externalId)) reason = 'recurring_schedule';
+    if (!reason) {
+      included.push(event);
+      return;
+    }
+    excluded.push({
+      apiEventId: String(event.id ?? ''),
+      externalId,
+      title: clean(event.name, 300),
+      date: zonedDate(event.occurs_at, event.time_zone),
+      reason,
+    });
+  });
+  return { included, excluded };
 };
 
 export const buildNowstaImportRows = ({ events = [], shifts = [], companyUsers = [] } = {}) => {
@@ -241,9 +293,11 @@ export const fetchNowstaImportRows = async ({ from, to, fetchImpl, apiKey } = {}
     }),
     client.listAll('/v2/company_users', { include_archived: false }),
   ]);
+  const classified = classifyNowstaSourceEvents(events);
   return {
     range,
     counts: { events: events.length, shifts: shifts.length, companyUsers: companyUsers.length },
-    events: buildNowstaImportRows({ events, shifts, companyUsers }),
+    events: buildNowstaImportRows({ events: classified.included, shifts, companyUsers }),
+    excludedEvents: classified.excluded,
   };
 };

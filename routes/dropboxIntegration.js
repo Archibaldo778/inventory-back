@@ -25,6 +25,58 @@ let syncProgress = null;
 
 const requireDropboxAdmin = [requireAuth, requireAdmin];
 
+const reclassifyStoredDropboxReviews = async () => {
+  const documents = await DropboxDocument.find({ status: 'review' })
+    .select('dropboxId path name status documentType inferredDate eventId revisionNumber revisionLabel revisionSeries revisionGroupKey reason')
+    .lean();
+  if (!documents.length) return { total: 0, skippedOld: 0, discovered: 0, ignored: 0 };
+
+  const stats = { total: 0, skippedOld: 0, discovered: 0, ignored: 0 };
+  const operations = [];
+  documents.forEach((document) => {
+    const classification = classifyDropboxEntry({
+      '.tag': 'file',
+      name: document.name,
+      path_display: document.path,
+    });
+    const revision = getDropboxRevisionMetadata({
+      name: document.name,
+      path_display: document.path,
+      ...classification,
+    });
+    const changed = classification.status !== document.status
+      || classification.reason !== document.reason
+      || classification.inferredDate !== document.inferredDate
+      || classification.documentType !== document.documentType;
+    if (!changed) return;
+
+    stats.total += 1;
+    if (classification.status === 'skipped_old') stats.skippedOld += 1;
+    if (classification.status === 'discovered') stats.discovered += 1;
+    if (classification.status === 'ignored') stats.ignored += 1;
+    operations.push({
+      updateOne: {
+        filter: { dropboxId: document.dropboxId, status: 'review' },
+        update: {
+          $set: {
+            status: classification.status,
+            reason: classification.reason,
+            inferredDate: classification.inferredDate,
+            documentType: classification.documentType,
+            eventId: revision.eventId,
+            revisionNumber: revision.revisionNumber,
+            revisionLabel: revision.revisionLabel,
+            revisionSeries: revision.revisionSeries,
+            revisionGroupKey: revision.revisionGroupKey,
+          },
+        },
+      },
+    });
+  });
+  if (operations.length) await DropboxDocument.bulkWrite(operations, { ordered: false });
+  return stats;
+};
+
 const reconcileDropboxRevisions = async () => {
   const documents = await DropboxDocument.find({
     status: { $in: ['discovered', 'review', 'superseded', 'imported'] },
@@ -174,6 +226,11 @@ export const runDropboxDiscoverySync = async () => {
         latestCursor = page.cursor || latestCursor;
         page = page.has_more ? await listDropboxFolder(accessToken, { cursor: latestCursor }) : null;
       }
+      const reclassified = await reclassifyStoredDropboxReviews();
+      stats.reclassified = reclassified.total;
+      stats.skippedOld += reclassified.skippedOld;
+      stats.discovered += reclassified.discovered;
+      stats.ignored += reclassified.ignored;
       await reconcileDropboxRevisions();
       integration.cursor = latestCursor;
       integration.lastSyncCompletedAt = new Date();

@@ -166,9 +166,13 @@ export const classifyDropboxEntry = (entry, { today = nyToday() } = {}) => {
     return { status: 'ignored', reason: 'Not a DOCX PO/Kitchen Menu', inferredDate: '', documentType: 'review' };
   }
   const inferredDate = inferDropboxPathDate(path);
-  const datePrefix = inferredDate || inferYearMonth(path);
+  const folderDatePrefix = inferYearMonth(path);
   const todayMonth = today.slice(0, 7);
-  if ((inferredDate && inferredDate < today) || (datePrefix.length === 7 && datePrefix < todayMonth) || (datePrefix.length === 4 && datePrefix < today.slice(0, 4))) {
+  if (
+    (inferredDate && inferredDate < today)
+    || (folderDatePrefix.length === 7 && folderDatePrefix < todayMonth)
+    || (folderDatePrefix.length === 4 && folderDatePrefix < today.slice(0, 4))
+  ) {
     return { status: 'skipped_old', reason: 'Before the current New York date', inferredDate, documentType: inferDropboxDocumentType(name) };
   }
   const documentType = inferDropboxDocumentType(`${path}/${name}`);

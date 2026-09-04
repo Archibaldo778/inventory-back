@@ -105,6 +105,18 @@ test('Dropbox discovery never queues files before the current New York date', ()
   assert.equal(classifyDropboxEntry(futureEntry, { today: '2026-09-04' }).status, 'discovered');
 });
 
+test('Dropbox discovery rejects legacy Caterease folders even when their filenames are ambiguous', () => {
+  const legacyEntry = {
+    '.tag': 'file',
+    id: 'id:legacy',
+    name: 'Lincoln Passed HDs and Small Plates[1].docx',
+    path_display: '/Proposals/2015/03 march/03 carlie/03-29-30-15 Lincoln Motor Company/Lincoln Passed HDs and Small Plates[1].docx',
+  };
+  const result = classifyDropboxEntry(legacyEntry, { today: '2026-09-04' });
+  assert.equal(result.status, 'skipped_old');
+  assert.equal(result.reason, 'Before the current New York date');
+});
+
 test('Dropbox discovery sends missing dates to review instead of importing', () => {
   const entry = {
     '.tag': 'file', id: 'id:review', name: 'PO.docx', path_display: '/Proposals/2026/September/George/Event/PO.docx',

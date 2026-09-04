@@ -7,6 +7,7 @@ import {
   inferDropboxDocumentType,
   inferDropboxEventId,
   inferDropboxEventTitle,
+  inferDropboxEventTitles,
   inferDropboxDocumentSeries,
   inferDropboxPathDate,
   inferDropboxRevision,
@@ -36,6 +37,21 @@ test('Dropbox filenames expose a clean event title and match by title plus date'
   }, [
     { _id: 'one', title: 'Other Event', date: '2026-09-05' },
     { _id: 'two', title: 'Merryl Tisch Dinner', date: '2026-09-05' },
+  ]);
+  assert.equal(match.status, 'matched');
+  assert.equal(match.event._id, 'two');
+});
+
+test('Dropbox documents match the event folder even when the filename is abbreviated', () => {
+  const document = {
+    name: '09-05-26 Merryl Tisch Dinner PO.docx',
+    path: '/Proposals/2026/September/Emily/09-05-26 James & Merryl Tisch Host a Dinner/Leadership File/09-05-26 Merryl Tisch Dinner PO.docx',
+    inferredDate: '2026-09-05',
+  };
+  assert.ok(inferDropboxEventTitles(document).includes('James & Merryl Tisch Host a Dinner'));
+  const match = findDropboxEventMatch(document, [
+    { _id: 'one', title: 'Other Event', date: '2026-09-05' },
+    { _id: 'two', title: 'James & Merryl Tisch Host a Dinner', date: '2026-09-05' },
   ]);
   assert.equal(match.status, 'matched');
   assert.equal(match.event._id, 'two');

@@ -71,6 +71,38 @@ const normalizedEventName = (value) => clean(value)
 const normalizedEventNumber = (value) => clean(value).toUpperCase().replace(/[^A-Z0-9]/g, '');
 const baseEventNumber = (value) => normalizedEventNumber(value).match(/^E\d+/)?.[0] || normalizedEventNumber(value);
 
+const GENERIC_PATH_SEGMENTS = new Set([
+  'proposals',
+  'proposal',
+  'leadership file',
+  'leadership files',
+  'documents',
+  'files',
+  'po',
+  'purchase order',
+  'purchase orders',
+  'km',
+  'kitchen menu',
+  'kitchen menus',
+]);
+
+export const inferDropboxEventTitles = (document = {}) => {
+  const path = clean(document?.path || document?.path_display || document?.path_lower);
+  const name = clean(document?.name) || path.split('/').filter(Boolean).at(-1) || '';
+  const candidates = [name, ...path.split('/').filter(Boolean).slice(0, -1).reverse()];
+  const seen = new Set();
+  return candidates.map((candidate) => inferDropboxEventTitle(candidate))
+    .map((candidate) => candidate.replace(/\s+/g, ' ').trim())
+    .filter((candidate) => {
+      const normalized = normalizedEventName(candidate);
+      if (!normalized || normalized.length < 4 || seen.has(normalized)) return false;
+      if (GENERIC_PATH_SEGMENTS.has(normalized)) return false;
+      if (/^(?:20\d{2}|\d{1,2}|january|february|march|april|may|june|july|august|september|october|november|december)$/.test(normalized)) return false;
+      seen.add(normalized);
+      return true;
+    });
+};
+
 export const findDropboxEventMatch = (document, events = []) => {
   const candidates = (Array.isArray(events) ? events : []).filter((event) => event?._id || event?.id);
   const eventId = normalizedEventNumber(document?.eventId);
@@ -84,16 +116,14 @@ export const findDropboxEventMatch = (document, events = []) => {
   }
 
   const date = clean(document?.inferredDate);
-  const title = normalizedEventName(inferDropboxEventTitle(document?.name));
+  const titles = inferDropboxEventTitles(document).map(normalizedEventName).filter(Boolean);
   const dated = candidates.filter((event) => clean(event?.date).slice(0, 10) === date);
-  const exact = dated.filter((event) => normalizedEventName(event?.title || event?.name) === title);
-  if (title && exact.length === 1) return { status: 'matched', event: exact[0], reason: 'name_date' };
-  const similar = title.length >= 6
-    ? dated.filter((event) => {
-      const candidate = normalizedEventName(event?.title || event?.name);
-      return candidate && (candidate.includes(title) || title.includes(candidate));
-    })
-    : [];
+  const exact = dated.filter((event) => titles.includes(normalizedEventName(event?.title || event?.name)));
+  if (titles.length && exact.length === 1) return { status: 'matched', event: exact[0], reason: 'name_date' };
+  const similar = dated.filter((event) => {
+    const candidate = normalizedEventName(event?.title || event?.name);
+    return candidate && titles.some((title) => title.length >= 6 && (candidate.includes(title) || title.includes(candidate)));
+  });
   if (similar.length === 1) return { status: 'matched', event: similar[0], reason: 'similar_name_date' };
   return {
     status: exact.length > 1 || similar.length > 1 ? 'ambiguous' : 'unmatched',

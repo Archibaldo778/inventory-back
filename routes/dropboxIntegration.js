@@ -470,7 +470,13 @@ const resolveDropboxTeamRoot = async (accessToken, account, configuredRootPath) 
   }
   const selected = existing.find((candidate) => candidate.hasCurrentYear) || existing[0];
   if (selected) {
-    return { namespaceId, homeNamespaceId, homePath, resolvedRootPath: selected.path };
+    return {
+      namespaceId,
+      homeNamespaceId,
+      homePath,
+      resolvedRootPath: selected.path,
+      scanRootPath: selected.hasCurrentYear ? joinDropboxPath(selected.path, currentYear) : selected.path,
+    };
   }
   throw Object.assign(
     new Error(`Dropbox Team Space folder was not found: ${configuredRootPath}${lastError?.message ? ` (${lastError.message})` : ''}`),
@@ -487,20 +493,32 @@ export const runDropboxDiscoverySync = async () => {
     integration.lastSyncError = '';
     await integration.save();
     try {
-      syncProgress = { processed: 0, pages: 0, startedAt: new Date() };
+      syncProgress = { processed: 0, pages: 0, phase: 'attaching', startedAt: new Date() };
+      // Do not make already indexed documents wait behind a potentially large
+      // recursive Dropbox listing. This also lets a retry repair attachments
+      // without downloading or rediscovering the files first.
+      const preexistingAttachments = integration.namespaceId
+        ? await attachDiscoveredDropboxDocuments(integration.namespaceId)
+        : { attached: 0, unchanged: 0, review: 0, failed: 0 };
+      syncProgress = {
+        ...syncProgress,
+        attached: preexistingAttachments.attached,
+        phase: 'connecting',
+      };
       const accessToken = await refreshDropboxAccessToken(decryptDropboxSecret(integration.refreshToken));
       const account = await getDropboxCurrentAccount(accessToken);
       const root = await resolveDropboxTeamRoot(accessToken, account, integration.rootPath);
       const rootChanged = String(integration.namespaceId || '') !== root.namespaceId
-        || String(integration.resolvedRootPath || '') !== root.resolvedRootPath;
+        || String(integration.resolvedRootPath || '') !== root.scanRootPath;
       integration.namespaceId = root.namespaceId;
       integration.homeNamespaceId = root.homeNamespaceId;
       integration.homePath = root.homePath;
-      integration.resolvedRootPath = root.resolvedRootPath;
+      integration.resolvedRootPath = root.scanRootPath;
       if (rootChanged) integration.cursor = '';
       await integration.save();
+      syncProgress = { ...syncProgress, phase: 'listing' };
       let page = await listDropboxFolder(accessToken, {
-        path: root.resolvedRootPath,
+        path: root.scanRootPath,
         cursor: integration.cursor || '',
         namespaceId: root.namespaceId,
       });
@@ -630,10 +648,10 @@ export const runDropboxDiscoverySync = async () => {
       stats.contentInspectionFailed = inspected.failed;
       await reconcileDropboxRevisions(root.namespaceId);
       const attachments = await attachDiscoveredDropboxDocuments(root.namespaceId);
-      stats.attached = directAttachments.attached + attachments.attached;
-      stats.attachmentUnchanged = directAttachments.unchanged + attachments.unchanged;
-      stats.attachmentReview = directAttachments.review + attachments.review;
-      stats.attachmentFailed = directAttachments.failed + attachments.failed;
+      stats.attached = preexistingAttachments.attached + directAttachments.attached + attachments.attached;
+      stats.attachmentUnchanged = preexistingAttachments.unchanged + directAttachments.unchanged + attachments.unchanged;
+      stats.attachmentReview = preexistingAttachments.review + directAttachments.review + attachments.review;
+      stats.attachmentFailed = preexistingAttachments.failed + directAttachments.failed + attachments.failed;
       integration.cursor = latestCursor;
       integration.lastSyncCompletedAt = new Date();
       integration.lastSyncSummary = stats;

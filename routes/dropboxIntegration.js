@@ -425,20 +425,41 @@ const resolveDropboxTeamRoot = async (accessToken, account, configuredRootPath) 
   const namespaceId = String(account?.root_info?.root_namespace_id || '');
   const homeNamespaceId = String(account?.root_info?.home_namespace_id || '');
   const homePath = String(account?.root_info?.home_path || '');
-  const candidates = [...new Set([
+  const duplicateRoots = [
     configuredRootPath,
-    homePath ? joinDropboxPath(homePath, configuredRootPath) : '',
-  ].filter(Boolean))];
+    ...Array.from({ length: 5 }, (_unused, index) => `${configuredRootPath} (${index + 1})`),
+  ];
+  const candidates = [...new Set(duplicateRoots.flatMap((path) => [
+    path,
+    homePath ? joinDropboxPath(homePath, path) : '',
+  ]).filter(Boolean))];
+  const currentYear = String(new Date().getUTCFullYear());
+  const existing = [];
   let lastError = null;
   for (const path of candidates) {
     try {
       const metadata = await getDropboxMetadata(accessToken, path, { namespaceId });
       if (metadata?.['.tag'] === 'folder') {
-        return { namespaceId, homeNamespaceId, homePath, resolvedRootPath: path };
+        let hasCurrentYear = false;
+        try {
+          const yearMetadata = await getDropboxMetadata(
+            accessToken,
+            joinDropboxPath(path, currentYear),
+            { namespaceId }
+          );
+          hasCurrentYear = yearMetadata?.['.tag'] === 'folder';
+        } catch {
+          hasCurrentYear = false;
+        }
+        existing.push({ path, hasCurrentYear });
       }
     } catch (error) {
       lastError = error;
     }
+  }
+  const selected = existing.find((candidate) => candidate.hasCurrentYear) || existing[0];
+  if (selected) {
+    return { namespaceId, homeNamespaceId, homePath, resolvedRootPath: selected.path };
   }
   throw Object.assign(
     new Error(`Dropbox Team Space folder was not found: ${configuredRootPath}${lastError?.message ? ` (${lastError.message})` : ''}`),

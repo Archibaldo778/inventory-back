@@ -55,6 +55,17 @@ const reclassifyStoredDropboxReviews = async (namespaceId) => {
   const operations = [];
   documents.forEach((document) => {
     if (document.contentInspectedRev && String(document.contentInspectedRev) === String(document.rev || '')) {
+      if (document.documentType === 'review') {
+        stats.total += 1;
+        stats.ignored += 1;
+        operations.push({
+          updateOne: {
+            filter: { dropboxId: document.dropboxId, status: 'review' },
+            update: { $set: { status: 'ignored', reason: 'DOCX content is not a PO/KPO or KM/AKM' } },
+          },
+        });
+        return;
+      }
       if (
         document.inferredDate >= nyToday()
         && ['po', 'kitchen_menu'].includes(document.documentType)
@@ -297,7 +308,7 @@ const syncDropboxBarItems = async (event) => {
 const attachDiscoveredDropboxDocuments = async (namespaceId) => {
   const documents = await DropboxDocument.find({ namespaceId, status: 'discovered' })
     .sort({ inferredDate: 1, serverModifiedAt: 1 })
-    .limit(200)
+    .limit(500)
     .lean();
   if (!documents.length) return { attached: 0, unchanged: 0, review: 0, failed: 0 };
 
@@ -612,16 +623,17 @@ export const runDropboxDiscoverySync = async () => {
       stats.skippedOld += reclassified.skippedOld;
       stats.discovered += reclassified.discovered;
       stats.ignored += reclassified.ignored;
+      const directAttachments = await attachDiscoveredDropboxDocuments(root.namespaceId);
       const inspected = await inspectDropboxDocumentContents(accessToken, root.namespaceId);
       stats.contentInspected = inspected.inspected;
       stats.contentEnriched = inspected.enriched;
       stats.contentInspectionFailed = inspected.failed;
       await reconcileDropboxRevisions(root.namespaceId);
       const attachments = await attachDiscoveredDropboxDocuments(root.namespaceId);
-      stats.attached = attachments.attached;
-      stats.attachmentUnchanged = attachments.unchanged;
-      stats.attachmentReview = attachments.review;
-      stats.attachmentFailed = attachments.failed;
+      stats.attached = directAttachments.attached + attachments.attached;
+      stats.attachmentUnchanged = directAttachments.unchanged + attachments.unchanged;
+      stats.attachmentReview = directAttachments.review + attachments.review;
+      stats.attachmentFailed = directAttachments.failed + attachments.failed;
       integration.cursor = latestCursor;
       integration.lastSyncCompletedAt = new Date();
       integration.lastSyncSummary = stats;

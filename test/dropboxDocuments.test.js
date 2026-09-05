@@ -20,6 +20,23 @@ test('Dropbox document names identify PO and Kitchen Menu files conservatively',
   assert.equal(inferDropboxDocumentType('Event documents.docx'), 'review');
 });
 
+test('Dropbox document names recognize Caterease KPO and AKM variants', () => {
+  assert.equal(inferDropboxDocumentType('09-05-26 Event Day 2 KPO.docx'), 'po');
+  assert.equal(inferDropboxDocumentType('09-05-26 Event Day 2 AKM.docx'), 'kitchen_menu');
+  assert.equal(inferDropboxEventTitle('09-05-26 Event Day 2 KPO.docx'), 'Event Day 2');
+  assert.equal(inferDropboxEventTitle('09-05-26 Event Day 2 AKM.docx'), 'Event Day 2');
+});
+
+test('dated invoices and administrative DOCX files are ignored instead of sent to review', () => {
+  const result = classifyDropboxEntry({
+    '.tag': 'file',
+    name: 'Cocktail Invoice.docx',
+    path_display: '/Proposals (1)/2026/09 September/09 Olivier/09-10-26 Event/Cocktail Invoice.docx',
+  }, { today: '2026-09-05' });
+  assert.equal(result.status, 'ignored');
+  assert.equal(result.documentType, 'review');
+});
+
 test('Dropbox revision metadata recognizes event ids and common revision labels', () => {
   assert.equal(inferDropboxEventId('/E22825 - S62566/Kitchen Menu Revision 3.docx'), 'E22825');
   assert.deepEqual(inferDropboxRevision('Kitchen Menu REV-02.docx'), { number: 2, label: 'Revision 2' });

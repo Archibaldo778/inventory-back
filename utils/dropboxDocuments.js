@@ -6,8 +6,8 @@ export const nyToday = (now = new Date()) => new Intl.DateTimeFormat('en-CA', {
 
 export const inferDropboxDocumentType = (name) => {
   const normalized = clean(name).replace(/[_-]+/g, ' ');
-  const kitchen = /\b(?:kitchen\s*menu|km)\b/i.test(normalized);
-  const po = /\b(?:purchase\s*order|pack\s*out|packout|po)\b/i.test(normalized);
+  const kitchen = /\b(?:kitchen\s*menu|a?km)\b/i.test(normalized);
+  const po = /\b(?:purchase\s*order|pack\s*out|packout|k?po)\b/i.test(normalized);
   if (kitchen && !po) return 'kitchen_menu';
   if (po && !kitchen) return 'po';
   return 'review';
@@ -40,7 +40,7 @@ export const inferDropboxDocumentSeries = (value) => clean(value)
   .replace(/\bE\s*[-_ ]?\s*\d{2,}(?:\s*[-_ ]\s*S\s*[-_ ]?\s*\d{2,})?\b/gi, ' event ')
   .replace(/\b20\d{2}[-_.\/]\d{1,2}[-_.\/]\d{1,2}\b/g, ' date ')
   .replace(/\b\d{1,2}[-_.]\d{1,2}[-_.](?:20\d{2}|\d{2})\b/g, ' date ')
-  .replace(/\b(?:kitchen\s*menu|km|purchase\s*order|pack\s*out|packout|po)\b/g, ' document ')
+  .replace(/\b(?:kitchen\s*menu|a?km|purchase\s*order|pack\s*out|packout|k?po)\b/g, ' document ')
   .split('/')
   .map((segment) => segment.replace(/[^a-z0-9]+/g, ' ').trim())
   .filter(Boolean)
@@ -53,7 +53,7 @@ export const inferDropboxEventTitle = (value) => clean(value)
   .replace(/\bE\s*[-_ ]?\s*\d{2,}(?:\s*[-_ ]\s*S\s*[-_ ]?\s*\d{2,})?\b/gi, ' ')
   .replace(/\b(?:revision|rev(?:ision)?|version|ver)\s*[-_.#:]?\s*\d{1,4}\b/gi, ' ')
   .replace(/(?:^|[\s._-])v\s*[-_.#:]?\s*\d{1,4}(?=$|[\s._-])/gi, ' ')
-  .replace(/\b(?:kitchen\s*menu|km|purchase\s*order|pack\s*out|packout|po)\b/gi, ' ')
+  .replace(/\b(?:kitchen\s*menu|a?km|purchase\s*order|pack\s*out|packout|k?po)\b/gi, ' ')
   .replace(/[_-]+/g, ' ')
   .replace(/\s+/g, ' ')
   .replace(/\s+(?:beverage|staff\s+holding|vendor\s+meal|dinner\s+kitchen|hds\s+(?:and|&)\s+station)\s*$/i, '')
@@ -272,8 +272,10 @@ export const classifyDropboxEntry = (entry, { today = nyToday() } = {}) => {
   if (!inferredDate && !folderDatePrefix) {
     return { status: 'ignored', reason: 'Outside the dated Caterease folder structure', inferredDate: '', documentType };
   }
+  if (documentType === 'review') {
+    return { status: 'ignored', reason: 'DOCX is not named as a PO/KPO or KM/AKM', inferredDate, documentType };
+  }
   if (!inferredDate) return { status: 'review', reason: 'Event date could not be confirmed from the path or filename', inferredDate: '', documentType };
-  if (documentType === 'review') return { status: 'review', reason: 'Document type could not be confirmed from the filename', inferredDate, documentType };
   const revision = getDropboxRevisionMetadata({ ...entry, documentType, inferredDate });
   return { status: 'discovered', reason: 'Ready for safe matching', inferredDate, documentType, ...revision };
 };

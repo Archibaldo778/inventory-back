@@ -11,7 +11,7 @@ import { sendApiError } from '../utils/apiErrors.js';
 
 const router = Router();
 const MAX_PACKOUT_TYPES = 1000;
-const TAPE_LIBRARY_PATTERN = /^__nexel_tape_library__(?::|$)/i;
+const TAPE_LIBRARY_PATTERN = /^__event_board_tape_library__(?::|$)/i;
 
 const actorName = (auth) => String(auth?.username || auth?.email || '').trim();
 const isObjectId = (value) => mongoose.isValidObjectId(String(value || '').trim());

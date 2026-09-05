@@ -70,7 +70,7 @@ export const ensureDecorInventoryCodes = async () => {
   if (backfillPromise) return backfillPromise;
   backfillPromise = (async () => {
     const missing = await Product.find({
-      category: { $not: /^__nexel_tape_library__(?::|$)/i },
+      category: { $not: /^__event_board_tape_library__(?::|$)/i },
       $or: [
         { inventoryCode: { $exists: false } },
         { inventoryCode: null },

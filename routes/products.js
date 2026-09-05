@@ -30,7 +30,7 @@ cloudinary.config({
 
 const router = Router();
 const CACHE_GROUP = 'products';
-const TAPE_LIBRARY_PREFIX = '__nexel_tape_library__';
+const TAPE_LIBRARY_PREFIX = '__event_board_tape_library__';
 const DEFAULT_TAPE_CATEGORY_KEY = 'tape-swatches-colors';
 const DEFAULT_INVENTORY_FOLDER = process.env.CLOUDINARY_INVENTORY_FOLDER || 'inventory';
 const DEFAULT_TAPE_FOLDER_ROOT = process.env.CLOUDINARY_TAPE_FOLDER_ROOT || 'tapes';

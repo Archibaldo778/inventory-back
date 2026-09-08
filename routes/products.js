@@ -31,6 +31,7 @@ cloudinary.config({
 const router = Router();
 const CACHE_GROUP = 'products';
 const TAPE_LIBRARY_PREFIX = '__event_board_tape_library__';
+const TAPE_LIBRARY_PATTERN = /^__event_board_tape_library__(?::|$)/i;
 const DEFAULT_TAPE_CATEGORY_KEY = 'tape-swatches-colors';
 const DEFAULT_INVENTORY_FOLDER = process.env.CLOUDINARY_INVENTORY_FOLDER || 'inventory';
 const DEFAULT_TAPE_FOLDER_ROOT = process.env.CLOUDINARY_TAPE_FOLDER_ROOT || 'tapes';
@@ -454,10 +455,14 @@ router.post('/', upload.single('image'), async (req, res) => {
 });
 
 // READ all
-router.get('/', cacheWithGroup('5 minutes', CACHE_GROUP), async (_req, res) => {
+router.get('/', cacheWithGroup('5 minutes', CACHE_GROUP), async (req, res) => {
   try {
     await ensureDecorInventoryCodes();
-    const items = await Product.find().sort({ createdAt: -1 });
+    const includeTapeLibrary = String(req.query?.includeTapeLibrary || '') === '1';
+    const query = includeTapeLibrary
+      ? {}
+      : { category: { $not: TAPE_LIBRARY_PATTERN } };
+    const items = await Product.find(query).sort({ createdAt: -1 });
     const mapped = items.map((d) => ({ ...d.toObject(), qty: d.quantity }));
     res.json(mapped);
   } catch (err) {

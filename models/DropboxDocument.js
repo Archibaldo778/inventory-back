@@ -23,6 +23,7 @@ const dropboxDocumentSchema = new mongoose.Schema({
   contentEventDate: { type: String, trim: true, default: '' },
   contentDocumentType: { type: String, enum: ['po', 'kitchen_menu', 'review'], default: 'review' },
   contentInspectedRev: { type: String, trim: true, default: '' },
+  contentParserVersion: { type: Number, default: 0 },
   contentInspectedAt: { type: Date, default: null },
   contentInspectionError: { type: String, trim: true, default: '' },
   kitchenItems: { type: [mongoose.Schema.Types.Mixed], default: undefined },

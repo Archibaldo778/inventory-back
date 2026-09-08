@@ -2,9 +2,36 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import JSZip from 'jszip';
 import {
+  parseDropboxKitchenBarItems,
   parseDropboxDocxMetadataText,
   readDropboxDocxMetadata,
 } from '../utils/dropboxDocxMetadata.js';
+
+test('Kitchen Menu treats mixed-case cocktail recipes as one cocktail, not alcohol inventory', () => {
+  const result = parseDropboxKitchenBarItems([
+    'BEVERAGE',
+    'SPECIALTY COCKTAILS',
+    'Hibiscus Honey Margarita',
+    'Tequila, Hibiscus Flower, Fresh Lime Juice, Orange Blossom Honey',
+  ].join('\n'));
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0].name, 'Hibiscus Honey Margarita');
+  assert.equal(result[0].preparedBeverageType, 'cocktail');
+  assert.equal(result[0].returnRequired, false);
+  assert.match(result[0].notes, /Tequila, Hibiscus Flower/);
+});
+
+test('Kitchen Menu ignores recipe and service comments containing spirit names', () => {
+  const result = parseDropboxKitchenBarItems([
+    'BEVERAGE',
+    'SPECIALTY COCKTAILS',
+    'Tequila, Hibiscus Flower, Fresh Lime Juice, Orange Blossom Honey',
+    'Please pour vodka into the labeled batch container',
+  ].join('\n'));
+
+  assert.deepEqual(result, []);
+});
 
 test('Dropbox DOCX metadata identifies a Caterease Kitchen Menu', () => {
   assert.deepEqual(parseDropboxDocxMetadataText([

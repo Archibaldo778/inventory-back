@@ -10,6 +10,7 @@ import { clearApiCacheGroups } from '../utils/apiCache.js';
 import { mergeEventDocumentHistory } from '../utils/documentImportAudit.js';
 import { readDropboxDocxMetadata } from '../utils/dropboxDocxMetadata.js';
 import {
+  combineImportedBarItems,
   mergePackoutDocumentItems,
   preservePackoutOperationalState,
   schedulePreparedItemsForEvent,
@@ -36,6 +37,8 @@ import {
   getDropboxRevisionMetadata,
   nyToday,
 } from '../utils/dropboxDocuments.js';
+
+const DROPBOX_CONTENT_PARSER_VERSION = 2;
 
 const router = Router();
 const syncRateLimit = createMemoryRateLimiter({ windowMs: 10 * 60 * 1000, max: 8, message: 'Too many Dropbox sync requests' });
@@ -129,7 +132,10 @@ const inspectDropboxDocumentContents = async (accessToken, namespaceId) => {
   const documents = await DropboxDocument.find({
     namespaceId,
     status: { $in: ['discovered', 'review', 'imported'] },
-    $expr: { $ne: ['$contentInspectedRev', '$rev'] },
+    $or: [
+      { $expr: { $ne: ['$contentInspectedRev', '$rev'] } },
+      { contentParserVersion: { $ne: DROPBOX_CONTENT_PARSER_VERSION } },
+    ],
   })
     .sort({ serverModifiedAt: -1 })
     .limit(100)
@@ -177,6 +183,7 @@ const inspectDropboxDocumentContents = async (accessToken, namespaceId) => {
           contentEventDate: metadata.eventDate,
           contentDocumentType: metadata.documentType,
           contentInspectedRev: String(document.rev || ''),
+          contentParserVersion: DROPBOX_CONTENT_PARSER_VERSION,
           contentInspectedAt: new Date(),
           contentInspectionError: '',
           kitchenItems: metadata.kitchenItems,
@@ -255,15 +262,16 @@ const syncDropboxBarItems = async (event) => {
   const rawItems = sourceDocuments.flatMap((document) => (
     Array.isArray(document?.barItems) ? document.barItems : []
   ));
-  if (!rawItems.length) return false;
 
   const documentTypes = [...new Set(sourceDocuments
-    .filter((document) => Array.isArray(document?.barItems) && document.barItems.length)
     .map((document) => String(document?.type || ''))
     .filter(Boolean))];
   const guestCount = dashboardEventGuestCount(event);
-  const importedItems = await normalizePackoutItems(rawItems, { allowFinancials: false, guestCount });
+  const importedItems = combineImportedBarItems(
+    await normalizePackoutItems(rawItems, { allowFinancials: false, guestCount })
+  );
   let barEvent = await BarEvent.findOne({ linkedEventId: event._id });
+  if (!rawItems.length && !barEvent) return false;
   if (!barEvent) {
     barEvent = new BarEvent({
       linkedEventId: event._id,
@@ -543,7 +551,7 @@ export const runDropboxDiscoverySync = async () => {
           .filter(({ dropboxId }) => dropboxId);
         const existingRows = await DropboxDocument.find({
           dropboxId: { $in: entries.map(({ dropboxId }) => dropboxId) },
-        }).select('dropboxId rev contentHash status importedAt inferredDate documentType eventId revisionGroupKey contentEventId contentEventDate contentDocumentType contentInspectedRev contentInspectionError').lean();
+        }).select('dropboxId rev contentHash status importedAt inferredDate documentType eventId revisionGroupKey contentEventId contentEventDate contentDocumentType contentInspectedRev contentParserVersion contentInspectionError').lean();
         const existingById = new Map(existingRows.map((row) => [String(row.dropboxId), row]));
         const operations = [];
         for (const { entry, dropboxId } of entries) {
@@ -552,6 +560,7 @@ export const runDropboxDiscoverySync = async () => {
           const existing = existingById.get(dropboxId);
           const contentCurrent = Boolean(existing)
             && String(existing.contentInspectedRev || '') === String(entry.rev || '')
+            && Number(existing.contentParserVersion || 0) === DROPBOX_CONTENT_PARSER_VERSION
             && !existing.contentInspectionError;
           const classification = contentCurrent ? {
             ...pathClassification,

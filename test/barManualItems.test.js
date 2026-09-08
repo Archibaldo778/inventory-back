@@ -1,10 +1,23 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { barItemIdentityKey, mergeManualItemsWithPackout, mergePackoutDocumentItems, preservePackoutOperationalState, schedulePreparedItemsForEvent } from '../utils/barManualItems.js';
+import { barItemIdentityKey, combineImportedBarItems, mergeManualItemsWithPackout, mergePackoutDocumentItems, preservePackoutOperationalState, schedulePreparedItemsForEvent } from '../utils/barManualItems.js';
 
 test('manual liquor and cocktails keep stable catalog identities', () => {
   assert.equal(barItemIdentityKey({ beverageItemId: 'ABC123', name: 'Vodka' }), 'beverage:abc123');
   assert.equal(barItemIdentityKey({ cocktailRecipeKey: 'house-martini', name: 'Martini' }), 'cocktail:house-martini');
+});
+
+test('multiple event documents combine duplicate alcohol and keep one cocktail batch', () => {
+  const result = combineImportedBarItems([
+    { name: 'Tito’s Vodka', beverageItemId: 'a1', scope: 'alcohol', sentQty: 2 },
+    { name: 'Tito’s Vodka', beverageItemId: 'a1', scope: 'alcohol', sentQty: 3 },
+    { name: 'Hibiscus Honey Margarita', cocktailRecipeKey: 'hibiscus-honey', preparedBeverageType: 'cocktail', sentQty: 130 },
+    { name: 'Hibiscus Honey Margarita', cocktailRecipeKey: 'hibiscus-honey', preparedBeverageType: 'cocktail', sentQty: 130 },
+  ]);
+
+  assert.equal(result.length, 2);
+  assert.equal(result[0].sentQty, 5);
+  assert.equal(result[1].sentQty, 130);
 });
 
 test('packout merge preserves manual items, drops their duplicates, and replaces old imported rows', () => {

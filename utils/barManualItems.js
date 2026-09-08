@@ -24,6 +24,37 @@ export const barItemIdentityKey = (item) => {
   return name ? `${String(item?.scope || 'item').toLowerCase()}:${name}` : '';
 };
 
+export const combineImportedBarItems = (items) => {
+  const combined = new Map();
+  (Array.isArray(items) ? items : []).forEach((source) => {
+    const item = typeof source?.toObject === 'function' ? source.toObject() : { ...source };
+    const key = barItemIdentityKey(item) || `row:${combined.size}`;
+    const current = combined.get(key);
+    if (!current) {
+      combined.set(key, item);
+      return;
+    }
+    // A prepared cocktail describes one production batch for the event even
+    // when the same menu was exported for several rooms.
+    if (
+      item.preparedBeverageType
+      || current.preparedBeverageType
+      || getPreparedBeverageType(item)
+      || getPreparedBeverageType(current)
+    ) return;
+    const currentPending = current.sentQtyPending === true;
+    const itemPending = item.sentQtyPending === true;
+    if (!currentPending && !itemPending) {
+      current.sentQty = Math.max(0, Number(current.sentQty) || 0) + Math.max(0, Number(item.sentQty) || 0);
+      current.sentQtyText = String(current.sentQty);
+    }
+    current.sentQtyPending = currentPending || itemPending;
+    const notes = [...new Set([current.notes, item.notes].map((value) => String(value || '').trim()).filter(Boolean))];
+    current.notes = notes.join(' · ').slice(0, 1000);
+  });
+  return [...combined.values()];
+};
+
 const barItemNameKey = (item) => normalizedName(item?.name);
 
 export const mergeManualItemsWithPackout = (existingItems, importedItems) => {

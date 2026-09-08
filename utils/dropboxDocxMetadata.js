@@ -72,6 +72,16 @@ const TABLE_HEADER_RE = /^(?:QTY|ITEM|COMMENT|LABEL(?:\s+\(.*\))?)$/i;
 const NON_DISH_RE = /^(?:choice\s+of|included|requires?\b|pack\b|same\b.*\bas\s+guests?\b|option\s+[a-z]\b|chef(?:'|’)?s\s+choice\b|silent\s+vegetarian\s+option\b|\$?\d+(?:\.\d+)?\s*(?:pp)?\s*supplement\b|supplement\b)/i;
 const DIETARY_TOKEN_RE = /\b(?:GF|DF|NF|V|VG|VEGAN|VEGETARIAN)\b/gi;
 const ALCOHOL_RE = /\b(?:absinthe|amaretto|amaro|aperol|beer|bitters?|bourbon|brandy|campari|champagne|chartreuse|cider|cognac|cointreau|gin|liqueur|mezcal|prosecco|rum|rye|sake|sancerre|scotch|sherry|tequila|vermouth|vodka|whisk(?:e)?y|wine)\b/i;
+const RECIPE_COMPONENT_RE = /\b(?:juice|syrup|honey|flower|puree|purée|water|soda|lime|lemon|orange|grapefruit|mint|basil|cucumber|garnish|ice|salt|sugar|cordial|shr[u]?b|nectar)\b/i;
+const RECIPE_INSTRUCTION_RE = /^(?:add|batch|build|combine|do not|garnish|mix|note|please|pour|serve|shake|stir|strain|top|use)\b/i;
+
+const isRecipeDetailLine = (value) => {
+  const line = clean(value);
+  if (!line) return false;
+  const commaParts = line.split(',').map(clean).filter(Boolean);
+  return RECIPE_INSTRUCTION_RE.test(line)
+    || (commaParts.length >= 3 && RECIPE_COMPONENT_RE.test(line));
+};
 
 const uppercaseHeading = (value) => {
   const text = clean(value);
@@ -158,8 +168,8 @@ export const parseDropboxKitchenBarItems = (text) => {
     }
     if (/^(?:QTY|ITEM|COMMENT|LABEL|BEVERAGE|MENU|STAFF|GLASS|GARNISH|ICE|WATER|JUICE|SODA)\b/i.test(line)) continue;
     const next = lines[index + 1] || '';
-    const ingredientList = next.includes(',') && !uppercaseHeading(next);
-    if (preparedType && uppercaseHeading(line) && ingredientList) {
+    const ingredientList = isRecipeDetailLine(next);
+    if (preparedType && !isRecipeDetailLine(line) && ingredientList) {
       const key = `prepared:${normalizeKitchenName(line)}`;
       if (!seen.has(key)) {
         seen.add(key);
@@ -179,6 +189,9 @@ export const parseDropboxKitchenBarItems = (text) => {
       index += 1;
       continue;
     }
+    // A recipe or service note can contain a spirit name, but it is not a
+    // bottle/inventory row by itself.
+    if (isRecipeDetailLine(line)) continue;
     if (ALCOHOL_RE.test(line) && !/^(?:SPECIALTY|ALSO AVAILABLE|SPIRIT|BAR)\b/i.test(line)) {
       const key = `alcohol:${normalizeKitchenName(line)}`;
       if (seen.has(key)) continue;

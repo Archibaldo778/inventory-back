@@ -114,6 +114,14 @@ export const resolveProductMutationGuard = (req) => {
 };
 const requireProductMutationAccess = requireMethodGuards(resolveProductMutationGuard);
 
+export const resolveProductWorkspaceGuard = (req) => {
+  const method = String(req.method || '').toUpperCase();
+  const requestPath = String(req.path || '');
+  if (['GET', 'HEAD'].includes(method) && /^\/code\/[^/]+\/?$/i.test(requestPath)) return null;
+  return requireWorkspaceAccess;
+};
+const requireProductWorkspaceAccess = requireMethodGuards(resolveProductWorkspaceGuard);
+
 export const resolveUsersGuard = (req) => {
   const method = String(req.method || '').toUpperCase();
   if (['GET', 'HEAD'].includes(method)) {
@@ -440,7 +448,7 @@ import catereaseIntegrationRoutes, { runCatereaseFileSync } from './routes/cater
 import { getCatereaseConfig } from './utils/catereaseApi.js';
 
 app.use('/api/auth', authRoutes);
-app.use('/api/products', requireAuth, requireWorkspaceAccess, requireProductMutationAccess, productRoutes);
+app.use('/api/products', requireAuth, requireProductWorkspaceAccess, requireProductMutationAccess, productRoutes);
 app.use('/api/users', requireAuth, requireUsersAccess, userRoutes);
 app.use('/users', requireAuth, requireUsersAccess, userRoutes);
 app.use('/api/events', requireAuth, requireWorkspaceAccess, eventRoutes);

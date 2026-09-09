@@ -35,7 +35,7 @@ test('a counted PO row overrides a pending KM row for the same beverage', () => 
 test('an explicit PO cocktail count overrides the automatic KM placeholder', () => {
   const result = combineImportedBarItems([
     { name: 'Orange Blossom', cocktailRecipeKey: 'orange-blossom', preparedBeverageType: 'cocktail', cocktailServingsAuto: true, sentQty: 0 },
-    { name: 'Orange Blossom', cocktailRecipeKey: 'orange-blossom', preparedBeverageType: 'cocktail', cocktailServingsAuto: false, sentQty: 150 },
+    { name: 'Orange Blossom', preparedBeverageType: 'cocktail', cocktailServingsAuto: false, sentQty: 150 },
   ]);
 
   assert.equal(result.length, 1);

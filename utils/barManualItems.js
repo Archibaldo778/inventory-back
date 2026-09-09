@@ -26,9 +26,17 @@ export const barItemIdentityKey = (item) => {
 
 export const combineImportedBarItems = (items) => {
   const combined = new Map();
+  const preparedNameKeys = new Map();
   (Array.isArray(items) ? items : []).forEach((source) => {
     const item = typeof source?.toObject === 'function' ? source.toObject() : { ...source };
-    const key = barItemIdentityKey(item) || `row:${combined.size}`;
+    let key = barItemIdentityKey(item) || `row:${combined.size}`;
+    const preparedType = item.preparedBeverageType || getPreparedBeverageType(item);
+    const preparedName = preparedType ? normalizedName(item?.name) : '';
+    if (preparedName) {
+      const existingPreparedKey = preparedNameKeys.get(preparedName);
+      if (existingPreparedKey) key = existingPreparedKey;
+      else preparedNameKeys.set(preparedName, key);
+    }
     const current = combined.get(key);
     if (!current) {
       combined.set(key, item);
@@ -37,7 +45,7 @@ export const combineImportedBarItems = (items) => {
     // A prepared cocktail describes one production batch for the event even
     // when the same menu was exported for several rooms.
     if (
-      item.preparedBeverageType
+      preparedType
       || current.preparedBeverageType
       || getPreparedBeverageType(item)
       || getPreparedBeverageType(current)

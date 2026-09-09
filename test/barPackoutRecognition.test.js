@@ -107,6 +107,30 @@ test('Ranch Water remains a prepared cocktail instead of being filtered as water
   assert.equal(result.items[0].returnRequired, false);
 });
 
+test('SPECIALTY BEVERAGES keeps explicit cocktail counts but excludes shaker equipment', () => {
+  const result = parseRecognizedPackout({
+    tables: [{
+      headerRows: [['Name', 'Qty', 'Notes/Comments', 'Delivered', 'Returned']],
+      bodyRows: [
+        ['SPECIALTY BEVERAGES', '', '', '', ''],
+        ['MOMENT', '200', '', '', ''],
+        ['ICE: Custom cube', '', '', '', ''],
+        ['GARNISH: White Flower', '200', '', '', ''],
+        ['IGNITE', '150', '', '', ''],
+        ['Cocktail Shakers', '2', '', '', ''],
+        ['Silver Skewers', '150', '', '', ''],
+        ['Pink Glitter', '1', '', '', ''],
+      ],
+    }],
+  });
+  assert.equal(result.items.length, 2);
+  assert.equal(result.items[0].name, 'MOMENT');
+  assert.equal(result.items[0].quantity, 200);
+  assert.equal(result.items[0].preparedBeverageType, 'cocktail');
+  assert.equal(result.items[1].name, 'IGNITE');
+  assert.equal(result.items[1].quantity, 150);
+});
+
 test('equipment containing wine champagne or rose words is excluded from captain returns', () => {
   const result = parseRecognizedPackout({
     tables: [{

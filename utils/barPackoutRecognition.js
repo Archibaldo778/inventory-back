@@ -134,7 +134,9 @@ const parseRows = (rows, startSection = '', startScope = 'review', startIndex = 
       columns.returned >= 0 ? cells[columns.returned] : '',
     ].filter((entry) => cleanText(entry));
     const classified = classifyRecognizedSection(name);
-    if (otherValues.length === 0 && (classified !== 'review' || isUppercaseSection(name))) {
+    const isPreparedRecipeDetail = /\b(?:cocktails?|mocktails?|specialty\s+beverages?)\b/i.test(currentSection)
+      && /^(?:ice|garnish|glass|note|instructions?)\s*:/i.test(name);
+    if (!isPreparedRecipeDetail && otherValues.length === 0 && (classified !== 'review' || isUppercaseSection(name))) {
       currentSection = name;
       currentScope = classified;
       sections.push({ name, scope: classified });

@@ -10,7 +10,7 @@ export const isFoodMenuItem = (item = {}) => (
   || FOOD_MENU_SECTION_PATTERN.test(String(item?.section || '').trim())
 );
 const isPreparedBeverageSupportRow = (item = {}) => (
-  /\b(?:garnish|ice|water|cups?|glassware|napkins?|straws?|mixers?|juices?|sodas?)\b/i
+  /\b(?:garnish|ice|water|cups?|glassware|napkins?|straws?|shakers?|skewers?|glitter|mixers?|juices?|sodas?)\b/i
     .test(String(item?.name || '').trim())
 );
 
@@ -19,9 +19,9 @@ export const getPreparedBeverageType = (item = {}) => {
   if (isFoodMenuItem(item)) return '';
   const explicitType = /^\s*mocktails?\s*$/i.test(section)
     ? 'mocktail'
-    : (/^\s*(?:specialty\s+)?cocktails?\s*$/i.test(section) ? 'cocktail' : '');
+    : (/^\s*(?:(?:specialty\s+)?cocktails?|specialty\s+beverages?)\s*$/i.test(section) ? 'cocktail' : '');
   if (explicitType) {
-    if (/\b(?:garnish|ice|cups?|glassware|napkins?|straws?|mixers?|juices?|sodas?)\b/i.test(String(item?.name || '').trim())) return '';
+    if (/\b(?:garnish|ice|cups?|glassware|napkins?|straws?|shakers?|skewers?|glitter|mixers?|juices?|sodas?)\b/i.test(String(item?.name || '').trim())) return '';
     return explicitType;
   }
   if (String(item?.scope || '') === 'alcohol') return '';

@@ -360,7 +360,19 @@ export const runCatereaseFileSync = async () => {
     integration.lastSyncStartedAt = new Date();
     integration.lastSyncError = '';
     await integration.save();
-    const stats = { eventsSeen: 0, eventsWithoutCatereaseId: 0, filesSeen: 0, imported: 0, added: 0, updated: 0, unchanged: 0, ignored: 0, deleted: 0, failed: 0 };
+    const stats = {
+      eventsSeen: 0,
+      eventsWithoutCatereaseId: 0,
+      filesSeen: 0,
+      imported: 0,
+      added: 0,
+      updated: 0,
+      unchanged: 0,
+      ignored: 0,
+      deleted: 0,
+      failed: 0,
+      errorSamples: [],
+    };
     try {
       const events = await Event.find({ date: { $gte: nyToday() }, status: { $ne: 'deleted' } })
         .select('externalId title date client managerId meta documents documentHistory')
@@ -378,6 +390,14 @@ export const runCatereaseFileSync = async () => {
           await syncOneEvent(event, eventId, stats);
         } catch (error) {
           stats.failed += 1;
+          if (stats.errorSamples.length < 12) {
+            stats.errorSamples.push({
+              eventId,
+              title: String(event.title || ''),
+              status: Number(error?.statusCode) || null,
+              message: String(error?.message || 'Caterease request failed').slice(0, 300),
+            });
+          }
           console.error(`Caterease file sync failed for ${eventId}:`, error?.message || error);
         }
       }

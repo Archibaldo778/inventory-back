@@ -181,6 +181,7 @@ router.post('/:id/scan', async (req, res) => {
         productId: product._id,
         inventoryCode: product.inventoryCode,
         source: 'inventory',
+        inventoryType: product.inventoryType === 'disposable' ? 'disposable' : 'decor',
         name: product.name,
         image: product.image || product.imageUrl || product.images?.[0] || '',
         category: product.category || '',

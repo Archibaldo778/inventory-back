@@ -5,6 +5,7 @@ const decorPackoutItemSchema = new mongoose.Schema(
     productId: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', default: null },
     inventoryCode: { type: String, trim: true, uppercase: true, default: '' },
     source: { type: String, enum: ['inventory', 'event'], default: 'inventory' },
+    inventoryType: { type: String, enum: ['decor', 'disposable'], default: 'decor' },
     name: { type: String, required: true, trim: true },
     image: { type: String, trim: true, default: '' },
     category: { type: String, trim: true, default: '' },

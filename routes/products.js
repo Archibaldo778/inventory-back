@@ -364,8 +364,7 @@ const buildSizePayload = (body, { forUpdate = false } = {}) => {
   return { hasAnyInput: true, payload };
 };
 
-// CREATE
-router.post('/', upload.single('image'), async (req, res) => {
+const createProduct = async (req, res, inventoryType = 'decor') => {
   let uploadedImage = '';
   try {
     const {
@@ -388,7 +387,10 @@ router.post('/', upload.single('image'), async (req, res) => {
       return res.status(400).json(INVALID_IMAGE_UPLOAD_RESPONSE);
     }
 
-    const categoryValue = String(category || '').trim() || 'Trays';
+    const requestedCategory = String(category || '').trim();
+    const categoryValue = inventoryType === 'disposable' && normalizeTapeCategoryKey(requestedCategory)
+      ? 'Disposable'
+      : (requestedCategory || (inventoryType === 'disposable' ? 'Disposable' : 'Trays'));
     const inventoryCode = normalizeTapeCategoryKey(categoryValue)
       ? undefined
       : await allocateDecorInventoryCode();
@@ -427,6 +429,7 @@ router.post('/', upload.single('image'), async (req, res) => {
 
     const doc = await Product.create({
       ...(inventoryCode ? { inventoryCode } : {}),
+      inventoryType,
       name: name.trim(),
       quantity: locationPayload.quantity,
       locations: locationPayload.locations.length ? locationPayload.locations : undefined,
@@ -452,16 +455,25 @@ router.post('/', upload.single('image'), async (req, res) => {
       fallbackMessage: 'Failed to create product',
     });
   }
-});
+};
+
+// Workspace users may create persistent disposable stock. Permanent decor
+// catalog mutations remain admin-only at the server mount.
+router.post('/disposable', upload.single('image'), (req, res) => createProduct(req, res, 'disposable'));
+router.post('/', upload.single('image'), (req, res) => createProduct(req, res, 'decor'));
 
 // READ all
 router.get('/', cacheWithGroup('5 minutes', CACHE_GROUP), async (req, res) => {
   try {
     await ensureDecorInventoryCodes();
     const includeTapeLibrary = String(req.query?.includeTapeLibrary || '') === '1';
+    const inventoryType = String(req.query?.inventoryType || '').trim().toLowerCase();
+    const typeQuery = inventoryType === 'disposable'
+      ? { inventoryType: 'disposable' }
+      : { $or: [{ inventoryType: 'decor' }, { inventoryType: { $exists: false } }] };
     const query = includeTapeLibrary
-      ? {}
-      : { category: { $not: TAPE_LIBRARY_PATTERN } };
+      ? typeQuery
+      : { $and: [typeQuery, { category: { $not: TAPE_LIBRARY_PATTERN } }] };
     const items = await Product.find(query).sort({ createdAt: -1 });
     const mapped = items.map((d) => ({ ...d.toObject(), qty: d.quantity }));
     res.json(mapped);

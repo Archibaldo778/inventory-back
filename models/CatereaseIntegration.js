@@ -7,6 +7,10 @@ const catereaseIntegrationSchema = new mongoose.Schema({
   lastSyncCompletedAt: { type: Date, default: null },
   lastSyncError: { type: String, trim: true, default: '' },
   lastSyncSummary: { type: mongoose.Schema.Types.Mixed, default: {} },
+  lastRecipeSyncStartedAt: { type: Date, default: null },
+  lastRecipeSyncCompletedAt: { type: Date, default: null },
+  lastRecipeSyncError: { type: String, trim: true, default: '' },
+  lastRecipeSyncSummary: { type: mongoose.Schema.Types.Mixed, default: {} },
 }, { timestamps: true });
 
 export default mongoose.model('CatereaseIntegration', catereaseIntegrationSchema);

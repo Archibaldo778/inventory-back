@@ -1,8 +1,12 @@
 import { Router } from 'express';
+import crypto from 'node:crypto';
 import CatereaseFile from '../models/CatereaseFile.js';
 import CatereaseIntegration from '../models/CatereaseIntegration.js';
 import Event from '../models/Event.js';
 import BarEvent from '../models/BarEvent.js';
+import KitchenIngredient from '../models/KitchenIngredient.js';
+import KitchenIngredientUnit from '../models/KitchenIngredientUnit.js';
+import KitchenRecipe from '../models/KitchenRecipe.js';
 import { requireAdmin, requireAuth } from '../middleware/auth.js';
 import { createMemoryRateLimiter } from '../middleware/rateLimit.js';
 import { sendApiError } from '../utils/apiErrors.js';
@@ -16,13 +20,20 @@ import {
   schedulePreparedItemsForEvent,
 } from '../utils/barManualItems.js';
 import { normalizePackoutItems } from './bar.js';
-import { downloadCatereaseEventFile, getCatereaseConfig, listCatereaseEventFiles } from '../utils/catereaseApi.js';
+import {
+  downloadCatereaseEventFile,
+  getCatereaseConfig,
+  getCatereaseEventBundle,
+  listCatereaseEventFiles,
+  listCatereaseHubResource,
+} from '../utils/catereaseApi.js';
 import {
   catereaseFileRevision,
   normalizeCatereaseEventId,
   normalizeCatereaseFile,
 } from '../utils/catereaseFiles.js';
 import { nyToday } from '../utils/dropboxDocuments.js';
+import { buildCatereaseFinancialPreview, buildCatereaseKitchenCatalog } from '../utils/catereaseKitchen.js';
 
 const router = Router();
 const requireCatereaseAdmin = [requireAuth, requireAdmin];
@@ -30,6 +41,8 @@ const syncRateLimit = createMemoryRateLimiter({ windowMs: 10 * 60 * 1000, max: 8
 const downloadRateLimit = createMemoryRateLimiter({ windowMs: 60 * 1000, max: 120, message: 'Too many Caterease file downloads' });
 let syncPromise = null;
 let syncProgress = null;
+let recipeSyncPromise = null;
+let recipeSyncProgress = null;
 
 const isDocx = (fileName, contentType = '') => /\.docx$/i.test(String(fileName || ''))
   || /officedocument\.wordprocessingml\.document/i.test(String(contentType || ''));
@@ -93,11 +106,120 @@ const listAllEventFiles = async (eventId) => {
   do {
     const page = await listCatereaseEventFiles(eventId, { cursor, limit: 200 });
     files.push(...page.data);
+    if (page.pagination.hasMore && !page.pagination.nextCursor) throw new Error(`Caterease file pagination cursor is missing for ${eventId}`);
     cursor = page.pagination.hasMore ? page.pagination.nextCursor : '';
     pages += 1;
     if (pages > 1000) throw new Error(`Caterease pagination did not finish for ${eventId}`);
   } while (cursor);
   return files;
+};
+
+const listAllHubRows = async (resource) => {
+  const rows = [];
+  let cursor = '';
+  let pages = 0;
+  do {
+    const page = await listCatereaseHubResource(resource, { cursor, limit: 200 });
+    rows.push(...page.data);
+    if (page.pagination.hasMore && !page.pagination.nextCursor) throw new Error(`Caterease ${resource} pagination cursor is missing`);
+    cursor = page.pagination.hasMore ? page.pagination.nextCursor : '';
+    pages += 1;
+    recipeSyncProgress = { resource, rows: rows.length, pages };
+    if (pages > 5000) throw new Error(`Caterease ${resource} pagination did not finish`);
+  } while (cursor);
+  return rows;
+};
+
+const createIntegration = () => CatereaseIntegration.findOneAndUpdate(
+  { provider: 'caterease' },
+  { $setOnInsert: { provider: 'caterease', enabled: true } },
+  { upsert: true, new: true }
+);
+
+export const runCatereaseRecipeSync = async () => {
+  if (recipeSyncPromise) return recipeSyncPromise;
+  recipeSyncPromise = (async () => {
+    const integration = await createIntegration();
+    integration.lastRecipeSyncStartedAt = new Date();
+    integration.lastRecipeSyncError = '';
+    await integration.save();
+    const runId = crypto.randomUUID();
+    try {
+      const [menuItems, menuItemRecipes, ingredients, ingredientRecipes, ingredientUnits] = await Promise.all([
+        listAllHubRows('menuitem'),
+        listAllHubRows('menuitemrecipe'),
+        listAllHubRows('ingredient'),
+        listAllHubRows('ingredientrecipe'),
+        listAllHubRows('ingredientunit'),
+      ]);
+      const catalog = buildCatereaseKitchenCatalog({ menuItems, menuItemRecipes, ingredients, ingredientRecipes, ingredientUnits });
+      const ingredientOperations = catalog.ingredients.map(({ key: _key, ...ingredient }) => ({
+        updateOne: {
+          filter: { sourceProvider: 'caterease', locationId: ingredient.locationId, sourceId: ingredient.sourceId },
+          update: { $set: { ...ingredient, lastSeenRun: runId, sourceDeletedAt: null } },
+          upsert: true,
+        },
+      }));
+      const recipeOperations = catalog.recipes.map(({ key: _key, ...recipe }) => ({
+        updateOne: {
+          filter: { sourceProvider: 'caterease', locationId: recipe.locationId, sourceId: recipe.sourceId },
+          update: { $set: { ...recipe, lastSeenRun: runId, sourceDeletedAt: null } },
+          upsert: true,
+        },
+      }));
+      const unitOperations = ingredientUnits.map((row) => ({
+        updateOne: {
+          filter: {
+            sourceProvider: 'caterease',
+            locationId: String(row.LocNum || '').trim() || 'default',
+            ingredientSourceId: String(row.IRNum || '').trim(),
+            unitId: String(row.UnitNum || '').trim(),
+          },
+          update: { $set: {
+            name: String(row.UnitName || '').trim(),
+            convertFrom: String(row.ConvertFrom || '').trim(),
+            convertTo: String(row.ConvertTo || '').trim(),
+            conversionUnitId: String(row.ConversionUnitNum || '').trim(),
+            conversionRatio: Number.isFinite(Number(row.ConversionRatio)) ? Number(row.ConversionRatio) : null,
+            baseConversionRatio: Number.isFinite(Number(row.BaseConversionRatio)) ? Number(row.BaseConversionRatio) : null,
+            note: String(row.Note || '').trim(),
+            lastSeenRun: runId,
+            sourceDeletedAt: null,
+          } },
+          upsert: true,
+        },
+      })).filter((operation) => operation.updateOne.filter.unitId);
+      if (ingredientOperations.length) await KitchenIngredient.bulkWrite(ingredientOperations, { ordered: false });
+      if (recipeOperations.length) await KitchenRecipe.bulkWrite(recipeOperations, { ordered: false });
+      if (unitOperations.length) await KitchenIngredientUnit.bulkWrite(unitOperations, { ordered: false });
+      const removedAt = new Date();
+      const [removedIngredients, removedRecipes, removedUnits] = await Promise.all([
+        KitchenIngredient.updateMany({ sourceProvider: 'caterease', lastSeenRun: { $ne: runId }, sourceDeletedAt: null }, { $set: { sourceDeletedAt: removedAt } }),
+        KitchenRecipe.updateMany({ sourceProvider: 'caterease', lastSeenRun: { $ne: runId }, sourceDeletedAt: null }, { $set: { sourceDeletedAt: removedAt } }),
+        KitchenIngredientUnit.updateMany({ sourceProvider: 'caterease', lastSeenRun: { $ne: runId }, sourceDeletedAt: null }, { $set: { sourceDeletedAt: removedAt } }),
+      ]);
+      const summary = {
+        recipes: catalog.recipes.length,
+        ingredients: catalog.ingredients.length,
+        recipeComponents: catalog.recipes.reduce((total, recipe) => total + recipe.ingredients.length, 0),
+        subRecipeComponents: catalog.ingredients.reduce((total, ingredient) => total + ingredient.components.length, 0),
+        units: ingredientUnits.length,
+        removedRecipes: Number(removedRecipes.modifiedCount || 0),
+        removedIngredients: Number(removedIngredients.modifiedCount || 0),
+        removedUnits: Number(removedUnits.modifiedCount || 0),
+      };
+      integration.lastRecipeSyncCompletedAt = new Date();
+      integration.lastRecipeSyncSummary = summary;
+      await integration.save();
+      clearApiCacheGroups('kitchen');
+      return summary;
+    } catch (error) {
+      integration.lastRecipeSyncError = String(error?.message || 'Caterease recipe sync failed').slice(0, 500);
+      await integration.save().catch(() => null);
+      throw error;
+    }
+  })();
+  try { return await recipeSyncPromise; } finally { recipeSyncPromise = null; recipeSyncProgress = null; }
 };
 
 const nextFileVersion = (event, uid) => Math.max(0, ...[
@@ -234,11 +356,7 @@ const syncOneEvent = async (event, eventId, stats) => {
 export const runCatereaseFileSync = async () => {
   if (syncPromise) return syncPromise;
   syncPromise = (async () => {
-    const integration = await CatereaseIntegration.findOneAndUpdate(
-      { provider: 'caterease' },
-      { $setOnInsert: { provider: 'caterease', enabled: true } },
-      { upsert: true, new: true }
-    );
+    const integration = await createIntegration();
     integration.lastSyncStartedAt = new Date();
     integration.lastSyncError = '';
     await integration.save();
@@ -280,30 +398,77 @@ export const runCatereaseFileSync = async () => {
 router.get('/status', ...requireCatereaseAdmin, async (_req, res) => {
   try {
     const config = getCatereaseConfig();
-    const [integration, counts, recentFiles] = await Promise.all([
+    const [integration, counts, recentFiles, recipeCount, ingredientCount, recentRecipes] = await Promise.all([
       CatereaseIntegration.findOne({ provider: 'caterease' }).lean(),
       CatereaseFile.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }]),
       CatereaseFile.find({ status: { $in: ['imported', 'failed'] } })
         .select('uid catereaseEventId fileName documentType status reason revisedAt importedEventId')
         .sort({ lastSeenAt: -1 }).limit(100).populate('importedEventId', 'title date externalId').lean(),
+      KitchenRecipe.countDocuments({ sourceProvider: 'caterease', sourceDeletedAt: null }),
+      KitchenIngredient.countDocuments({ sourceProvider: 'caterease', sourceDeletedAt: null }),
+      KitchenRecipe.find({ sourceProvider: 'caterease', sourceDeletedAt: null })
+        .select('sourceId locationId name category servings price cost costPerServing ingredients revisedAt')
+        .sort({ updatedAt: -1 }).limit(50).lean(),
     ]);
     return res.json({
       configured: Boolean(config.apiKey),
       primaryFiles: config.primaryFiles,
       syncing: Boolean(syncPromise),
       progress: syncProgress,
+      recipeSyncing: Boolean(recipeSyncPromise),
+      recipeProgress: recipeSyncProgress,
       integration: integration ? {
         enabled: integration.enabled,
         lastSyncStartedAt: integration.lastSyncStartedAt,
         lastSyncCompletedAt: integration.lastSyncCompletedAt,
         lastSyncError: integration.lastSyncError,
         lastSyncSummary: integration.lastSyncSummary,
+        lastRecipeSyncStartedAt: integration.lastRecipeSyncStartedAt,
+        lastRecipeSyncCompletedAt: integration.lastRecipeSyncCompletedAt,
+        lastRecipeSyncError: integration.lastRecipeSyncError,
+        lastRecipeSyncSummary: integration.lastRecipeSyncSummary,
       } : null,
       counts: Object.fromEntries(counts.map((entry) => [entry._id, entry.count])),
       recentFiles,
+      recipeCount,
+      ingredientCount,
+      recentRecipes,
     });
   } catch (error) {
     return sendApiError(res, error, { context: 'Caterease status failed', fallbackMessage: 'Failed to load Caterease status' });
+  }
+});
+
+router.post('/recipes/sync', ...requireCatereaseAdmin, syncRateLimit, async (_req, res) => {
+  try {
+    if (recipeSyncPromise) return res.status(202).json({ ok: true, started: false, syncing: true });
+    void runCatereaseRecipeSync().catch((error) => console.error('Caterease recipe sync failed:', error?.message || error));
+    return res.status(202).json({ ok: true, started: true, syncing: true });
+  } catch (error) {
+    return sendApiError(res, error, { context: 'Caterease recipe sync failed', defaultStatus: 502, fallbackMessage: 'Caterease recipe sync failed' });
+  }
+});
+
+router.get('/financial-preview/:eventId', ...requireCatereaseAdmin, async (req, res) => {
+  try {
+    const eventId = normalizeCatereaseEventId(req.params.eventId);
+    if (!eventId) return res.status(400).json({ error: 'A Caterease E-number is required' });
+    return res.json(buildCatereaseFinancialPreview(await getCatereaseEventBundle(eventId)));
+  } catch (error) {
+    return sendApiError(res, error, { context: 'Caterease financial preview failed', fallbackMessage: 'Failed to load Caterease financial preview' });
+  }
+});
+
+router.get('/recipes', ...requireCatereaseAdmin, async (req, res) => {
+  try {
+    const limit = Math.max(1, Math.min(200, Number(req.query.limit) || 100));
+    const search = String(req.query.search || '').trim();
+    const query = { sourceProvider: 'caterease', sourceDeletedAt: null };
+    if (search) query.name = { $regex: search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' };
+    const items = await KitchenRecipe.find(query).sort({ name: 1 }).limit(limit).lean();
+    return res.json({ items });
+  } catch (error) {
+    return sendApiError(res, error, { context: 'Caterease recipes failed', fallbackMessage: 'Failed to list Caterease recipes' });
   }
 });
 

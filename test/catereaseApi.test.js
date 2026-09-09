@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { downloadCatereaseEventFile, getCatereaseConfig, listCatereaseEventFiles } from '../utils/catereaseApi.js';
+import {
+  downloadCatereaseEventFile,
+  getCatereaseConfig,
+  getCatereaseEventBundle,
+  listCatereaseEventFiles,
+  listCatereaseHubResource,
+} from '../utils/catereaseApi.js';
 
 const withApiKey = async (callback) => {
   const previous = process.env.CATEREASE_API_KEY;
@@ -57,3 +63,33 @@ test('Caterease becomes the primary file source only through an explicit flag', 
     else process.env.CATEREASE_PRIMARY_FILES = previous;
   }
 });
+
+test('Caterease Hub catalog client supports recipe resources and pagination', async () => withApiKey(async () => {
+  const originalFetch = global.fetch;
+  let requestedUrl = '';
+  global.fetch = async (url) => {
+    requestedUrl = String(url);
+    return new Response(JSON.stringify({ data: [{ ItemNum: '42' }], pagination: { hasMore: false, nextCursor: null } }), { status: 200 });
+  };
+  try {
+    const page = await listCatereaseHubResource('menuitem', { activeOnly: true, locNum: '1' });
+    assert.equal(page.data[0].ItemNum, '42');
+    assert.match(requestedUrl, /\/v1\/menuitem\?/);
+    assert.match(requestedUrl, /activeOnly=true/);
+    assert.match(requestedUrl, /locNum=1/);
+  } finally { global.fetch = originalFetch; }
+}));
+
+test('Caterease event bundle client requests the composite event base id safely', async () => withApiKey(async () => {
+  const originalFetch = global.fetch;
+  let requestedUrl = '';
+  global.fetch = async (url) => {
+    requestedUrl = String(url);
+    return new Response(JSON.stringify({ event: { eventId: 'E00470' }, includes: {} }), { status: 200 });
+  };
+  try {
+    const bundle = await getCatereaseEventBundle('E00470');
+    assert.equal(bundle.event.eventId, 'E00470');
+    assert.match(requestedUrl, /\/v1\/events\/E00470\/bundle$/);
+  } finally { global.fetch = originalFetch; }
+}));

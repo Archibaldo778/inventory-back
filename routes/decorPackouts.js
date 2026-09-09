@@ -180,6 +180,7 @@ router.post('/:id/scan', async (req, res) => {
       packout.items.push({
         productId: product._id,
         inventoryCode: product.inventoryCode,
+        source: 'inventory',
         name: product.name,
         image: product.image || product.imageUrl || product.images?.[0] || '',
         category: product.category || '',
@@ -196,6 +197,51 @@ router.post('/:id/scan', async (req, res) => {
     return sendApiError(res, error, {
       context: 'Decor packout scan failed',
       fallbackMessage: 'Failed to add scanned inventory item',
+    });
+  }
+});
+
+router.post('/:id/items', async (req, res) => {
+  try {
+    const packout = await loadPackout(req.params.id);
+    if (!packout) return res.status(404).json({ error: 'Packout not found' });
+    if (packout.status !== 'draft') return res.status(409).json({ error: 'This packout is complete' });
+
+    const name = String(req.body?.name || '').trim();
+    const quantity = Number(req.body?.quantity ?? 1);
+    const image = String(req.body?.image || '').trim();
+    const category = String(req.body?.category || '').trim();
+    const description = String(req.body?.description || '').trim();
+    if (!name || name.length > 160) return res.status(400).json({ error: 'Item name is required and must be 160 characters or fewer' });
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 10000) {
+      return res.status(400).json({ error: 'Quantity must be a whole number from 1 to 10000' });
+    }
+    if (image.length > 2048) return res.status(400).json({ error: 'Item image URL is too long' });
+    if (category.length > 120) return res.status(400).json({ error: 'Category must be 120 characters or fewer' });
+    if (description.length > 1000) return res.status(400).json({ error: 'Description must be 1000 characters or fewer' });
+    if (packout.items.length >= MAX_PACKOUT_TYPES) {
+      return res.status(413).json({ error: `Packout is limited to ${MAX_PACKOUT_TYPES} item types` });
+    }
+
+    packout.items.push({
+      productId: null,
+      inventoryCode: '',
+      source: 'event',
+      name,
+      image,
+      category: category || 'Disposable / event purchase',
+      description,
+      quantity,
+      scannedBy: actorName(req.auth),
+    });
+    await packout.save();
+    await syncPackoutToBoardSafely(packout);
+    clearCaches();
+    return res.status(201).json(packout);
+  } catch (error) {
+    return sendApiError(res, error, {
+      context: 'Decor event item creation failed',
+      fallbackMessage: 'Failed to add event-only decor item',
     });
   }
 });

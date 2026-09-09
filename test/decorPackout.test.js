@@ -46,6 +46,25 @@ test('decor packout rejects invalid status and quantities', () => {
   assert.ok(error?.errors?.['items.0.quantity']);
 });
 
+test('decor packout supports event-only items without polluting Product inventory', () => {
+  const packout = new DecorPackout({
+    eventId: objectId(),
+    deckId: objectId(),
+    pageId: objectId(),
+    items: [{
+      source: 'event',
+      name: 'Disposable gold votive',
+      category: 'Disposable / event purchase',
+      quantity: 24,
+    }],
+  });
+
+  assert.equal(packout.validateSync(), undefined);
+  assert.equal(packout.items[0].productId, null);
+  assert.equal(packout.items[0].inventoryCode, '');
+  assert.equal(packout.items[0].source, 'event');
+});
+
 test('decor packout items are materialized on the linked Decor Board page', () => {
   const packoutId = objectId();
   const itemId = objectId();

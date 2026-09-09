@@ -47,6 +47,7 @@ export const buildDecorPackoutCanvas = (canvasValue, packoutValue) => {
       inventoryCode: text(item.inventoryCode).toUpperCase(),
       name: text(item.name) || 'Inventory item',
       initialName: text(item.name) || 'Inventory item',
+      description: text(item.description),
       quantity,
       quantityText: String(quantity),
     };
@@ -70,7 +71,7 @@ export const buildDecorPackoutCanvas = (canvasValue, packoutValue) => {
       decorPackoutItemId: itemId,
       name: text(item.name) || 'Inventory item',
       initialName: text(item.name) || 'Inventory item',
-      description: '',
+      description: text(item.description),
       quantity,
       quantityText: String(quantity),
       vendorType: 'OCC',

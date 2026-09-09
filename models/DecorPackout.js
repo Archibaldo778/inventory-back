@@ -2,11 +2,13 @@ import mongoose from 'mongoose';
 
 const decorPackoutItemSchema = new mongoose.Schema(
   {
-    productId: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
-    inventoryCode: { type: String, required: true, trim: true, uppercase: true },
+    productId: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', default: null },
+    inventoryCode: { type: String, trim: true, uppercase: true, default: '' },
+    source: { type: String, enum: ['inventory', 'event'], default: 'inventory' },
     name: { type: String, required: true, trim: true },
     image: { type: String, trim: true, default: '' },
     category: { type: String, trim: true, default: '' },
+    description: { type: String, trim: true, default: '' },
     location: { type: String, trim: true, default: '' },
     quantity: { type: Number, min: 1, max: 10000, default: 1 },
     scannedAt: { type: Date, default: Date.now },

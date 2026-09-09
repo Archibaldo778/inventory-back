@@ -98,7 +98,7 @@ router.get('/', async (req, res) => {
     if (req.query.status && ['draft', 'complete'].includes(String(req.query.status))) {
       query.status = String(req.query.status);
     }
-    const items = await DecorPackout.find(query).sort({ createdAt: -1 }).limit(200);
+    const items = await DecorPackout.find(query).sort({ updatedAt: -1, createdAt: -1 }).limit(200);
     return res.json(items);
   } catch (error) {
     return sendApiError(res, error, {

@@ -428,6 +428,7 @@ import toolsRoutes from './routes/tools.js';
 import barRoutes from './routes/bar.js';
 import publicBarReturnsRoutes from './routes/publicBarReturns.js';
 import dropboxIntegrationRoutes, { runDropboxDiscoverySync } from './routes/dropboxIntegration.js';
+import catereaseIntegrationRoutes, { runCatereaseFileSync } from './routes/catereaseIntegration.js';
 
 app.use('/api/auth', authRoutes);
 app.use('/api/products', requireAuth, requireWorkspaceAccess, requireAdminForMutations, productRoutes);
@@ -449,6 +450,7 @@ app.use('/api/tools', requireAuth, requireAdmin, toolsRoutes);
 app.use('/api/public/bar-returns', publicBarReturnsRoutes);
 app.use('/api/bar', requireAuth, barRoutes);
 app.use('/api/integrations/dropbox', dropboxIntegrationRoutes);
+app.use('/api/integrations/caterease', catereaseIntegrationRoutes);
 
 // подключение к Mongo
 const configuredMongoUri = String(process.env.MONGO_URI || '').trim();
@@ -593,7 +595,8 @@ export const startServer = async () => {
 
   let dropboxSyncTimer = null;
   let dropboxStartupTimer = null;
-  if (String(process.env.DROPBOX_APP_KEY || '').trim() && String(process.env.DROPBOX_APP_SECRET || '').trim()) {
+  const catereaseConfigured = Boolean(String(process.env.CATEREASE_API_KEY || '').trim());
+  if (!catereaseConfigured && String(process.env.DROPBOX_APP_KEY || '').trim() && String(process.env.DROPBOX_APP_SECRET || '').trim()) {
     const configuredMinutes = Number(process.env.DROPBOX_SYNC_INTERVAL_MINUTES);
     const intervalMinutes = Number.isFinite(configuredMinutes)
       ? Math.max(5, Math.min(180, Math.trunc(configuredMinutes)))
@@ -610,6 +613,26 @@ export const startServer = async () => {
     console.log(`Dropbox automatic discovery enabled every ${intervalMinutes} minutes`);
   }
 
+  let catereaseSyncTimer = null;
+  let catereaseStartupTimer = null;
+  if (catereaseConfigured) {
+    const configuredMinutes = Number(process.env.CATEREASE_SYNC_INTERVAL_MINUTES);
+    const intervalMinutes = Number.isFinite(configuredMinutes)
+      ? Math.max(5, Math.min(180, Math.trunc(configuredMinutes)))
+      : 15;
+    const syncCaterease = () => runCatereaseFileSync().then((summary) => {
+      console.log('✅ Caterease event file sync completed', summary);
+    }).catch((error) => {
+      console.error('Caterease automatic file sync failed:', error?.message || error);
+    });
+    catereaseStartupTimer = setTimeout(syncCaterease, 45_000);
+    catereaseStartupTimer.unref?.();
+    catereaseSyncTimer = setInterval(syncCaterease, intervalMinutes * 60_000);
+    catereaseSyncTimer.unref?.();
+    console.log(`Caterease automatic file sync enabled every ${intervalMinutes} minutes`);
+    console.log('Dropbox automatic discovery disabled because Caterease is the primary file source');
+  }
+
   let shuttingDown = false;
   const shutdown = (signal) => {
     if (shuttingDown) return;
@@ -619,6 +642,8 @@ export const startServer = async () => {
     if (nowstaSyncTimer) clearInterval(nowstaSyncTimer);
     if (dropboxStartupTimer) clearTimeout(dropboxStartupTimer);
     if (dropboxSyncTimer) clearInterval(dropboxSyncTimer);
+    if (catereaseStartupTimer) clearTimeout(catereaseStartupTimer);
+    if (catereaseSyncTimer) clearInterval(catereaseSyncTimer);
 
     const forceExit = setTimeout(() => {
       console.error('Forced shutdown after timeout');

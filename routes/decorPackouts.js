@@ -8,6 +8,7 @@ import Product from '../models/Product.js';
 import { clearApiCacheGroups } from '../utils/apiCache.js';
 import { parseDecorInventoryCode } from '../utils/decorInventoryCodes.js';
 import { sendApiError } from '../utils/apiErrors.js';
+import { buildDecorPackoutCanvas } from '../utils/decorPackoutBoard.js';
 
 const router = Router();
 const MAX_PACKOUT_TYPES = 1000;
@@ -53,6 +54,35 @@ const resolvePackoutTarget = async (eventId, requestedDeckId, requestedPageId) =
 const loadPackout = (id) => (
   isObjectId(id) ? DecorPackout.findById(id) : null
 );
+
+const syncPackoutToBoard = async (packout) => {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const page = await Page.findOne({ _id: packout.pageId, deckId: packout.deckId, deletedAt: null }).lean();
+    if (!page) return false;
+    const next = buildDecorPackoutCanvas(page.canvas, packout);
+    if (!next.changed) return true;
+    const revision = Math.max(0, Number(page.revision) || 0);
+    const revisionFilter = revision === 0
+      ? { $or: [{ revision: 0 }, { revision: { $exists: false } }] }
+      : { revision };
+    const updated = await Page.findOneAndUpdate(
+      { _id: page._id, deletedAt: null, ...revisionFilter },
+      { $set: { canvas: next.canvas }, $inc: { revision: 1 } },
+      { new: true }
+    );
+    if (updated) return true;
+  }
+  return false;
+};
+
+const syncPackoutToBoardSafely = async (packout) => {
+  try {
+    const synced = await syncPackoutToBoard(packout);
+    if (!synced) console.warn(`Decor packout ${packout?._id || ''} could not update its board after three revision conflicts`);
+  } catch (error) {
+    console.error('Decor packout board sync failed:', error);
+  }
+};
 
 router.get('/', async (req, res) => {
   try {
@@ -151,7 +181,7 @@ router.post('/:id/scan', async (req, res) => {
         productId: product._id,
         inventoryCode: product.inventoryCode,
         name: product.name,
-        image: product.image || product.imageUrl || '',
+        image: product.image || product.imageUrl || product.images?.[0] || '',
         category: product.category || '',
         location: product.location || '',
         quantity,
@@ -159,6 +189,7 @@ router.post('/:id/scan', async (req, res) => {
       });
     }
     await packout.save();
+    await syncPackoutToBoardSafely(packout);
     clearCaches();
     return res.json(packout);
   } catch (error) {
@@ -183,6 +214,7 @@ router.patch('/:id/items/:itemId', async (req, res) => {
     item.quantity = quantity;
     item.updatedAt = new Date();
     await packout.save();
+    await syncPackoutToBoardSafely(packout);
     clearCaches();
     return res.json(packout);
   } catch (error) {
@@ -202,6 +234,7 @@ router.delete('/:id/items/:itemId', async (req, res) => {
     if (!item) return res.status(404).json({ error: 'Packout item not found' });
     item.deleteOne();
     await packout.save();
+    await syncPackoutToBoardSafely(packout);
     clearCaches();
     return res.json(packout);
   } catch (error) {

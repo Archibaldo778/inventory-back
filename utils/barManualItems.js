@@ -41,14 +41,28 @@ export const combineImportedBarItems = (items) => {
       || current.preparedBeverageType
       || getPreparedBeverageType(item)
       || getPreparedBeverageType(current)
-    ) return;
+    ) {
+      const currentIsAuto = current.cocktailServingsAuto === true;
+      const itemIsAuto = item.cocktailServingsAuto === true;
+      const currentQuantity = Math.max(0, Number(current.sentQty) || 0);
+      const itemQuantity = Math.max(0, Number(item.sentQty) || 0);
+      if ((currentIsAuto && !itemIsAuto) || (currentIsAuto === itemIsAuto && itemQuantity > currentQuantity)) {
+        combined.set(key, item);
+      }
+      return;
+    }
     const currentPending = current.sentQtyPending === true;
     const itemPending = item.sentQtyPending === true;
     if (!currentPending && !itemPending) {
       current.sentQty = Math.max(0, Number(current.sentQty) || 0) + Math.max(0, Number(item.sentQty) || 0);
       current.sentQtyText = String(current.sentQty);
+    } else if (currentPending && !itemPending) {
+      current.sentQty = Math.max(0, Number(item.sentQty) || 0);
+      current.sentQtyText = String(item.sentQtyText || current.sentQty);
     }
-    current.sentQtyPending = currentPending || itemPending;
+    // A KM may mention an item without a count. Once any PO supplies a real
+    // quantity, that authoritative count must win over the pending KM row.
+    current.sentQtyPending = currentPending && itemPending;
     const notes = [...new Set([current.notes, item.notes].map((value) => String(value || '').trim()).filter(Boolean))];
     current.notes = notes.join(' · ').slice(0, 1000);
   });

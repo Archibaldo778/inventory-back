@@ -129,17 +129,33 @@ const reclassifyStoredDropboxReviews = async (namespaceId) => {
 };
 
 const inspectDropboxDocumentContents = async (accessToken, namespaceId) => {
-  const documents = await DropboxDocument.find({
+  const today = nyToday();
+  const needsInspection = {
     namespaceId,
     status: { $in: ['discovered', 'review', 'imported'] },
     $or: [
       { $expr: { $ne: ['$contentInspectedRev', '$rev'] } },
       { contentParserVersion: { $ne: DROPBOX_CONTENT_PARSER_VERSION } },
     ],
+  };
+  // Always repair today's and future event files first. Keep a smaller second
+  // pass for documents whose date can only be discovered by reading the DOCX.
+  const priorityDocuments = await DropboxDocument.find({
+    ...needsInspection,
+    inferredDate: { $gte: today },
+  })
+    .sort({ inferredDate: 1, serverModifiedAt: -1 })
+    .limit(400)
+    .lean();
+  const priorityIds = priorityDocuments.map((document) => document._id);
+  const fallbackDocuments = await DropboxDocument.find({
+    ...needsInspection,
+    ...(priorityIds.length ? { _id: { $nin: priorityIds } } : {}),
   })
     .sort({ serverModifiedAt: -1 })
     .limit(100)
     .lean();
+  const documents = [...priorityDocuments, ...fallbackDocuments];
   const stats = { inspected: 0, enriched: 0, failed: 0 };
   let nextIndex = 0;
   const inspectNext = async () => {
@@ -314,7 +330,12 @@ const syncDropboxBarItems = async (event) => {
 };
 
 const attachDiscoveredDropboxDocuments = async (namespaceId) => {
-  const documents = await DropboxDocument.find({ namespaceId, status: 'discovered' })
+  const documents = await DropboxDocument.find({
+    namespaceId,
+    status: 'discovered',
+    contentParserVersion: DROPBOX_CONTENT_PARSER_VERSION,
+    contentInspectionError: '',
+  })
     .sort({ inferredDate: 1, serverModifiedAt: 1 })
     .limit(500)
     .lean();

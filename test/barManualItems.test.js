@@ -20,6 +20,29 @@ test('multiple event documents combine duplicate alcohol and keep one cocktail b
   assert.equal(result[1].sentQty, 130);
 });
 
+test('a counted PO row overrides a pending KM row for the same beverage', () => {
+  const result = combineImportedBarItems([
+    { name: 'Sancerre', scope: 'alcohol', sentQty: 0, sentQtyText: 'Pending captain count', sentQtyPending: true },
+    { name: 'Sancerre', scope: 'alcohol', sentQty: 12, sentQtyText: '12', sentQtyPending: false },
+  ]);
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0].sentQty, 12);
+  assert.equal(result[0].sentQtyText, '12');
+  assert.equal(result[0].sentQtyPending, false);
+});
+
+test('an explicit PO cocktail count overrides the automatic KM placeholder', () => {
+  const result = combineImportedBarItems([
+    { name: 'Orange Blossom', cocktailRecipeKey: 'orange-blossom', preparedBeverageType: 'cocktail', cocktailServingsAuto: true, sentQty: 0 },
+    { name: 'Orange Blossom', cocktailRecipeKey: 'orange-blossom', preparedBeverageType: 'cocktail', cocktailServingsAuto: false, sentQty: 150 },
+  ]);
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0].sentQty, 150);
+  assert.equal(result[0].cocktailServingsAuto, false);
+});
+
 test('packout merge preserves manual items, drops their duplicates, and replaces old imported rows', () => {
   const existing = [
     { name: 'Tito’s Vodka', beverageItemId: 'a1', entrySource: 'manual', sentQty: 2 },

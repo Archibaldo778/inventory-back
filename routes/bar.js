@@ -543,8 +543,13 @@ export const normalizePackoutItems = async (items, { allowFinancials = false, gu
         : 'review';
       const preparedBeverageType = getPreparedBeverageType(item);
       const preparedRate = getPreparedBeverageRate(item);
+      const explicitSentQty = item?.sentQty ?? item?.quantity;
+      const hasExplicitSentQty = explicitSentQty !== null
+        && explicitSentQty !== undefined
+        && String(explicitSentQty).trim() !== ''
+        && Number.isFinite(Number(explicitSentQty));
       const cocktailServingsAuto = preparedBeverageType
-        ? cleanBoolean(item?.cocktailServingsAuto, true)
+        ? cleanBoolean(item?.cocktailServingsAuto, !hasExplicitSentQty)
         : false;
       const automaticCocktailServings = cocktailServingsAuto
         ? cocktailServingsForGuests(guestCount)

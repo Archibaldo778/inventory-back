@@ -429,6 +429,7 @@ import barRoutes from './routes/bar.js';
 import publicBarReturnsRoutes from './routes/publicBarReturns.js';
 import dropboxIntegrationRoutes, { runDropboxDiscoverySync } from './routes/dropboxIntegration.js';
 import catereaseIntegrationRoutes, { runCatereaseFileSync } from './routes/catereaseIntegration.js';
+import { getCatereaseConfig } from './utils/catereaseApi.js';
 
 app.use('/api/auth', authRoutes);
 app.use('/api/products', requireAuth, requireWorkspaceAccess, requireAdminForMutations, productRoutes);
@@ -595,8 +596,9 @@ export const startServer = async () => {
 
   let dropboxSyncTimer = null;
   let dropboxStartupTimer = null;
-  const catereaseConfigured = Boolean(String(process.env.CATEREASE_API_KEY || '').trim());
-  if (!catereaseConfigured && String(process.env.DROPBOX_APP_KEY || '').trim() && String(process.env.DROPBOX_APP_SECRET || '').trim()) {
+  const catereaseConfig = getCatereaseConfig();
+  const catereaseConfigured = Boolean(catereaseConfig.apiKey);
+  if (!catereaseConfig.primaryFiles && String(process.env.DROPBOX_APP_KEY || '').trim() && String(process.env.DROPBOX_APP_SECRET || '').trim()) {
     const configuredMinutes = Number(process.env.DROPBOX_SYNC_INTERVAL_MINUTES);
     const intervalMinutes = Number.isFinite(configuredMinutes)
       ? Math.max(5, Math.min(180, Math.trunc(configuredMinutes)))
@@ -630,7 +632,11 @@ export const startServer = async () => {
     catereaseSyncTimer = setInterval(syncCaterease, intervalMinutes * 60_000);
     catereaseSyncTimer.unref?.();
     console.log(`Caterease automatic file sync enabled every ${intervalMinutes} minutes`);
-    console.log('Dropbox automatic discovery disabled because Caterease is the primary file source');
+    if (catereaseConfig.primaryFiles) {
+      console.log('Dropbox automatic discovery disabled because CATEREASE_PRIMARY_FILES is enabled');
+    } else {
+      console.log('Caterease file sync is in validation mode; Dropbox automatic discovery remains enabled');
+    }
   }
 
   let shuttingDown = false;

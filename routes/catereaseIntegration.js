@@ -279,6 +279,7 @@ export const runCatereaseFileSync = async () => {
 
 router.get('/status', ...requireCatereaseAdmin, async (_req, res) => {
   try {
+    const config = getCatereaseConfig();
     const [integration, counts, recentFiles] = await Promise.all([
       CatereaseIntegration.findOne({ provider: 'caterease' }).lean(),
       CatereaseFile.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }]),
@@ -287,7 +288,8 @@ router.get('/status', ...requireCatereaseAdmin, async (_req, res) => {
         .sort({ lastSeenAt: -1 }).limit(100).populate('importedEventId', 'title date externalId').lean(),
     ]);
     return res.json({
-      configured: Boolean(getCatereaseConfig().apiKey),
+      configured: Boolean(config.apiKey),
+      primaryFiles: config.primaryFiles,
       syncing: Boolean(syncPromise),
       progress: syncProgress,
       integration: integration ? {

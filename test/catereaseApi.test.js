@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { downloadCatereaseEventFile, listCatereaseEventFiles } from '../utils/catereaseApi.js';
+import { downloadCatereaseEventFile, getCatereaseConfig, listCatereaseEventFiles } from '../utils/catereaseApi.js';
 
 const withApiKey = async (callback) => {
   const previous = process.env.CATEREASE_API_KEY;
@@ -44,3 +44,16 @@ test('Caterease content download returns bytes and ETag', async () => withApiKey
     assert.equal(file.etag, 'revision-etag');
   } finally { global.fetch = originalFetch; }
 }));
+
+test('Caterease becomes the primary file source only through an explicit flag', () => {
+  const previous = process.env.CATEREASE_PRIMARY_FILES;
+  try {
+    delete process.env.CATEREASE_PRIMARY_FILES;
+    assert.equal(getCatereaseConfig().primaryFiles, false);
+    process.env.CATEREASE_PRIMARY_FILES = 'true';
+    assert.equal(getCatereaseConfig().primaryFiles, true);
+  } finally {
+    if (previous === undefined) delete process.env.CATEREASE_PRIMARY_FILES;
+    else process.env.CATEREASE_PRIMARY_FILES = previous;
+  }
+});

@@ -3,10 +3,12 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
 
 const clean = (value) => String(value || '').trim();
+const enabled = (value) => ['1', 'true', 'yes', 'on'].includes(clean(value).toLowerCase());
 
 export const getCatereaseConfig = () => ({
   apiKey: clean(process.env.CATEREASE_API_KEY),
   baseUrl: clean(process.env.CATEREASE_BASE_URL || DEFAULT_BASE_URL).replace(/\/+$/, ''),
+  primaryFiles: enabled(process.env.CATEREASE_PRIMARY_FILES),
 });
 
 const catereaseFetch = async (path, options = {}) => {
@@ -80,4 +82,3 @@ export const downloadCatereaseEventFile = async (uid, { attempts = 3 } = {}) => 
   }
   throw Object.assign(new Error('Caterease file is temporarily locked'), { statusCode: 409 });
 };
-

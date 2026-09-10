@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildCatereaseFinancialPreview, buildCatereaseKitchenCatalog } from '../utils/catereaseKitchen.js';
+import { buildCatereaseFinancialPreview, buildCatereaseKitchenCatalog, catereaseRichTextToPlain } from '../utils/catereaseKitchen.js';
+
+test('Caterease rich text fields are converted to readable plain text', () => {
+  const rtf = String.raw`{\rtf1\ansi\deff0{\fonttbl{\f0 Arial;}}{\colortbl;\red255\green0\blue0;}\uc1\pard\plain\f0\fs20\u8220?Apples\u8221? will come glazed.\par Temper before service.}`;
+  assert.equal(catereaseRichTextToPlain(rtf), '“Apples” will come glazed.\nTemper before service.');
+});
 
 test('Caterease kitchen catalog joins menu items to ingredients and keeps reported costs', () => {
   const catalog = buildCatereaseKitchenCatalog({

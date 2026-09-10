@@ -1,4 +1,93 @@
 const clean = (value) => String(value ?? '').trim();
+const RTF_DESTINATIONS = new Set([
+  'fonttbl', 'colortbl', 'stylesheet', 'info', 'pict', 'object', 'header', 'footer',
+  'filetbl', 'listtable', 'listoverridetable', 'generator', 'datastore', 'themedata',
+]);
+const RTF_SYMBOLS = {
+  emdash: '—', endash: '–', bullet: '•', lquote: '‘', rquote: '’',
+  ldblquote: '“', rdblquote: '”', '~': '\u00a0', '-': '\u00ad', '_': '‑',
+};
+
+export const catereaseRichTextToPlain = (value) => {
+  const source = clean(value);
+  if (!/^\{\\rtf\d?/i.test(source)) return source;
+  const stack = [{ skip: false, unicodeFallback: 1 }];
+  let output = '';
+
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    if (character === '{') {
+      stack.push({ ...stack[stack.length - 1] });
+      continue;
+    }
+    if (character === '}') {
+      if (stack.length > 1) stack.pop();
+      continue;
+    }
+    const state = stack[stack.length - 1];
+    if (character !== '\\') {
+      if (!state.skip && character !== '\r' && character !== '\n') output += character;
+      continue;
+    }
+
+    const next = source[index + 1] || '';
+    if (next === '\\' || next === '{' || next === '}') {
+      if (!state.skip) output += next;
+      index += 1;
+      continue;
+    }
+    if (next === '*') {
+      state.skip = true;
+      index += 1;
+      continue;
+    }
+    if (next === "'") {
+      const hex = source.slice(index + 2, index + 4);
+      if (!state.skip && /^[0-9a-f]{2}$/i.test(hex)) output += String.fromCharCode(Number.parseInt(hex, 16));
+      index += 3;
+      continue;
+    }
+    if (!/[a-z]/i.test(next)) {
+      if (!state.skip && RTF_SYMBOLS[next]) output += RTF_SYMBOLS[next];
+      index += 1;
+      continue;
+    }
+
+    let cursor = index + 1;
+    while (/[a-z]/i.test(source[cursor] || '')) cursor += 1;
+    const word = source.slice(index + 1, cursor).toLowerCase();
+    let sign = 1;
+    if (source[cursor] === '-') { sign = -1; cursor += 1; }
+    const numberStart = cursor;
+    while (/\d/.test(source[cursor] || '')) cursor += 1;
+    const hasNumber = cursor > numberStart;
+    const parameter = hasNumber ? sign * Number.parseInt(source.slice(numberStart, cursor), 10) : null;
+    if (source[cursor] === ' ') cursor += 1;
+    index = cursor - 1;
+
+    if (RTF_DESTINATIONS.has(word)) {
+      state.skip = true;
+      continue;
+    }
+    if (state.skip) continue;
+    if (word === 'par' || word === 'line') output += '\n';
+    else if (word === 'tab') output += '\t';
+    else if (word === 'uc' && parameter !== null) state.unicodeFallback = Math.max(0, parameter);
+    else if (word === 'u' && parameter !== null) {
+      output += String.fromCodePoint(parameter < 0 ? parameter + 65536 : parameter);
+      index += state.unicodeFallback;
+    } else if (RTF_SYMBOLS[word]) output += RTF_SYMBOLS[word];
+  }
+
+  return output
+    .replace(/\u0000/g, '')
+    .replace(/\u00a0/g, ' ')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n[ \t]+/g, '\n')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+};
 const numberOrNull = (value) => {
   if (value === '' || value === null || value === undefined) return null;
   const number = Number(value);
@@ -57,7 +146,7 @@ export const buildCatereaseKitchenCatalog = ({ menuItems = [], menuItemRecipes =
       reportedCost: numberOrNull(row.Cost),
       purchaseUnitCost: numberOrNull(row.PUnitCost ?? master?.PUnitCost),
       subRecipe: booleanValue(row.SubRecipe ?? master?.SubRecipe),
-      instructions: clean(row.Instructions || master?.Instructions),
+      instructions: catereaseRichTextToPlain(row.Instructions || master?.Instructions),
     };
   };
   const normalizedIngredients = [...ingredientByKey.entries()].map(([key, row]) => {
@@ -70,8 +159,8 @@ export const buildCatereaseKitchenCatalog = ({ menuItems = [], menuItemRecipes =
       name: clean(row.ItemName || row.Title || row.IngID),
       category: clean(row.Category),
       type: clean(row.Type),
-      instructions: clean(row.Instructions),
-      notes: clean(row.Notes || row.Comment),
+      instructions: catereaseRichTextToPlain(row.Instructions),
+      notes: catereaseRichTextToPlain(row.Notes || row.Comment),
       prepArea: clean(row.PrepArea),
       purchaseUnit: clean(row.PUnitNum),
       purchaseUnitQuantity: numberOrNull(row.PUnitQty),
@@ -99,9 +188,9 @@ export const buildCatereaseKitchenCatalog = ({ menuItems = [], menuItemRecipes =
       title: clean(row.LongTitle || row.Title),
       category: clean(row.Category),
       itemType: clean(row.ItemType),
-      description: clean(row.Description || row.Comment),
-      instructions: clean(row.Instructions || row.Prepare),
-      notes: clean(row.Notes),
+      description: catereaseRichTextToPlain(row.Description || row.Comment),
+      instructions: catereaseRichTextToPlain(row.Instructions || row.Prepare),
+      notes: catereaseRichTextToPlain(row.Notes),
       prepArea: clean(row.PrepArea),
       servings,
       price: numberOrNull(row.Price),

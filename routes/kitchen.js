@@ -12,9 +12,25 @@ import { cleanupManagedImageSafely } from '../utils/managedImageCleanup.js';
 import { INVALID_IMAGE_UPLOAD_RESPONSE, isAllowedImageUpload } from '../utils/imageSignature.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import { syncKitchenRecipeMatches } from '../utils/kitchenRecipeMatching.js';
+import { catereaseRichTextToPlain } from '../utils/catereaseKitchen.js';
 
 const router = Router();
 const RECIPE_SUMMARY_FIELDS = 'sourceId locationId name title category itemType description instructions notes prepArea servings price cost costPerServing ingredients hidden inactive revisedAt';
+const sanitizeRecipeOutput = (recipe) => recipe ? {
+  ...recipe,
+  title: catereaseRichTextToPlain(recipe.title),
+  description: catereaseRichTextToPlain(recipe.description),
+  instructions: catereaseRichTextToPlain(recipe.instructions),
+  notes: catereaseRichTextToPlain(recipe.notes),
+  ingredients: (Array.isArray(recipe.ingredients) ? recipe.ingredients : []).map((ingredient) => ({
+    ...ingredient,
+    instructions: catereaseRichTextToPlain(ingredient?.instructions),
+  })),
+} : recipe;
+const sanitizeKitchenItemOutput = (item) => ({
+  ...item,
+  ...(item?.catereaseRecipeId ? { catereaseRecipeId: sanitizeRecipeOutput(item.catereaseRecipeId) } : {}),
+});
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -260,7 +276,7 @@ router.get('/recipes', async (req, res) => {
       linkedByRecipe.set(key, entries);
     });
     return res.json({
-      items: items.map((item) => ({ ...item, linkedDishes: linkedByRecipe.get(String(item._id)) || [] })),
+      items: items.map((item) => ({ ...sanitizeRecipeOutput(item), linkedDishes: linkedByRecipe.get(String(item._id)) || [] })),
       total,
       page,
       limit,
@@ -291,8 +307,9 @@ router.get('/', async (_req, res) => {
   try {
     const items = await KitchenItem.find()
       .populate('catereaseRecipeId', RECIPE_SUMMARY_FIELDS)
-      .sort({ createdAt: -1 });
-    res.json(items);
+      .sort({ createdAt: -1 })
+      .lean();
+    res.json(items.map(sanitizeKitchenItemOutput));
   } catch (err) {
     return sendApiError(res, err, {
       context: 'Kitchen items list failed',
@@ -359,7 +376,8 @@ router.post('/', upload.single('image'), async (req, res) => {
 
     const created = await KitchenItem.create(payload);
     await syncKitchenRecipeMatches();
-    res.status(201).json(await KitchenItem.findById(created._id).populate('catereaseRecipeId', RECIPE_SUMMARY_FIELDS));
+    const result = await KitchenItem.findById(created._id).populate('catereaseRecipeId', RECIPE_SUMMARY_FIELDS).lean();
+    res.status(201).json(sanitizeKitchenItemOutput(result));
   } catch (err) {
     if (uploadedImage) await cleanupManagedImageSafely(uploadedImage, 'orphaned kitchen image');
     return sendApiError(res, err, {
@@ -503,7 +521,8 @@ router.patch('/:id', upload.single('image'), async (req, res) => {
       await cleanupManagedImageSafely(current.image, 'kitchen image');
     }
     if (updates.name !== undefined && current.recipeMatchMethod !== 'manual') await syncKitchenRecipeMatches();
-    res.json(await KitchenItem.findById(updated._id).populate('catereaseRecipeId', RECIPE_SUMMARY_FIELDS));
+    const result = await KitchenItem.findById(updated._id).populate('catereaseRecipeId', RECIPE_SUMMARY_FIELDS).lean();
+    res.json(sanitizeKitchenItemOutput(result));
   } catch (err) {
     if (uploadedImage) await cleanupManagedImageSafely(uploadedImage, 'orphaned kitchen image');
     return sendApiError(res, err, {

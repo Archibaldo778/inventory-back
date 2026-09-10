@@ -34,6 +34,7 @@ import {
 } from '../utils/catereaseFiles.js';
 import { nyToday } from '../utils/dropboxDocuments.js';
 import { buildCatereaseFinancialPreview, buildCatereaseKitchenCatalog } from '../utils/catereaseKitchen.js';
+import { syncKitchenRecipeMatches } from '../utils/kitchenRecipeMatching.js';
 
 const router = Router();
 const requireCatereaseAdmin = [requireAuth, requireAdmin];
@@ -198,6 +199,7 @@ export const runCatereaseRecipeSync = async () => {
         KitchenRecipe.updateMany({ sourceProvider: 'caterease', lastSeenRun: { $ne: runId }, sourceDeletedAt: null }, { $set: { sourceDeletedAt: removedAt } }),
         KitchenIngredientUnit.updateMany({ sourceProvider: 'caterease', lastSeenRun: { $ne: runId }, sourceDeletedAt: null }, { $set: { sourceDeletedAt: removedAt } }),
       ]);
+      const recipeMatches = await syncKitchenRecipeMatches();
       const summary = {
         recipes: catalog.recipes.length,
         ingredients: catalog.ingredients.length,
@@ -207,6 +209,7 @@ export const runCatereaseRecipeSync = async () => {
         removedRecipes: Number(removedRecipes.modifiedCount || 0),
         removedIngredients: Number(removedIngredients.modifiedCount || 0),
         removedUnits: Number(removedUnits.modifiedCount || 0),
+        recipeMatches,
       };
       integration.lastRecipeSyncCompletedAt = new Date();
       integration.lastRecipeSyncSummary = summary;

@@ -7,11 +7,14 @@ import multer from 'multer';
 import { Readable } from 'stream';
 import { v2 as cloudinary } from 'cloudinary';
 import KitchenItem from '../models/KitchenItem.js';
+import KitchenRecipe from '../models/KitchenRecipe.js';
 import { cleanupManagedImageSafely } from '../utils/managedImageCleanup.js';
 import { INVALID_IMAGE_UPLOAD_RESPONSE, isAllowedImageUpload } from '../utils/imageSignature.js';
 import { sendApiError } from '../utils/apiErrors.js';
+import { syncKitchenRecipeMatches } from '../utils/kitchenRecipeMatching.js';
 
 const router = Router();
+const RECIPE_SUMMARY_FIELDS = 'sourceId locationId name title category itemType description instructions notes prepArea servings price cost costPerServing ingredients hidden inactive revisedAt';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -207,10 +210,88 @@ const uploadToCloudinary = (file) => new Promise((resolve, reject) => {
   Readable.from(file.buffer).pipe(stream);
 });
 
+router.get('/recipes', async (req, res) => {
+  try {
+    const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+    const limit = Math.max(1, Math.min(100, Number.parseInt(req.query.limit, 10) || 48));
+    const search = sanitizeStr(req.query.search);
+    const linked = sanitizeStr(req.query.linked).toLowerCase();
+    const query = { sourceProvider: 'caterease', sourceDeletedAt: null };
+    if (search) {
+      const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const pattern = new RegExp(escaped, 'i');
+      query.$or = [
+        { name: pattern },
+        { title: pattern },
+        { category: pattern },
+        { description: pattern },
+        { 'ingredients.name': pattern },
+      ];
+    }
+
+    if (linked === 'true' || linked === 'false') {
+      const linkedRecipeIds = await KitchenItem.distinct('catereaseRecipeId', { catereaseRecipeId: { $ne: null } });
+      query._id = linked === 'true' ? { $in: linkedRecipeIds } : { $nin: linkedRecipeIds };
+    }
+
+    const [items, total, recipeCount, dishCount, matchedDishCount] = await Promise.all([
+      KitchenRecipe.find(query)
+        .select(RECIPE_SUMMARY_FIELDS)
+        .sort({ name: 1, revisedAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+      KitchenRecipe.countDocuments(query),
+      KitchenRecipe.countDocuments({ sourceProvider: 'caterease', sourceDeletedAt: null }),
+      KitchenItem.countDocuments(),
+      KitchenItem.countDocuments({ catereaseRecipeId: { $ne: null } }),
+    ]);
+    const recipeIds = items.map((item) => item._id);
+    const linkedItems = recipeIds.length
+      ? await KitchenItem.find({ catereaseRecipeId: { $in: recipeIds } })
+        .select('_id name image recipeMatchMethod')
+        .lean()
+      : [];
+    const linkedByRecipe = new Map();
+    linkedItems.forEach((item) => {
+      const key = String(item.catereaseRecipeId || '');
+      const entries = linkedByRecipe.get(key) || [];
+      entries.push(item);
+      linkedByRecipe.set(key, entries);
+    });
+    return res.json({
+      items: items.map((item) => ({ ...item, linkedDishes: linkedByRecipe.get(String(item._id)) || [] })),
+      total,
+      page,
+      limit,
+      pages: Math.max(1, Math.ceil(total / limit)),
+      stats: { recipes: recipeCount, dishes: dishCount, matchedDishes: matchedDishCount, unmatchedDishes: Math.max(0, dishCount - matchedDishCount) },
+    });
+  } catch (err) {
+    return sendApiError(res, err, {
+      context: 'Kitchen recipe catalog failed',
+      fallbackMessage: 'Failed to list kitchen recipes',
+    });
+  }
+});
+
+router.post('/recipes/rematch', async (_req, res) => {
+  try {
+    return res.json(await syncKitchenRecipeMatches());
+  } catch (err) {
+    return sendApiError(res, err, {
+      context: 'Kitchen recipe matching failed',
+      fallbackMessage: 'Failed to match kitchen recipes',
+    });
+  }
+});
+
 // GET all kitchen items
 router.get('/', async (_req, res) => {
   try {
-    const items = await KitchenItem.find().sort({ createdAt: -1 });
+    const items = await KitchenItem.find()
+      .populate('catereaseRecipeId', RECIPE_SUMMARY_FIELDS)
+      .sort({ createdAt: -1 });
     res.json(items);
   } catch (err) {
     return sendApiError(res, err, {
@@ -277,7 +358,8 @@ router.post('/', upload.single('image'), async (req, res) => {
     }
 
     const created = await KitchenItem.create(payload);
-    res.status(201).json(created);
+    await syncKitchenRecipeMatches();
+    res.status(201).json(await KitchenItem.findById(created._id).populate('catereaseRecipeId', RECIPE_SUMMARY_FIELDS));
   } catch (err) {
     if (uploadedImage) await cleanupManagedImageSafely(uploadedImage, 'orphaned kitchen image');
     return sendApiError(res, err, {
@@ -420,7 +502,8 @@ router.patch('/:id', upload.single('image'), async (req, res) => {
     ) {
       await cleanupManagedImageSafely(current.image, 'kitchen image');
     }
-    res.json(updated);
+    if (updates.name !== undefined && current.recipeMatchMethod !== 'manual') await syncKitchenRecipeMatches();
+    res.json(await KitchenItem.findById(updated._id).populate('catereaseRecipeId', RECIPE_SUMMARY_FIELDS));
   } catch (err) {
     if (uploadedImage) await cleanupManagedImageSafely(uploadedImage, 'orphaned kitchen image');
     return sendApiError(res, err, {

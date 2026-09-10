@@ -446,9 +446,11 @@ import barRoutes from './routes/bar.js';
 import publicBarReturnsRoutes from './routes/publicBarReturns.js';
 import dropboxIntegrationRoutes, { runDropboxDiscoverySync } from './routes/dropboxIntegration.js';
 import catereaseIntegrationRoutes, { runCatereaseFileSync } from './routes/catereaseIntegration.js';
+import brotherLabelRoutes from './routes/brotherLabels.js';
 import { getCatereaseConfig } from './utils/catereaseApi.js';
 
 app.use('/api/auth', authRoutes);
+app.use('/api/brother-labels', brotherLabelRoutes);
 app.use('/api/products', requireAuth, requireProductWorkspaceAccess, requireProductMutationAccess, productRoutes);
 app.use('/api/users', requireAuth, requireUsersAccess, userRoutes);
 app.use('/users', requireAuth, requireUsersAccess, userRoutes);

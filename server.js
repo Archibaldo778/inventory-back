@@ -427,6 +427,7 @@ app.get('/api/image-proxy', enforceImageProxyRateLimit, async (req, res) => {
 
 // роуты товаров
 import productRoutes from './routes/products.js';
+import publicProductRoutes from './routes/publicProducts.js';
 import userRoutes from './routes/users.js';
 import authRoutes from './routes/auth.js';
 import eventRoutes, { runNowstaSync } from './routes/events.js';
@@ -451,6 +452,7 @@ import { getCatereaseConfig } from './utils/catereaseApi.js';
 
 app.use('/api/auth', authRoutes);
 app.use('/api/brother-labels', brotherLabelRoutes);
+app.use('/api/public/products', publicProductRoutes);
 app.use('/api/products', requireAuth, requireProductWorkspaceAccess, requireProductMutationAccess, productRoutes);
 app.use('/api/users', requireAuth, requireUsersAccess, userRoutes);
 app.use('/users', requireAuth, requireUsersAccess, userRoutes);

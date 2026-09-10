@@ -232,6 +232,7 @@ router.get('/recipes', async (req, res) => {
     const limit = Math.max(1, Math.min(100, Number.parseInt(req.query.limit, 10) || 48));
     const search = sanitizeStr(req.query.search);
     const linked = sanitizeStr(req.query.linked).toLowerCase();
+    const ingredientFilter = sanitizeStr(req.query.ingredients).toLowerCase();
     const query = { sourceProvider: 'caterease', sourceDeletedAt: null };
     if (search) {
       const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -249,8 +250,10 @@ router.get('/recipes', async (req, res) => {
       const linkedRecipeIds = await KitchenItem.distinct('catereaseRecipeId', { catereaseRecipeId: { $ne: null } });
       query._id = linked === 'true' ? { $in: linkedRecipeIds } : { $nin: linkedRecipeIds };
     }
+    if (ingredientFilter === 'with') query['ingredients.0'] = { $exists: true };
+    if (ingredientFilter === 'without') query['ingredients.0'] = { $exists: false };
 
-    const [items, total, recipeCount, dishCount, matchedDishCount] = await Promise.all([
+    const [items, total, recipeCount, recipesWithIngredients, dishCount, matchedDishCount] = await Promise.all([
       KitchenRecipe.find(query)
         .select(RECIPE_SUMMARY_FIELDS)
         .sort({ name: 1, revisedAt: -1 })
@@ -259,6 +262,7 @@ router.get('/recipes', async (req, res) => {
         .lean(),
       KitchenRecipe.countDocuments(query),
       KitchenRecipe.countDocuments({ sourceProvider: 'caterease', sourceDeletedAt: null }),
+      KitchenRecipe.countDocuments({ sourceProvider: 'caterease', sourceDeletedAt: null, 'ingredients.0': { $exists: true } }),
       KitchenItem.countDocuments(),
       KitchenItem.countDocuments({ catereaseRecipeId: { $ne: null } }),
     ]);
@@ -289,7 +293,13 @@ router.get('/recipes', async (req, res) => {
       page,
       limit,
       pages: Math.max(1, Math.ceil(total / limit)),
-      stats: { recipes: recipeCount, dishes: dishCount, matchedDishes: matchedDishCount, unmatchedDishes: Math.max(0, dishCount - matchedDishCount) },
+      stats: {
+        recipes: recipeCount,
+        recipesWithIngredients,
+        dishes: dishCount,
+        matchedDishes: matchedDishCount,
+        unmatchedDishes: Math.max(0, dishCount - matchedDishCount),
+      },
     });
   } catch (err) {
     return sendApiError(res, err, {

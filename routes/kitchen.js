@@ -265,7 +265,7 @@ router.get('/recipes', async (req, res) => {
     const recipeIds = items.map((item) => item._id);
     const linkedItems = recipeIds.length
       ? await KitchenItem.find({ catereaseRecipeId: { $in: recipeIds } })
-        .select('_id name image recipeMatchMethod')
+        .select('_id name image catereaseRecipeId recipeMatchMethod')
         .lean()
       : [];
     const linkedByRecipe = new Map();
@@ -276,7 +276,15 @@ router.get('/recipes', async (req, res) => {
       linkedByRecipe.set(key, entries);
     });
     return res.json({
-      items: items.map((item) => ({ ...sanitizeRecipeOutput(item), linkedDishes: linkedByRecipe.get(String(item._id)) || [] })),
+      items: items.map((item) => {
+        const linkedDishes = linkedByRecipe.get(String(item._id)) || [];
+        const linkedImage = linkedDishes.find((dish) => sanitizeStr(dish?.image))?.image || null;
+        return {
+          ...sanitizeRecipeOutput(item),
+          image: linkedImage,
+          linkedDishes,
+        };
+      }),
       total,
       page,
       limit,

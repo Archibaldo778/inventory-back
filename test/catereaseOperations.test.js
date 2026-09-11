@@ -12,6 +12,7 @@ import {
   renderCatereaseOperationalDocx,
 } from '../utils/catereaseOperations.js';
 import {
+  CATEREASE_OPERATIONAL_BAR_ITEMS_VERSION,
   catereaseOperationalPackOutToBarItems,
   hasAppliedCatereaseOperationalChecksum,
 } from '../utils/catereaseOperationalBarItems.js';
@@ -106,9 +107,9 @@ test('unchanged Caterease operational snapshots are applied only once to a BarEv
   const barEvent = {
     revision: 8,
     audit: [
-      { action: 'caterease_operations_synced', details: { checksum: 'checksum-a' } },
+      { action: 'caterease_operations_synced', details: { checksum: 'checksum-a', barItemsVersion: CATEREASE_OPERATIONAL_BAR_ITEMS_VERSION } },
       { action: 'returns_saved', details: {} },
-      { action: 'caterease_operations_synced', details: { checksum: 'checksum-b' } },
+      { action: 'caterease_operations_synced', details: { checksum: 'checksum-b', barItemsVersion: CATEREASE_OPERATIONAL_BAR_ITEMS_VERSION } },
       { action: 'captain_notes_saved', details: {} },
     ],
   };
@@ -116,6 +117,9 @@ test('unchanged Caterease operational snapshots are applied only once to a BarEv
   assert.equal(hasAppliedCatereaseOperationalChecksum(barEvent, 'checksum-a'), false);
   assert.equal(hasAppliedCatereaseOperationalChecksum(barEvent, ''), false);
   assert.equal(hasAppliedCatereaseOperationalChecksum({ audit: [] }, 'checksum-b'), false);
+  assert.equal(hasAppliedCatereaseOperationalChecksum({
+    audit: [{ action: 'caterease_operations_synced', details: { checksum: 'checksum-b' } }],
+  }, 'checksum-b'), false);
 });
 
 test('Caterease Pack Out rows preserve operational grouping', () => {

@@ -18,6 +18,7 @@ import {
   runImportedBarItemMergePipeline,
 } from '../utils/barManualItems.js';
 import {
+  CATEREASE_OPERATIONAL_BAR_ITEMS_VERSION,
   catereaseOperationalPackOutToBarItems,
   hasAppliedCatereaseOperationalChecksum,
 } from '../utils/catereaseOperationalBarItems.js';
@@ -230,6 +231,7 @@ const syncCatereaseOperationalBarItems = async (event, snapshot) => {
     at: new Date(),
     details: {
       checksum: String(snapshot?.checksum || ''),
+      barItemsVersion: CATEREASE_OPERATIONAL_BAR_ITEMS_VERSION,
       rows: rawItems.length,
       items: merged.importedItems.length,
     },

@@ -1,6 +1,7 @@
 import { classifyRecognizedSection } from './barPackoutRecognition.js';
 
 const clean = (value) => String(value ?? '').trim();
+export const CATEREASE_OPERATIONAL_BAR_ITEMS_VERSION = 2;
 
 const normalizedQuantity = (value) => {
   if (value === null || value === undefined || clean(value) === '') return null;
@@ -36,7 +37,8 @@ export const hasAppliedCatereaseOperationalChecksum = (barEvent, checksum) => {
   for (let index = audit.length - 1; index >= 0; index -= 1) {
     const entry = audit[index];
     if (clean(entry?.action) !== 'caterease_operations_synced') continue;
-    return clean(entry?.details?.checksum) === expected;
+    return clean(entry?.details?.checksum) === expected
+      && Number(entry?.details?.barItemsVersion) === CATEREASE_OPERATIONAL_BAR_ITEMS_VERSION;
   }
   return false;
 };

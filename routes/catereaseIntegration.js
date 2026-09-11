@@ -283,6 +283,7 @@ export const fetchCatereaseOperationalSnapshot = async (eventId, eventDate = '',
     eventId: resolvedEventId,
     packOutRows,
     kitchenPackOutRows,
+    kitchenMenuRows: packOutRows,
     sourceErrors,
   });
 };
@@ -836,7 +837,7 @@ router.get('/operations/events/:id/export/:type', requireAuth, async (req, res) 
   try {
     const type = String(req.params.type || '').toLowerCase();
     if (!['po', 'kitchen_packout', 'kitchen_menu'].includes(type)) return res.status(400).json({ error: 'Unknown operational document type' });
-    const event = await Event.findById(req.params.id).select('externalId title date meta catereaseOperations').lean();
+    const event = await Event.findById(req.params.id).select('externalId title date client meta catereaseOperations updatedAt').lean();
     if (!event) return res.status(404).json({ error: 'Event not found' });
     if (!event.catereaseOperations) return res.status(404).json({ error: 'Caterease operational data has not been synced for this event' });
     const recipes = type === 'kitchen_menu'

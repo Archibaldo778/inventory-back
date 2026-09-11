@@ -110,6 +110,7 @@ export const normalizeCatereaseKitchenMenuDishRows = (rows = []) => {
       prepArea: clean(first(row, ['PrepArea', 'FSPrepArea']), 160),
       subEvent,
       category: clean(first(row, ['Category', 'FSCategory']), 160),
+      menuGroup: clean(first(row, ['MenuGroup', 'GroupName']), 160),
       description: clean(catereaseRichTextToPlain(first(row, ['Description', 'UseDesc'])), 12000),
       notes: clean(catereaseRichTextToPlain(first(row, ['Comment', 'Notes'])), 12000),
     });
@@ -134,6 +135,7 @@ const mergeKitchenMenuRows = (derivedRows = [], directRows = []) => {
       unit: direct.unit,
       subEvent: direct.subEvent,
       category: direct.category,
+      menuGroup: direct.menuGroup,
       description: direct.description,
       notes: direct.notes,
     };
@@ -219,6 +221,15 @@ const table = (headers, rows, widths) => `<w:tbl>
   <w:tblGrid>${widths.map((width) => `<w:gridCol w:w="${width}"/>`).join('')}</w:tblGrid>
   ${headers.length ? `<w:tr>${headers.map((header, index) => cell(header, { bold: true, width: widths[index], shading: 'E7E6E6' })).join('')}</w:tr>` : ''}
   ${rows.map((row) => `<w:tr>${row.map((value, index) => cell(value, { width: widths[index] })).join('')}</w:tr>`).join('')}
+</w:tbl>`;
+
+const documentTitleRow = (title) => `<w:tbl>
+  <w:tblPr><w:tblW w:w="5000" w:type="pct"/><w:tblLayout w:type="fixed"/></w:tblPr>
+  <w:tblGrid><w:gridCol w:w="8000"/><w:gridCol w:w="2600"/></w:tblGrid>
+  <w:tr>
+    <w:tc><w:tcPr><w:tcW w:w="8000" w:type="dxa"/></w:tcPr>${paragraph(title, { bold: true, size: 36, after: 80 })}</w:tc>
+    <w:tc><w:tcPr><w:tcW w:w="2600" w:type="dxa"/></w:tcPr>${paragraph('Revision', { bold: true, size: 28, align: 'right', after: 80 })}</w:tc>
+  </w:tr>
 </w:tbl>`;
 
 const longDate = (value) => {
@@ -374,36 +385,35 @@ const kitchenMenuSections = (rows, recipes) => {
     const match = resolveExactRecipeMatch(row?.itemName, recipeIndex);
     const recipe = match.status === 'matched' ? match.recipe : null;
     const dishKey = itemKey(row?.itemName);
-    const details = [row?.description, row?.notes, recipe?.description, recipe?.instructions, recipe?.notes]
+    const comments = [row?.description, row?.notes]
       .map((value) => clean(catereaseRichTextToPlain(value), 12000))
       .filter((value, index, values) => value && itemKey(value) !== dishKey && values.indexOf(value) === index);
-    const ingredientSource = Array.isArray(recipe?.ingredients) && recipe.ingredients.length
-      ? recipe.ingredients
-      : Array.isArray(row?.components) ? row.components : [];
-    const ingredients = ingredientSource.map((ingredient) => {
-      const amount = [formatQuantity(ingredient?.quantity), clean(ingredient?.unit, 80)].filter(Boolean).join(' ');
-      const name = clean(ingredient?.name, 300);
-      return [amount, name].filter(Boolean).join(' — ');
-    }).filter(Boolean);
+    const labels = [recipe?.instructions, recipe?.notes]
+      .map((value) => clean(catereaseRichTextToPlain(value), 12000))
+      .filter((value, index, values) => value && itemKey(value) !== dishKey && values.indexOf(value) === index);
     return {
       ...row,
-      group: clean(row?.prepArea || row?.category, 160) || 'Menu',
+      group: clean(row?.menuGroup || row?.category || row?.prepArea, 160) || 'Menu',
       itemName: clean(row?.itemName, 300) || 'Untitled dish',
-      details,
-      ingredients,
+      comments,
+      labels,
     };
   });
-  return [...groupedRows(preparedRows, (row) => row.group).entries()].map(([group, values]) => {
-    const bodyRows = values.map((row) => [
+  const bodyRows = [];
+  [...groupedRows(preparedRows, (row) => row.group).entries()].forEach(([group, values]) => {
+    if (!['menu', 'unassigned'].includes(group.toLowerCase())) {
+      bodyRows.push(['', group.toUpperCase(), '', '']);
+    }
+    values.forEach((row) => bodyRows.push([
       formatQuantity(row.quantity),
       row.itemName,
-      row.ingredients.length ? row.ingredients : ['—'],
-      row.details.length ? row.details : ['—'],
-    ]);
-    return `${group.toLowerCase() === 'menu' ? '' : paragraph(group.toUpperCase(), { bold: true, size: 22, before: 220, after: 80 })}${
-      table(['Qty', 'Item', 'Ingredients / Components', 'Comment / Instructions'], bodyRows, [750, 2800, 3400, 3650])
-    }`;
-  }).join('');
+      row.comments,
+      row.labels,
+    ]));
+  });
+  return `${paragraph('MENU', { bold: true, size: 28, before: 220, after: 80 })}${
+    table(['Qty', 'Item', 'Comment', 'Label (OCC; Rentals)'], bodyRows, [570, 4580, 2825, 3105])
+  }`;
 };
 
 const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = false, decorImages = [], includePackOutTemplate = true }) => {
@@ -436,17 +446,28 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
     : Number.isFinite(parsedSnapshotGuestCount) && parsedSnapshotGuestCount > 0 ? parsedSnapshotGuestCount : '';
   const eventTiming = event?.meta?.eventTime || event?.meta?.nowsta?.eventTime || '';
   const deliveryTime = event?.meta?.deliveryTime || '';
+  const documentHeader = isKitchenMenu ? `${documentTitleRow(title)}${table([], [
+    [`Event Name: ${event?.title || 'Event'}`, `Event Timing: ${eventTiming}`],
+    [`Date: ${longDate(event?.date)}`, `Staff Arrival on Site: ${event?.meta?.staffArrivalTime || ''}`],
+    [`Guest Count: ${guestCount}`, `Sales Rep: ${event?.meta?.salesRep || ''}`],
+    [`Client: ${event?.client || ''}`, `Site Contact: ${event?.meta?.siteContact || ''}`],
+    [`Location: ${event?.meta?.venue || event?.meta?.nowsta?.venue || ''}`, `Last Modified: ${new Intl.DateTimeFormat('en-US').format(new Date(event?.updatedAt || Date.now()))}`],
+    [`Address: ${event?.meta?.address || event?.meta?.nowsta?.address || ''}`, `Service Entrance: ${event?.meta?.serviceEntrance || ''}`],
+    [`Client Notes: ${event?.meta?.clientNotes || ''}`, `Meeting Point: ${event?.meta?.meetingPoint || ''}`],
+    [`Venue Notes: ${event?.meta?.venueNotes || ''}`, `Event Number: ${displayedEventNumber(event?.externalId || snapshot?.eventId || '')}`],
+    [`Allergen/Restrictions: ${event?.meta?.allergens || event?.meta?.restrictions || ''}`, ''],
+  ], [5300, 5300])}` : `${paragraph('Revision', { bold: true, size: 28, align: 'right', after: 80 })}${
+    title ? paragraph(title, { bold: true, size: 30, align: 'center', after: 120 }) : ''
+  }${table([], [
+    [`Event: ${event?.title || 'Event'}`, `Event Date: ${longDate(event?.date)}`],
+    [`Sales Rep: ${event?.meta?.salesRep || ''}`, `Event Timing: ${eventTiming}`],
+    [`Guests: ${guestCount}`, `Delivery Time: ${deliveryTime}`],
+    [`Event Number: ${displayedEventNumber(event?.externalId || snapshot?.eventId || '')}`, `Date PO Modified: ${new Intl.DateTimeFormat('en-US').format(new Date())}`],
+  ], [5300, 5300])}`;
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><w:body>
   ${includeBrandLogo ? brandLogoParagraph() : ''}
-  ${paragraph('Revision', { bold: true, size: 28, align: 'right', after: 80 })}
-  ${title ? paragraph(title, { bold: true, size: 30, align: 'center', after: 120 }) : ''}
-  ${table([], [
-    [`Event: ${event?.title || 'Event'}`, `Event Date: ${longDate(event?.date)}`],
-    [`Sales Rep: ${event?.salesRep || ''}`, `Event Timing: ${eventTiming}`],
-    [`Guests: ${guestCount}`, `Delivery Time: ${deliveryTime}`],
-    [`Event Number: ${displayedEventNumber(event?.externalId || snapshot?.eventId || '')}`, `Date PO Modified: ${new Intl.DateTimeFormat('en-US').format(new Date())}`],
-  ], [5300, 5300])}
+  ${documentHeader}
   ${sections || paragraph('No rows returned by Caterease.', { size: 20, before: 240 })}
   <w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="615" w:right="765" w:bottom="600" w:left="810" w:header="720" w:footer="720" w:gutter="0"/></w:sectPr>
 </w:body></w:document>`;

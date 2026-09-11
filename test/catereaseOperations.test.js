@@ -100,6 +100,7 @@ test('Caterease food service rows preserve Kitchen Menu dish details', () => {
     prepArea: 'Pastry',
     subEvent: '',
     category: 'Dessert',
+    menuGroup: '',
     description: '',
     notes: 'Plate cold.',
   });
@@ -193,14 +194,13 @@ test('Kitchen Menu DOCX uses dish names and matched Caterease instructions', asy
   assert.match(xml, /KITCHEN MENU/);
   assert.match(xml, /Caramel Apple/);
   assert.match(xml, /Temper apples before service/);
-  assert.match(xml, /Ingredients \/ Components/);
-  assert.match(xml, /Comment \/ Instructions/);
-  assert.match(xml, /3 lb/);
-  assert.match(xml, /Green apple puree/);
+  assert.match(xml, /Label \(OCC; Rentals\)/);
+  assert.match(xml, />Comment</);
+  assert.doesNotMatch(xml, /Green apple puree/);
   assert.ok((xml.match(/<w:tbl>/g) || []).length >= 2, 'metadata and menu must both use tables');
 });
 
-test('Kitchen Menu DOCX lists packout component quantities when no recipe is matched', async () => {
+test('Kitchen Menu DOCX does not render packout components as menu dishes', async () => {
   const snapshot = buildCatereaseOperationalSnapshot({
     eventId: 'E22672',
     kitchenPackOutRows: [
@@ -216,10 +216,9 @@ test('Kitchen Menu DOCX lists packout component quantities when no recipe is mat
   });
   const zip = await JSZip.loadAsync(buffer);
   const xml = await zip.file('word/document.xml').async('string');
-  assert.match(xml, /12 Each/);
-  assert.match(xml, /Mousse/);
-  assert.match(xml, /6 Each/);
-  assert.match(xml, /Apple center/);
+  assert.match(xml, /Caramel Apple/);
+  assert.doesNotMatch(xml, />Mousse</);
+  assert.doesNotMatch(xml, />Apple center</);
 });
 
 test('generated operational DOCX is a valid Word package and escapes upstream text', async () => {

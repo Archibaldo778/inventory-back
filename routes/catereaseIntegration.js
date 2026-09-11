@@ -768,14 +768,18 @@ router.get('/operations/events/:id/export/:type', requireAuth, async (req, res) 
   try {
     const type = String(req.params.type || '').toLowerCase();
     if (!['po', 'kitchen_production', 'kitchen_menu'].includes(type)) return res.status(400).json({ error: 'Unknown operational document type' });
-    const event = await Event.findById(req.params.id).select('externalId title date catereaseOperations').lean();
+    const event = await Event.findById(req.params.id).select('externalId title date meta catereaseOperations').lean();
     if (!event) return res.status(404).json({ error: 'Event not found' });
     if (!event.catereaseOperations) return res.status(404).json({ error: 'Caterease operational data has not been synced for this event' });
     const docx = await renderCatereaseOperationalDocx({ event, snapshot: event.catereaseOperations, type });
-    const safeName = String(event.title || 'event').replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').slice(0, 80) || 'event';
+    const safeTitle = String(event.title || 'Event').replace(/[<>:"/\\|?*\u0000-\u001F]/g, '').replace(/\s+/g, ' ').trim().slice(0, 100) || 'Event';
+    const dateMatch = String(event.date || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    const datePrefix = dateMatch ? `${dateMatch[2]}-${dateMatch[3]}-${dateMatch[1].slice(-2)}` : '';
+    const documentCode = type === 'po' ? 'PO' : 'KPO';
+    const fileName = [datePrefix, safeTitle, documentCode].filter(Boolean).join(' ');
     res.setHeader('Cache-Control', 'private, no-store');
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-    res.setHeader('Content-Disposition', `attachment; filename="${safeName}-${type === 'po' ? 'pack-out' : 'kitchen-production'}.docx"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}.docx"`);
     return res.send(docx);
   } catch (error) {
     return sendApiError(res, error, { context: 'Caterease operational export failed', fallbackMessage: 'Failed to generate Caterease operational document' });

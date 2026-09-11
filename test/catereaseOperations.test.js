@@ -36,6 +36,23 @@ test('Caterease Pack Out rows preserve operational grouping', () => {
   });
 });
 
+test('Caterease Pack Out excludes non-inventory Standard service rows', () => {
+  const rows = normalizeCatereasePackOutRows([
+    { ItemName: 'Food', Qty: 12, MenuGroup: 'Standard' },
+    { ItemName: 'C-folds', Qty: 2, MenuGroup: 'Kitchen Equipment' },
+  ]);
+  assert.deepEqual(rows.map((row) => row.itemName), ['C-folds']);
+});
+
+test('operational snapshot keeps guest count from the Standard Food service row', () => {
+  const snapshot = buildCatereaseOperationalSnapshot({
+    eventId: 'E22672',
+    packOutRows: [{ ItemName: 'Food', Qty: 12, MenuGroup: 'Standard' }],
+  });
+  assert.equal(snapshot.guestCount, 12);
+  assert.equal(snapshot.packOut.length, 0);
+});
+
 test('Caterease Kitchen Production rows preserve required item details', () => {
   const rows = normalizeCatereaseKitchenMenuRows([{
     UID: 42,
@@ -71,7 +88,7 @@ test('operational snapshot checksum is stable when API row order changes', () =>
 test('generated operational DOCX is a valid Word package and escapes upstream text', async () => {
   const buffer = await renderCatereaseOperationalDocx({
     event: { title: '<Bensadoun>', date: '2026-09-11', externalId: 'E22672' },
-    snapshot: { schemaVersion: 2, packOut: [{ itemName: '<script>alert(1)</script>', quantity: 1, unit: 'Each', menuGroup: 'Kitchen Equipment' }] },
+    snapshot: { schemaVersion: 2, packOut: [{ itemName: '<script>alert(1)</script>', quantity: 1, unit: 'Each', menuGroup: 'Kitchen Equipment', subEvent: '00001-00000000062666' }] },
     type: 'po',
   });
   const zip = await JSZip.loadAsync(buffer);
@@ -79,5 +96,6 @@ test('generated operational DOCX is a valid Word package and escapes upstream te
   assert.match(xml, /&lt;Bensadoun&gt;/);
   assert.doesNotMatch(xml, /<script>/);
   assert.match(xml, /KITCHEN EQUIPMENT/);
-  assert.match(xml, /PACK OUT/);
+  assert.match(xml, /Notes\/Comments/);
+  assert.doesNotMatch(xml, /00001-00000000062666/);
 });

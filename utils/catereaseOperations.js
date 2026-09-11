@@ -34,7 +34,7 @@ export const normalizeCatereasePackOutRows = (rows = []) => (Array.isArray(rows)
     menuGroup: clean(first(row, ['MenuGroup', 'GroupName']), 160),
     notes: clean(first(row, ['Notes', 'Comment', 'Instructions']), 1000),
   }))
-  .filter((row) => row.itemName);
+  .filter((row) => row.itemName && row.menuGroup.toLowerCase() !== 'standard');
 
 export const normalizeCatereaseKitchenMenuRows = (rows = []) => (Array.isArray(rows) ? rows : [])
   .slice(0, 10000)
@@ -57,10 +57,16 @@ export const normalizeCatereaseKitchenMenuRows = (rows = []) => (Array.isArray(r
 const stableRows = (rows) => [...rows].sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
 
 export const buildCatereaseOperationalSnapshot = ({ eventId, packOutRows = [], kitchenMenuRows = [], syncedAt = new Date() } = {}) => {
+  const guestRow = (Array.isArray(packOutRows) ? packOutRows : []).find((row) => (
+    clean(first(row, ['ItemName', 'Name', 'Title'])).toLowerCase() === 'food'
+    && clean(first(row, ['MenuGroup', 'GroupName'])).toLowerCase() === 'standard'
+  ));
+  const guestCount = numberOrNull(first(guestRow, ['Qty', 'Quantity']));
   const packOut = normalizeCatereasePackOutRows(packOutRows);
   const kitchenMenu = normalizeCatereaseKitchenMenuRows(kitchenMenuRows);
   const checksum = crypto.createHash('sha256').update(JSON.stringify({
     eventId: clean(eventId, 120),
+    guestCount,
     packOut: stableRows(packOut),
     kitchenMenu: stableRows(kitchenMenu),
   })).digest('hex');
@@ -69,6 +75,7 @@ export const buildCatereaseOperationalSnapshot = ({ eventId, packOutRows = [], k
     eventId: clean(eventId, 120),
     syncedAt,
     checksum,
+    guestCount,
     packOut,
     kitchenMenu,
   };
@@ -90,18 +97,126 @@ const paragraph = (value, options = {}) => {
   return `<w:p><w:pPr>${align ? `<w:jc w:val="${align}"/>` : ''}<w:spacing w:before="${before}" w:after="${after}"/></w:pPr>${textRun(value, { bold, size })}</w:p>`;
 };
 
-const cell = (value, { bold = false, width = 0, shading = '' } = {}) => (
-  `<w:tc><w:tcPr>${width ? `<w:tcW w:w="${width}" w:type="dxa"/>` : ''}${shading ? `<w:shd w:val="clear" w:fill="${shading}"/>` : ''}</w:tcPr>${paragraph(value, { bold, size: 18, after: 0 })}</w:tc>`
+const cell = (value, { bold = false, width = 0, shading = '', align = '' } = {}) => (
+  `<w:tc><w:tcPr>${width ? `<w:tcW w:w="${width}" w:type="dxa"/>` : ''}${shading ? `<w:shd w:val="clear" w:fill="${shading}"/>` : ''}</w:tcPr>${paragraph(value, { bold, size: 18, after: 0, align })}</w:tc>`
 );
 
 const table = (headers, rows, widths) => `<w:tbl>
-  <w:tblPr><w:tblW w:w="0" w:type="auto"/><w:tblBorders><w:top w:val="single" w:sz="4" w:color="A6A6A6"/><w:left w:val="single" w:sz="4" w:color="A6A6A6"/><w:bottom w:val="single" w:sz="4" w:color="A6A6A6"/><w:right w:val="single" w:sz="4" w:color="A6A6A6"/><w:insideH w:val="single" w:sz="4" w:color="D9D9D9"/><w:insideV w:val="single" w:sz="4" w:color="D9D9D9"/></w:tblBorders></w:tblPr>
+  <w:tblPr><w:tblW w:w="5000" w:type="pct"/><w:tblLayout w:type="fixed"/><w:tblBorders><w:top w:val="single" w:sz="8" w:color="000000"/><w:left w:val="single" w:sz="8" w:color="000000"/><w:bottom w:val="single" w:sz="8" w:color="000000"/><w:right w:val="single" w:sz="8" w:color="000000"/><w:insideH w:val="single" w:sz="8" w:color="000000"/><w:insideV w:val="single" w:sz="8" w:color="000000"/></w:tblBorders></w:tblPr>
   <w:tblGrid>${widths.map((width) => `<w:gridCol w:w="${width}"/>`).join('')}</w:tblGrid>
-  <w:tr>${headers.map((header, index) => cell(header, { bold: true, width: widths[index], shading: 'E7E6E6' })).join('')}</w:tr>
+  ${headers.length ? `<w:tr>${headers.map((header, index) => cell(header, { bold: true, width: widths[index], shading: 'E7E6E6' })).join('')}</w:tr>` : ''}
   ${rows.map((row) => `<w:tr>${row.map((value, index) => cell(value, { width: widths[index] })).join('')}</w:tr>`).join('')}
 </w:tbl>`;
 
+const longDate = (value) => {
+  const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return clean(value, 80);
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  return new Intl.DateTimeFormat('en-US', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC',
+  }).format(date);
+};
+
+const displayedEventNumber = (value) => {
+  const text = clean(value, 120);
+  const match = text.match(/\bE\d+\b/i);
+  return match ? match[0].toUpperCase() : text;
+};
+
+const itemKey = (value) => clean(value, 300).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+const matchesAny = (value, patterns) => patterns.some((pattern) => pattern.test(value));
+
+const packOutSection = (row) => {
+  const name = itemKey(row?.itemName);
+  const category = clean(row?.category, 160);
+  const menuGroup = clean(row?.menuGroup, 160);
+  if (category.toLowerCase() === 'staff' || menuGroup.toLowerCase() === 'staff') return 'STAFF ITEMS';
+  if (matchesAny(name, [/milk/, /sweet and low/, /splenda/, /sugar cubes?/, /tea bags?/, /espresso/, /tea kettle/])) return 'COFFEE EQUIPMENT';
+  if (matchesAny(name, [/\bpanna\b/, /pellegrino/])) return 'WATER';
+  if (matchesAny(name, [/\bcoke\b/, /diet coke/, /ginger ale/, /ginger beer/, /club soda/, /\btonic\b/])) return 'SODA';
+  if (matchesAny(name, [/juice/, /simple syrup/, /squeeze bottle 12 oz/, /quart container$/])) return 'JUICE';
+  if (matchesAny(name, [/lime wheels?/, /lemon wheels?/, /whole limes?/, /whole lemons?/, /maraschino/, /martini olives?/, /whole oranges?/])) return 'GARNISH';
+  if (matchesAny(name, [/\bstraws?\b/])) return 'ADDITIONAL';
+  if (matchesAny(name, [/tray spray/, /roll of paper ?towels?/])) return 'CLEANING';
+  if (matchesAny(name, [/wooden tray/, /taco insert/, /corner insert/, /white stones?/])) return 'TRAYS';
+  if (matchesAny(name, [/cake stand/, /champagne bucket/])) return 'CAKE STAND';
+  if (matchesAny(name, [/c folds?/, /dish soap/, /dish sponge/, /tray cleaning spray/, /microfiber cloths?/, /first aid kit$/])) return 'SANITATION KIT';
+  if (category.toLowerCase() === 'disposable') return 'DISPOSABLE ITEMS';
+  if (menuGroup.toLowerCase() === 'kitchen equipment') return 'KITCHEN EQUIPMENT';
+  return category || menuGroup || 'UNASSIGNED';
+};
+
+const PACK_OUT_SECTION_ORDER = [
+  'STAFF ITEMS', 'COFFEE EQUIPMENT', 'WATER', 'SODA', 'JUICE', 'GARNISH', 'ADDITIONAL',
+  'CLEANING', 'TRAYS', 'CAKE STAND', 'KITCHEN EQUIPMENT', 'SANITATION KIT', 'DISPOSABLE ITEMS', 'UNASSIGNED',
+];
+
+const PACK_OUT_TEMPLATE = Object.freeze({
+  'STAFF ITEMS': ['Paper plates', 'Plastic flatware', 'Paper cups', 'Staff water', 'First aid and grooming kits'],
+  'COFFEE EQUIPMENT': ['Milk (Quart)', 'Skim Milk (Quart)', 'Almond Milk', 'Oat Milk', ['Sweet and Low /splenda', '1/2 pint combined'], 'Sugar Cubes', 'Assorted Tea Bags', 'Espresso Machine', ['Espresso Machine Pods', '1 box each kind'], 'Milk Steamer', 'Tea kettle'],
+  WATER: ['Panna', 'Pellegrino'],
+  SODA: ['Coke', 'Diet Coke', 'Ginger Ale', 'Ginger Beer', 'Club Soda', 'Tonic'],
+  JUICE: ['Orange Juice', 'Grapefruit Juice', 'Cranberry Juice', 'Lemon Juice', 'Lime Juice', 'Simple Syrup - pint', 'Squeeze Bottle (12 oz)', 'Quart Container'],
+  GARNISH: ['Lime Wheels', 'Lemon Wheels', 'Whole Limes', 'Whole Lemons', 'Maraschino Cherries', 'Martini Olives', 'Whole oranges'],
+  ADDITIONAL: ['Straws'],
+  CLEANING: ['Tray spray', 'Roll of papertowels'],
+  TRAYS: ['Square Walnut wooden tray 14"X14"', 'Taco insert for square wood tray', 'Gold corner insert', 'Small white stones'],
+  'CAKE STAND': ['CAKE STAND', 'Milano Stainless Steel Champagne Bucket'],
+  'KITCHEN EQUIPMENT': ['Chef apron', 'Cutting Board', 'Knife- Serrated', 'Sheet pans- Half', 'Sheet pans- Full', 'Mixing Bowl- Small', 'Mixing Bowl- Medium', 'Spoons- Small', 'Spoons- Medium', 'Parchment paper', 'Pot- Small', 'Pot- Medium', 'Rondeau - Medium', 'Ice cream scoop', 'Ladles- 2 oz', 'Salt and pepper', 'Olive oil', 'Fish Spatula', 'Squeeze bottle', 'Whisk', 'Tongs', 'Rubber Spatula', 'Wooden spoon', 'Plastic teaspoons', 'Plastic tasting spoons'],
+  'SANITATION KIT': ['C-folds', 'Dish soap', 'Dish sponge', 'Tray Cleaning spray', 'Microfiber cloths', 'First aid kit'],
+  'DISPOSABLE ITEMS': ['Cocktail napkins', 'Clear recycle bags', 'Pastry bags', 'Garbage bags', 'Lug liners', 'Paper towels', 'Foil', 'Plastic wrap', 'Empty transfer tins- half', 'Empty transfer tins- full', ['Gloves- S, M, L', '1 of each'], 'Quart containers w/ lids', 'Pint containers w/ lids', 'Sani wipes'],
+});
+
+const templatedPackOutGroups = (rows) => {
+  const byName = new Map(rows.map((row) => [itemKey(row.itemName), row]));
+  const consumed = new Set();
+  const groups = new Map();
+  Object.entries(PACK_OUT_TEMPLATE).forEach(([section, items]) => {
+    groups.set(section, items.map((entry) => {
+      const [name, templateNote = ''] = Array.isArray(entry) ? entry : [entry, ''];
+      const matched = byName.get(itemKey(name));
+      if (matched) consumed.add(itemKey(matched.itemName));
+      return {
+        itemName: name,
+        quantity: matched?.quantity ?? null,
+        notes: matched?.notes || templateNote,
+      };
+    }));
+  });
+  rows.forEach((row) => {
+    if (consumed.has(itemKey(row.itemName))) return;
+    const section = packOutSection(row);
+    const values = groups.get(section) || [];
+    values.push(row);
+    groups.set(section, values);
+  });
+  return groups;
+};
+
+const blankPackOutRow = (widths) => `<w:tr>${widths.map((width) => cell('', { width })).join('')}</w:tr>`;
+const sectionRow = (value, widths) => `<w:tr>${widths.map((width, index) => cell(index === 0 ? value : '', { width, align: index === 0 ? 'center' : '' })).join('')}</w:tr>`;
+
+const packOutTable = (rows) => {
+  const groups = templatedPackOutGroups(rows.filter((row) => clean(row?.menuGroup, 160).toLowerCase() !== 'standard'));
+  const orderedGroups = [...groups.entries()].sort(([left], [right]) => {
+    const leftIndex = PACK_OUT_SECTION_ORDER.indexOf(left);
+    const rightIndex = PACK_OUT_SECTION_ORDER.indexOf(right);
+    return (leftIndex < 0 ? 999 : leftIndex) - (rightIndex < 0 ? 999 : rightIndex) || left.localeCompare(right);
+  });
+  const widths = [3600, 750, 3800, 1050, 1050];
+  const header = `<w:tr>${['Name', 'Qty', 'Notes/Comments', 'Delivered', 'Returned'].map((value, index) => cell(value, { bold: true, width: widths[index], shading: 'BFBFBF', align: 'center' })).join('')}</w:tr>`;
+  const body = orderedGroups.map(([group, values]) => `${blankPackOutRow(widths)}${sectionRow(group, widths)}${values.map((row) => `<w:tr>${[
+    { value: row.itemName, align: 'center' },
+    { value: formatQuantity(row.quantity), align: '' },
+    { value: row.notes || '', align: '' },
+    { value: '', align: '' },
+    { value: '', align: '' },
+  ].map(({ value, align }, index) => cell(value, { width: widths[index], align })).join('')}</w:tr>`).join('')}`).join('');
+  return `<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/><w:tblLayout w:type="fixed"/><w:tblBorders><w:top w:val="single" w:sz="8" w:color="000000"/><w:left w:val="single" w:sz="8" w:color="000000"/><w:bottom w:val="single" w:sz="8" w:color="000000"/><w:right w:val="single" w:sz="8" w:color="000000"/><w:insideH w:val="single" w:sz="8" w:color="000000"/><w:insideV w:val="single" w:sz="8" w:color="000000"/></w:tblBorders></w:tblPr><w:tblGrid>${widths.map((width) => `<w:gridCol w:w="${width}"/>`).join('')}</w:tblGrid>${header}${body}</w:tbl>`;
+};
+
 const formatQuantity = (value) => {
+  if (value === '' || value === null || value === undefined) return '';
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return '';
   return Number.isInteger(numeric) ? String(numeric) : String(Math.round(numeric * 1000) / 1000);
@@ -124,13 +239,13 @@ const documentXml = ({ event, snapshot, type }) => {
   const rows = isKitchenProduction
     ? (currentMapping ? snapshot?.kitchenMenu : snapshot?.packOut) || []
     : (currentMapping ? snapshot?.packOut : snapshot?.kitchenMenu) || [];
-  const title = isKitchenProduction ? 'KITCHEN PRODUCTION' : 'PACK OUT';
+  const title = isKitchenProduction ? 'KITCHEN PRODUCTION' : '';
   const groups = groupedRows(rows, (row) => (
     isKitchenProduction
       ? row.station || row.prepArea
       : row.menuGroup || row.category || row.prepArea
   ));
-  const sections = [...groups.entries()].map(([group, values]) => {
+  const sections = isKitchenProduction ? [...groups.entries()].map(([group, values]) => {
     const bodyRows = values.map((row) => (
       isKitchenProduction
         ? [formatQuantity(row.quantity), row.unit, row.itemName, row.prepArea]
@@ -141,15 +256,27 @@ const documentXml = ({ event, snapshot, type }) => {
         ? table(['Qty', 'Unit', 'Required item', 'Prep area'], bodyRows, [900, 1200, 5200, 1800])
         : table(['Qty', 'Name', 'Notes / Comments', 'Delivered', 'Returned'], bodyRows, [750, 3600, 3800, 1050, 1050])
     }`;
-  }).join('');
+  }).join('') : packOutTable(rows);
+  const parsedEventGuestCount = Number(event?.meta?.guestCount);
+  const legacyGuestRow = rows.find((row) => itemKey(row?.itemName) === 'food' && clean(row?.menuGroup).toLowerCase() === 'standard');
+  const parsedSnapshotGuestCount = Number(snapshot?.guestCount ?? legacyGuestRow?.quantity);
+  const guestCount = Number.isFinite(parsedEventGuestCount) && parsedEventGuestCount > 0
+    ? parsedEventGuestCount
+    : Number.isFinite(parsedSnapshotGuestCount) && parsedSnapshotGuestCount > 0 ? parsedSnapshotGuestCount : '';
+  const eventTiming = event?.meta?.eventTime || event?.meta?.nowsta?.eventTime || '';
+  const deliveryTime = event?.meta?.deliveryTime || '';
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>
-  ${paragraph('OLIVIER CHENG', { bold: true, size: 32, align: 'center', after: 0 })}
-  ${paragraph('C A T E R I N G  A N D  E V E N T S', { size: 14, align: 'center', after: 180 })}
-  ${paragraph(title, { bold: true, size: 34, align: 'center', after: 160 })}
-  ${table(['Event', 'Event date', 'Event number'], [[event?.title || 'Event', event?.date || '', event?.externalId || snapshot?.eventId || '']], [5200, 2200, 2600])}
+  ${paragraph('Revision', { bold: true, size: 28, align: 'right', after: 80 })}
+  ${title ? paragraph(title, { bold: true, size: 30, align: 'center', after: 120 }) : ''}
+  ${table([], [
+    [`Event: ${event?.title || 'Event'}`, `Event Date: ${longDate(event?.date)}`],
+    [`Sales Rep: ${event?.salesRep || ''}`, `Event Timing: ${eventTiming}`],
+    [`Guests: ${guestCount}`, `Delivery Time: ${deliveryTime}`],
+    [`Event Number: ${displayedEventNumber(event?.externalId || snapshot?.eventId || '')}`, `Date PO Modified: ${new Intl.DateTimeFormat('en-US').format(new Date())}`],
+  ], [5300, 5300])}
   ${sections || paragraph('No rows returned by Caterease.', { size: 20, before: 240 })}
-  <w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="720" w:right="720" w:bottom="720" w:left="720" w:header="360" w:footer="360" w:gutter="0"/></w:sectPr>
+  <w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="615" w:right="765" w:bottom="600" w:left="810" w:header="720" w:footer="720" w:gutter="0"/></w:sectPr>
 </w:body></w:document>`;
 };
 
@@ -159,7 +286,7 @@ export const renderCatereaseOperationalDocx = async ({ event, snapshot, type }) 
   zip.folder('_rels').file('.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`);
   const word = zip.folder('word');
   word.file('document.xml', documentXml({ event, snapshot, type }));
-  word.file('styles.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="20"/></w:rPr></w:style></w:styles>`);
+  word.file('styles.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:rPr><w:rFonts w:ascii="Avenir Medium" w:hAnsi="Avenir Medium"/><w:sz w:val="20"/></w:rPr></w:style></w:styles>`);
   word.folder('_rels').file('document.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`);
   return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
 };

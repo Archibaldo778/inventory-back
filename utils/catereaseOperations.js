@@ -117,6 +117,29 @@ export const normalizeCatereaseKitchenMenuDishRows = (rows = []) => {
   return [...dishes.values()];
 };
 
+const mergeKitchenMenuRows = (derivedRows = [], directRows = []) => {
+  const directByName = new Map();
+  directRows.forEach((row) => {
+    const key = clean(row?.itemName, 300).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    if (key && !directByName.has(key)) directByName.set(key, row);
+  });
+  return derivedRows.map((row) => {
+    const key = clean(row?.itemName, 300).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    const direct = directByName.get(key);
+    if (!direct) return row;
+    return {
+      ...direct,
+      ...row,
+      quantity: direct.quantity,
+      unit: direct.unit,
+      subEvent: direct.subEvent,
+      category: direct.category,
+      description: direct.description,
+      notes: direct.notes,
+    };
+  });
+};
+
 const stableRows = (rows) => [...rows].sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
 
 export const buildCatereaseOperationalSnapshot = ({
@@ -136,7 +159,9 @@ export const buildCatereaseOperationalSnapshot = ({
   const kitchenPackOut = normalizeCatereaseKitchenPackOutRows(kitchenPackOutRows);
   const directKitchenMenu = normalizeCatereaseKitchenMenuDishRows(kitchenMenuRows);
   const derivedKitchenMenu = buildKitchenMenuRows(kitchenPackOut);
-  const kitchenMenu = derivedKitchenMenu.length ? derivedKitchenMenu : directKitchenMenu;
+  const kitchenMenu = derivedKitchenMenu.length
+    ? mergeKitchenMenuRows(derivedKitchenMenu, directKitchenMenu)
+    : directKitchenMenu;
   const checksum = crypto.createHash('sha256').update(JSON.stringify({
     eventId: clean(eventId, 120),
     guestCount,
@@ -335,7 +360,9 @@ const operationalRows = (snapshot, type) => {
   }
   if (version >= 3) {
     const derivedKitchenMenu = buildKitchenMenuRows(snapshot?.kitchenPackOut || []);
-    return derivedKitchenMenu.length ? derivedKitchenMenu : snapshot?.kitchenMenu || [];
+    return derivedKitchenMenu.length
+      ? mergeKitchenMenuRows(derivedKitchenMenu, snapshot?.kitchenMenu || [])
+      : snapshot?.kitchenMenu || [];
   }
   const legacyKitchenPackOut = (version >= 2 ? snapshot?.kitchenMenu : snapshot?.packOut) || [];
   return buildKitchenMenuRows(legacyKitchenPackOut);

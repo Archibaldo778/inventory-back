@@ -139,6 +139,21 @@ test('Kitchen Menu prefers dishes derived from Kitchen Pack Out over generic foo
   assert.equal(snapshot.kitchenMenu[0].componentCount, 2);
 });
 
+test('Kitchen Menu keeps exact Caterease dish quantity while using packout components', () => {
+  const snapshot = buildCatereaseOperationalSnapshot({
+    eventId: 'E22672',
+    kitchenPackOutRows: [
+      { ItemName: 'Mousse', Qty: 12, FSName: 'Caramel Apple', FSPrepArea: 'Pastry' },
+      { ItemName: 'Apple center', Qty: 12, FSName: 'Caramel Apple', FSPrepArea: 'Pastry' },
+    ],
+    kitchenMenuRows: [{ ItemName: 'Caramel Apple', Qty: 150, Comment: 'Plate cold.' }],
+  });
+  assert.equal(snapshot.kitchenMenu.length, 1);
+  assert.equal(snapshot.kitchenMenu[0].quantity, 150);
+  assert.equal(snapshot.kitchenMenu[0].notes, 'Plate cold.');
+  assert.equal(snapshot.kitchenMenu[0].components.length, 2);
+});
+
 test('operational snapshot checksum is stable when API row order changes', () => {
   const first = buildCatereaseOperationalSnapshot({
     eventId: 'E22672',

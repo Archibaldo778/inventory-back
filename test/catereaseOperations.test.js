@@ -45,11 +45,13 @@ test('Caterease operational bar item mapping reuses packout scope classification
     { itemName: 'Tito\'s Vodka' },
     { itemName: 'Club Soda' },
     { itemName: 'Kitchen Equipment Cart' },
+    { itemName: 'Milano Stainless Steel Champagne Bucket' },
     { itemName: 'Mystery item' },
   ]);
   assert.deepEqual(items.map(({ scope, includedByDefault }) => ({ scope, includedByDefault })), [
     { scope: 'alcohol', includedByDefault: true },
     { scope: 'bar_support', includedByDefault: true },
+    { scope: 'non_bar', includedByDefault: false },
     { scope: 'non_bar', includedByDefault: false },
     { scope: 'review', includedByDefault: false },
   ]);

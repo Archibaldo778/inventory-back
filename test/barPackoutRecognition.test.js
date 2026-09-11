@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  classifyRecognizedSection,
   matchRecognizedItemsToCatalog,
   parseRecognizedPackout,
 } from '../utils/barPackoutRecognition.js';
@@ -132,6 +133,9 @@ test('SPECIALTY BEVERAGES keeps explicit cocktail counts but excludes shaker equ
 });
 
 test('equipment containing wine champagne or rose words is excluded from captain returns', () => {
+  assert.equal(classifyRecognizedSection('Milano Stainless Steel Champagne Bucket'), 'non_bar');
+  assert.equal(classifyRecognizedSection('Charleston Wine/Champagne Bucket'), 'non_bar');
+
   const result = parseRecognizedPackout({
     tables: [{
       headerRows: [['Name', 'Qty', 'Notes/Comments', 'Delivered', 'Returned']],

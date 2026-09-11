@@ -9,6 +9,9 @@ import { clearApiCacheGroups } from '../utils/apiCache.js';
 import { parseDecorInventoryCode } from '../utils/decorInventoryCodes.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import { buildDecorPackoutCanvas } from '../utils/decorPackoutBoard.js';
+import { requireAuth } from '../middleware/auth.js';
+import { renderCatereaseOperationalDocx } from '../utils/catereaseOperations.js';
+import { loadBrandLogoSvg, loadCloudinaryWordImages } from '../utils/operationalDocumentAssets.js';
 
 const router = Router();
 const MAX_PACKOUT_TYPES = 1000;
@@ -145,6 +148,50 @@ router.get('/:id', async (req, res) => {
     return sendApiError(res, error, {
       context: 'Decor packout lookup failed',
       fallbackMessage: 'Failed to load decor packout',
+    });
+  }
+});
+
+router.get('/:id/export', requireAuth, async (req, res) => {
+  try {
+    const packout = await loadPackout(req.params.id);
+    if (!packout) return res.status(404).json({ error: 'Packout not found' });
+    const event = await Event.findById(packout.eventId).select('externalId title date client managerId meta').lean();
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    const rows = (packout.items || []).map((item) => ({
+      itemName: item.name,
+      quantity: item.quantity,
+      menuGroup: item.category || 'DECOR',
+      notes: [item.inventoryCode, item.location, item.description].filter(Boolean).join(' · '),
+    }));
+    const [brandLogoSvg, decorImages] = await Promise.all([
+      loadBrandLogoSvg(),
+      loadCloudinaryWordImages((packout.items || []).map((item) => ({ itemName: item.name, url: item.image }))),
+    ]);
+    const docx = await renderCatereaseOperationalDocx({
+      event: { ...event, salesRep: event.managerId || '' },
+      snapshot: { schemaVersion: 3, eventId: event.externalId || '', packOut: rows },
+      type: 'po',
+      brandLogoSvg,
+      decorImages,
+      includePackOutTemplate: false,
+    });
+    const safeTitle = String(event.title || packout.eventTitle || 'Event')
+      .replace(/[<>:"/\\|?*\u0000-\u001F]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 100) || 'Event';
+    const dateMatch = String(event.date || packout.eventDate || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    const datePrefix = dateMatch ? `${dateMatch[2]}-${dateMatch[3]}-${dateMatch[1].slice(-2)}` : '';
+    const fileName = [datePrefix, safeTitle, 'Decor PO'].filter(Boolean).join(' ');
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}.docx"`);
+    return res.send(docx);
+  } catch (error) {
+    return sendApiError(res, error, {
+      context: 'Decor packout export failed',
+      fallbackMessage: 'Failed to generate decor packout document',
     });
   }
 });

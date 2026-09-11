@@ -241,22 +241,24 @@ const PACK_OUT_TEMPLATE = Object.freeze({
   'DISPOSABLE ITEMS': ['Cocktail napkins', 'Clear recycle bags', 'Pastry bags', 'Garbage bags', 'Lug liners', 'Paper towels', 'Foil', 'Plastic wrap', 'Empty transfer tins- half', 'Empty transfer tins- full', ['Gloves- S, M, L', '1 of each'], 'Quart containers w/ lids', 'Pint containers w/ lids', 'Sani wipes'],
 });
 
-const templatedPackOutGroups = (rows) => {
+const templatedPackOutGroups = (rows, includeTemplate = true) => {
   const byName = new Map(rows.map((row) => [itemKey(row.itemName), row]));
   const consumed = new Set();
   const groups = new Map();
-  Object.entries(PACK_OUT_TEMPLATE).forEach(([section, items]) => {
-    groups.set(section, items.map((entry) => {
-      const [name, templateNote = ''] = Array.isArray(entry) ? entry : [entry, ''];
-      const matched = byName.get(itemKey(name));
-      if (matched) consumed.add(itemKey(matched.itemName));
-      return {
-        itemName: name,
-        quantity: matched?.quantity ?? null,
-        notes: matched?.notes || templateNote,
-      };
-    }));
-  });
+  if (includeTemplate) {
+    Object.entries(PACK_OUT_TEMPLATE).forEach(([section, items]) => {
+      groups.set(section, items.map((entry) => {
+        const [name, templateNote = ''] = Array.isArray(entry) ? entry : [entry, ''];
+        const matched = byName.get(itemKey(name));
+        if (matched) consumed.add(itemKey(matched.itemName));
+        return {
+          itemName: name,
+          quantity: matched?.quantity ?? null,
+          notes: matched?.notes || templateNote,
+        };
+      }));
+    });
+  }
   rows.forEach((row) => {
     if (consumed.has(itemKey(row.itemName))) return;
     const section = packOutSection(row);
@@ -267,8 +269,11 @@ const templatedPackOutGroups = (rows) => {
   return groups;
 };
 
-const packOutTable = (rows, decorImages = []) => {
-  const groups = templatedPackOutGroups(rows.filter((row) => clean(row?.menuGroup, 160).toLowerCase() !== 'standard'));
+const packOutTable = (rows, decorImages = [], includeTemplate = true) => {
+  const groups = templatedPackOutGroups(
+    rows.filter((row) => clean(row?.menuGroup, 160).toLowerCase() !== 'standard'),
+    includeTemplate
+  );
   const orderedGroups = [...groups.entries()].sort(([left], [right]) => {
     const leftIndex = PACK_OUT_SECTION_ORDER.indexOf(left);
     const rightIndex = PACK_OUT_SECTION_ORDER.indexOf(right);
@@ -339,7 +344,7 @@ const kitchenMenuSections = (rows, recipes) => {
   }).join('');
 };
 
-const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = false, decorImages = [] }) => {
+const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = false, decorImages = [], includePackOutTemplate = true }) => {
   const isKitchenPackOut = type === 'kitchen_packout';
   const isKitchenMenu = type === 'kitchen_menu';
   const rows = operationalRows(snapshot, type);
@@ -360,7 +365,7 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
         ? table(['Qty', 'Unit', 'Required item', 'Prep area'], bodyRows, [900, 1200, 5200, 1800])
         : table(['Qty', 'Name', 'Notes / Comments', 'Delivered', 'Returned'], bodyRows, [750, 3600, 3800, 1050, 1050])
     }`;
-  }).join('') : packOutTable(rows, decorImages);
+  }).join('') : packOutTable(rows, decorImages, includePackOutTemplate);
   const parsedEventGuestCount = Number(event?.meta?.guestCount);
   const legacyGuestRow = rows.find((row) => itemKey(row?.itemName) === 'food' && clean(row?.menuGroup).toLowerCase() === 'standard');
   const parsedSnapshotGuestCount = Number(snapshot?.guestCount ?? legacyGuestRow?.quantity);
@@ -385,7 +390,15 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
 </w:body></w:document>`;
 };
 
-export const renderCatereaseOperationalDocx = async ({ event, snapshot, type, recipes = [], brandLogoSvg = null, decorImages = [] }) => {
+export const renderCatereaseOperationalDocx = async ({
+  event,
+  snapshot,
+  type,
+  recipes = [],
+  brandLogoSvg = null,
+  decorImages = [],
+  includePackOutTemplate = true,
+}) => {
   const includeBrandLogo = Buffer.isBuffer(brandLogoSvg) && brandLogoSvg.length > 0;
   const embeddedDecorImages = (Array.isArray(decorImages) ? decorImages : [])
     .filter((image) => Buffer.isBuffer(image?.buffer) && image.buffer.length > 0)
@@ -400,7 +413,15 @@ export const renderCatereaseOperationalDocx = async ({ event, snapshot, type, re
   zip.file('[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>${includeBrandLogo ? '<Default Extension="svg" ContentType="image/svg+xml"/>' : ''}${embeddedDecorImages.length ? '<Default Extension="jpg" ContentType="image/jpeg"/><Default Extension="png" ContentType="image/png"/>' : ''}<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/></Types>`);
   zip.folder('_rels').file('.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`);
   const word = zip.folder('word');
-  word.file('document.xml', documentXml({ event, snapshot, type, recipes, includeBrandLogo, decorImages: embeddedDecorImages }));
+  word.file('document.xml', documentXml({
+    event,
+    snapshot,
+    type,
+    recipes,
+    includeBrandLogo,
+    decorImages: embeddedDecorImages,
+    includePackOutTemplate,
+  }));
   word.file('styles.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:rPr><w:rFonts w:ascii="Avenir Medium" w:hAnsi="Avenir Medium"/><w:sz w:val="20"/></w:rPr></w:style></w:styles>`);
   if (includeBrandLogo) word.folder('media').file('logo.svg', brandLogoSvg);
   embeddedDecorImages.forEach((image) => word.folder('media').file(image.fileName, image.buffer));

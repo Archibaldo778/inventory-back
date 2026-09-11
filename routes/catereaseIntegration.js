@@ -39,7 +39,6 @@ import {
   selectLatestCatereaseFiles,
 } from '../utils/catereaseFiles.js';
 import { nyToday } from '../utils/dropboxDocuments.js';
-import { fetchWithTimeout, readBoundedResponseBuffer } from '../utils/fetchWithTimeout.js';
 import { normalizeProductImages } from '../utils/productImages.js';
 import { buildCatereaseFinancialPreview, buildCatereaseKitchenCatalog } from '../utils/catereaseKitchen.js';
 import {
@@ -47,6 +46,11 @@ import {
   renderCatereaseOperationalDocx,
 } from '../utils/catereaseOperations.js';
 import { normalizeKitchenRecipeName, syncKitchenRecipeMatches } from '../utils/kitchenRecipeMatching.js';
+import {
+  cloudinaryWordThumbnailUrl,
+  loadBrandLogoSvg,
+  loadCloudinaryWordImages,
+} from '../utils/operationalDocumentAssets.js';
 
 const router = Router();
 const requireCatereaseAdmin = [requireAuth, requireAdmin];
@@ -58,39 +62,6 @@ let recipeSyncPromise = null;
 let recipeSyncProgress = null;
 let operationalSyncPromise = null;
 let operationalSyncProgress = null;
-let brandLogoSvgPromise = null;
-
-const loadBrandLogoSvg = () => {
-  if (brandLogoSvgPromise) return brandLogoSvgPromise;
-  brandLogoSvgPromise = (async () => {
-    try {
-      const appOrigin = String(process.env.PUBLIC_APP_ORIGIN || process.env.FRONTEND_URL || 'https://occdecks.com').replace(/\/+$/, '');
-      const response = await fetch(`${appOrigin}/mockups/oc-logo.svg`, {
-        headers: { Accept: 'image/svg+xml' },
-        signal: AbortSignal.timeout(5000),
-      });
-      if (!response.ok) return null;
-      const bytes = Buffer.from(await response.arrayBuffer());
-      if (!bytes.length || bytes.length > 200_000 || !bytes.toString('utf8', 0, Math.min(bytes.length, 300)).includes('<svg')) return null;
-      return bytes;
-    } catch {
-      return null;
-    }
-  })();
-  return brandLogoSvgPromise;
-};
-
-const cloudinaryWordThumbnailUrl = (value) => {
-  try {
-    const url = new URL(String(value || ''));
-    if (url.protocol !== 'https:' || url.hostname !== 'res.cloudinary.com') return '';
-    url.pathname = url.pathname.replace('/upload/', '/upload/f_jpg,c_pad,b_white,w_180,h_180,q_auto/');
-    return url.toString();
-  } catch {
-    return '';
-  }
-};
-
 const loadMatchedDecorImages = async (snapshot) => {
   const rows = [
     ...(Array.isArray(snapshot?.packOut) ? snapshot.packOut : []),
@@ -118,21 +89,7 @@ const loadMatchedDecorImages = async (snapshot) => {
       url,
     }))
     .slice(0, 40);
-  const images = [];
-  for (let offset = 0; offset < matched.length; offset += 5) {
-    const batch = await Promise.all(matched.slice(offset, offset + 5).map(async (entry) => {
-      try {
-        const response = await fetchWithTimeout(entry.url, { headers: { Accept: 'image/jpeg' } }, { timeoutMs: 7000 });
-        if (!response.ok) return null;
-        const { buffer } = await readBoundedResponseBuffer(response, { maxBytes: 2 * 1024 * 1024, allowedContentTypes: ['image/jpeg', 'image/jpg'] });
-        return { itemName: entry.itemName, buffer, extension: 'jpg', contentType: 'image/jpeg' };
-      } catch {
-        return null;
-      }
-    }));
-    images.push(...batch.filter(Boolean));
-  }
-  return images;
+  return loadCloudinaryWordImages(matched);
 };
 
 const OPERATIONAL_FIELDS = Object.freeze({

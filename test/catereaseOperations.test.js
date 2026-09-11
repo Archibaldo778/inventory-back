@@ -194,3 +194,18 @@ test('generated operational DOCX is a valid Word package and escapes upstream te
   assert.match(xml, /Notes\/Comments/);
   assert.doesNotMatch(xml, /00001-00000000062666/);
 });
+
+test('decor Pack Out uses the shared layout without unrelated blank template rows', async () => {
+  const buffer = await renderCatereaseOperationalDocx({
+    event: { title: 'Decor Event', date: '2026-09-11', externalId: 'E22770' },
+    snapshot: { schemaVersion: 3, packOut: [{ itemName: 'Gold Candelabra', quantity: 4, menuGroup: 'Decor', notes: 'OCC00440' }] },
+    type: 'po',
+    includePackOutTemplate: false,
+  });
+  const zip = await JSZip.loadAsync(buffer);
+  const xml = await zip.file('word/document.xml').async('string');
+  assert.match(xml, /PACK OUT/);
+  assert.match(xml, /Gold Candelabra/);
+  assert.match(xml, /OCC00440/);
+  assert.doesNotMatch(xml, /Paper plates/);
+});

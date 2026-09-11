@@ -148,13 +148,19 @@ test('Kitchen Menu DOCX uses dish names and matched Caterease instructions', asy
 });
 
 test('generated operational DOCX is a valid Word package and escapes upstream text', async () => {
+  const logoSvg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><path d="M0 0h10v10H0z"/></svg>');
   const buffer = await renderCatereaseOperationalDocx({
     event: { title: '<Bensadoun>', date: '2026-09-11', externalId: 'E22672' },
     snapshot: { schemaVersion: 2, packOut: [{ itemName: '<script>alert(1)</script>', quantity: 1, unit: 'Each', menuGroup: 'Kitchen Equipment', subEvent: '00001-00000000062666' }] },
     type: 'po',
+    brandLogoSvg: logoSvg,
   });
   const zip = await JSZip.loadAsync(buffer);
   const xml = await zip.file('word/document.xml').async('string');
+  const embeddedLogo = await zip.file('word/media/logo.svg').async('nodebuffer');
+  assert.deepEqual(embeddedLogo, logoSvg);
+  assert.match(xml, /PACK OUT/);
+  assert.match(xml, /r:embed="rId2"/);
   assert.match(xml, /&lt;Bensadoun&gt;/);
   assert.doesNotMatch(xml, /<script>/);
   assert.match(xml, /KITCHEN EQUIPMENT/);

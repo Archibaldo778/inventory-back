@@ -55,6 +55,27 @@ let recipeSyncPromise = null;
 let recipeSyncProgress = null;
 let operationalSyncPromise = null;
 let operationalSyncProgress = null;
+let brandLogoSvgPromise = null;
+
+const loadBrandLogoSvg = () => {
+  if (brandLogoSvgPromise) return brandLogoSvgPromise;
+  brandLogoSvgPromise = (async () => {
+    try {
+      const appOrigin = String(process.env.PUBLIC_APP_ORIGIN || process.env.FRONTEND_URL || 'https://occdecks.com').replace(/\/+$/, '');
+      const response = await fetch(`${appOrigin}/mockups/oc-logo.svg`, {
+        headers: { Accept: 'image/svg+xml' },
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!response.ok) return null;
+      const bytes = Buffer.from(await response.arrayBuffer());
+      if (!bytes.length || bytes.length > 200_000 || !bytes.toString('utf8', 0, Math.min(bytes.length, 300)).includes('<svg')) return null;
+      return bytes;
+    } catch {
+      return null;
+    }
+  })();
+  return brandLogoSvgPromise;
+};
 
 const OPERATIONAL_FIELDS = Object.freeze({
   eventrequireditem: 'ItemName,Qty,Unit,PUnit,QtyPerPUnit,FSPrepArea,FSName,RentalItem,Vendor,SEvtDate,StartTime',
@@ -212,18 +233,46 @@ export const resolveCatereaseOperationalEventId = async (eventId, eventDate = ''
 
 export const fetchCatereaseOperationalSnapshot = async (eventId, eventDate = '', eventTitle = '') => {
   const resolvedEventId = await resolveCatereaseOperationalEventId(eventId, eventDate, eventTitle);
-  const kitchenProductionPromise = listAllOperationalRows('eventrequireditem', resolvedEventId, eventDate);
-  const kitchenMenuPromise = listAllOperationalRows('foodserv', resolvedEventId, '').catch((error) => {
-    if (![400, 404].includes(Number(error?.statusCode))) throw error;
-    return [];
-  });
+  const sourceErrors = [];
+  const captureRows = async (source, request) => {
+    try {
+      return await request;
+    } catch (error) {
+      sourceErrors.push({
+        source,
+        status: Number(error?.statusCode) || null,
+        message: String(error?.message || `${source} request failed`).slice(0, 240),
+      });
+      return [];
+    }
+  };
+  const kitchenProductionPromise = captureRows(
+    'eventrequireditem',
+    listAllOperationalRows('eventrequireditem', resolvedEventId, eventDate)
+  );
+  const kitchenMenuPromise = captureRows('foodserv', listAllOperationalRows('foodserv', resolvedEventId, ''));
   const packOutPromise = listAllOperationalRows('foodservquery', resolvedEventId, eventDate)
     .catch((error) => {
       if (![400, 404].includes(Number(error?.statusCode))) throw error;
       return listAllOperationalRows('foodservusage', resolvedEventId, eventDate);
     });
-  const [packOutRows, kitchenPackOutRows, kitchenMenuRows] = await Promise.all([packOutPromise, kitchenProductionPromise, kitchenMenuPromise]);
-  return buildCatereaseOperationalSnapshot({ eventId: resolvedEventId, packOutRows, kitchenPackOutRows, kitchenMenuRows });
+  const [packOutRows, kitchenPackOutRows, kitchenMenuRows] = await Promise.all([
+    captureRows('foodservquery', packOutPromise),
+    kitchenProductionPromise,
+    kitchenMenuPromise,
+  ]);
+  if (sourceErrors.length === 3) {
+    const error = new Error(`Caterease returned no operational sources: ${sourceErrors.map((entry) => entry.message).join('; ')}`);
+    error.statusCode = sourceErrors.find((entry) => entry.status)?.status || 502;
+    throw error;
+  }
+  return buildCatereaseOperationalSnapshot({
+    eventId: resolvedEventId,
+    packOutRows,
+    kitchenPackOutRows,
+    kitchenMenuRows,
+    sourceErrors,
+  });
 };
 
 const syncOperationalEvent = async (event) => {
@@ -783,7 +832,14 @@ router.get('/operations/events/:id/export/:type', requireAuth, async (req, res) 
         .select('name description instructions notes prepArea ingredients inactive hidden revisedAt updatedAt')
         .lean()
       : [];
-    const docx = await renderCatereaseOperationalDocx({ event, snapshot: event.catereaseOperations, type, recipes });
+    const brandLogoSvg = await loadBrandLogoSvg();
+    const docx = await renderCatereaseOperationalDocx({
+      event,
+      snapshot: event.catereaseOperations,
+      type,
+      recipes,
+      brandLogoSvg,
+    });
     const safeTitle = String(event.title || 'Event').replace(/[<>:"/\\|?*\u0000-\u001F]/g, '').replace(/\s+/g, ' ').trim().slice(0, 100) || 'Event';
     const dateMatch = String(event.date || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
     const datePrefix = dateMatch ? `${dateMatch[2]}-${dateMatch[3]}-${dateMatch[1].slice(-2)}` : '';

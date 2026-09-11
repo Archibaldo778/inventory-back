@@ -11,6 +11,91 @@ import {
   packOutRenderedItemNames,
   renderCatereaseOperationalDocx,
 } from '../utils/catereaseOperations.js';
+import { catereaseOperationalPackOutToBarItems } from '../utils/catereaseOperationalBarItems.js';
+import { runImportedBarItemMergePipeline } from '../utils/barManualItems.js';
+
+test('Caterease operational Pack Out rows map to recognized bar items', () => {
+  const [item] = catereaseOperationalPackOutToBarItems([{
+    sourceId: '42',
+    itemName: 'Tito\'s Vodka',
+    quantity: 3,
+    menuGroup: 'Liquor',
+    category: 'Beverages',
+    notes: '750 ml bottles',
+  }]);
+  assert.deepEqual(item, {
+    id: 'caterease-operation:42',
+    name: 'Tito\'s Vodka',
+    section: 'Liquor',
+    scope: 'alcohol',
+    includedByDefault: true,
+    quantity: 3,
+    quantityText: '3',
+    notes: '750 ml bottles',
+    delivered: '',
+    returned: '',
+  });
+});
+
+test('Caterease operational bar item mapping reuses packout scope classification', () => {
+  const items = catereaseOperationalPackOutToBarItems([
+    { itemName: 'Tito\'s Vodka' },
+    { itemName: 'Club Soda' },
+    { itemName: 'Kitchen Equipment Cart' },
+    { itemName: 'Mystery item' },
+  ]);
+  assert.deepEqual(items.map(({ scope, includedByDefault }) => ({ scope, includedByDefault })), [
+    { scope: 'alcohol', includedByDefault: true },
+    { scope: 'bar_support', includedByDefault: true },
+    { scope: 'non_bar', includedByDefault: false },
+    { scope: 'review', includedByDefault: false },
+  ]);
+});
+
+test('Caterease operational re-sync preserves recorded bar quantities and state', () => {
+  const existing = [{
+    _id: 'existing-item-id',
+    name: 'Tito\'s Vodka',
+    section: 'Liquor',
+    scope: 'alcohol',
+    included: true,
+    sentQty: 2,
+    entrySource: 'packout',
+    deliveredQty: 2,
+    returnedFullQty: 1,
+    returnedOpenQty: 0.5,
+    lostDamagedQty: 0.25,
+    returnConfirmed: true,
+    captainNotes: 'One bottle opened',
+    prepTask: { scheduledDate: '2026-09-11', completedAt: new Date('2026-09-11T22:00:00Z') },
+    updatedBy: 'captain',
+    updatedAt: new Date('2026-09-11T22:05:00Z'),
+  }];
+  const result = runImportedBarItemMergePipeline({
+    existingItems: existing,
+    importedItems: [{
+      name: 'Tito\'s Vodka',
+      section: 'Liquor',
+      scope: 'alcohol',
+      included: true,
+      sentQty: 4,
+    }],
+    documentTypes: ['po'],
+    eventDate: '2026-09-11',
+    scheduledBy: 'Caterease operational sync',
+  });
+  const [item] = result.items;
+  assert.equal(item.sentQty, 4);
+  assert.equal(item.deliveredQty, 2);
+  assert.equal(item.returnedFullQty, 1);
+  assert.equal(item.returnedOpenQty, 0.5);
+  assert.equal(item.lostDamagedQty, 0.25);
+  assert.equal(item.returnConfirmed, true);
+  assert.equal(item.captainNotes, 'One bottle opened');
+  assert.equal(item.prepTask.completedAt.toISOString(), '2026-09-11T22:00:00.000Z');
+  assert.equal(item.updatedBy, 'captain');
+  assert.equal(String(item._id), 'existing-item-id');
+});
 
 test('Caterease Pack Out rows preserve operational grouping', () => {
   const rows = normalizeCatereasePackOutRows([{

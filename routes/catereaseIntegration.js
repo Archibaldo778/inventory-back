@@ -15,11 +15,9 @@ import { clearApiCacheGroups } from '../utils/apiCache.js';
 import { mergeEventDocumentHistory } from '../utils/documentImportAudit.js';
 import { readDropboxDocxMetadata } from '../utils/dropboxDocxMetadata.js';
 import {
-  combineImportedBarItems,
-  mergePackoutDocumentItems,
-  preservePackoutOperationalState,
-  schedulePreparedItemsForEvent,
+  runImportedBarItemMergePipeline,
 } from '../utils/barManualItems.js';
+import { catereaseOperationalPackOutToBarItems } from '../utils/catereaseOperationalBarItems.js';
 import { canViewEvent, normalizePackoutItems } from './bar.js';
 import {
   downloadCatereaseEventFile,
@@ -135,7 +133,7 @@ const syncCatereaseBarItems = async (event) => {
   const rawItems = sourceDocuments.flatMap((document) => Array.isArray(document?.barItems) ? document.barItems : []);
   const documentTypes = [...new Set(sourceDocuments.map((document) => String(document?.type || '')).filter(Boolean))];
   const guestCount = dashboardEventGuestCount(event);
-  const importedItems = combineImportedBarItems(await normalizePackoutItems(rawItems, { allowFinancials: false, guestCount }));
+  const normalizedItems = await normalizePackoutItems(rawItems, { allowFinancials: false, guestCount });
   let barEvent = await BarEvent.findOne({ linkedEventId: event._id });
   if (!barEvent && !rawItems.length) return false;
   if (!barEvent) {
@@ -152,11 +150,14 @@ const syncCatereaseBarItems = async (event) => {
     });
   }
   const existingItems = Array.isArray(barEvent.items) ? barEvent.items : [];
-  barEvent.items = schedulePreparedItemsForEvent(
-    preservePackoutOperationalState(existingItems, mergePackoutDocumentItems(existingItems, importedItems, documentTypes)),
-    String(event.date || ''),
-    { by: 'Caterease automatic sync' }
-  );
+  const merged = runImportedBarItemMergePipeline({
+    existingItems,
+    importedItems: normalizedItems,
+    documentTypes,
+    eventDate: String(event.date || ''),
+    scheduledBy: 'Caterease automatic sync',
+  });
+  barEvent.items = merged.items;
   barEvent.packout = {
     fileName: sourceDocuments.map((document) => document.fileName).filter(Boolean).join(', ').slice(0, 500),
     contentType: sourceDocuments.map((document) => document.contentType).find(Boolean) || 'application/octet-stream',
@@ -170,10 +171,65 @@ const syncCatereaseBarItems = async (event) => {
     action: 'caterease_documents_synced',
     username: 'Caterease automatic sync',
     at: new Date(),
-    details: { documents: sourceDocuments.length, items: importedItems.length },
+    details: { documents: sourceDocuments.length, items: merged.importedItems.length },
   }].slice(-200);
   await barEvent.save();
   return true;
+};
+
+const syncCatereaseOperationalBarItems = async (event, snapshot) => {
+  const rawItems = catereaseOperationalPackOutToBarItems(snapshot?.packOut);
+  const dashboardGuestCount = dashboardEventGuestCount(event);
+  const snapshotGuestCount = Number(snapshot?.guestCount);
+  const guestCount = dashboardGuestCount ?? (
+    Number.isFinite(snapshotGuestCount) && snapshotGuestCount >= 0 ? snapshotGuestCount : null
+  );
+  const normalizedItems = await normalizePackoutItems(rawItems, { allowFinancials: false, guestCount });
+  let barEvent = await BarEvent.findOne({ linkedEventId: event._id });
+  if (!barEvent && !rawItems.length) return { synced: false, items: 0 };
+  if (!barEvent) {
+    barEvent = new BarEvent({
+      linkedEventId: event._id,
+      eventNumber: String(event.externalId || ''),
+      name: String(event.title || 'Untitled event'),
+      eventDate: String(event.date || ''),
+      client: String(event.client || ''),
+      salesRep: String(event.managerId || ''),
+      guestCount,
+      guestCountSource: dashboardGuestCount === null ? 'packout' : 'dashboard',
+      status: 'draft',
+    });
+  }
+  const existingItems = Array.isArray(barEvent.items) ? barEvent.items : [];
+  const merged = runImportedBarItemMergePipeline({
+    existingItems,
+    importedItems: normalizedItems,
+    documentTypes: ['po'],
+    eventDate: String(event.date || ''),
+    scheduledBy: 'Caterease operational sync',
+  });
+  barEvent.items = merged.items;
+  barEvent.packout = {
+    fileName: `${String(event.externalId || event.title || 'Event')} Caterease operational data`.slice(0, 500),
+    contentType: 'application/json',
+    packoutType: 'general',
+    importedAt: new Date(),
+    importedBy: 'Caterease operational sync',
+  };
+  if (barEvent.status === 'draft') barEvent.status = 'ready';
+  barEvent.revision = Number(barEvent.revision || 0) + 1;
+  barEvent.audit = [...(Array.isArray(barEvent.audit) ? barEvent.audit : []), {
+    action: 'caterease_operations_synced',
+    username: 'Caterease operational sync',
+    at: new Date(),
+    details: {
+      checksum: String(snapshot?.checksum || ''),
+      rows: rawItems.length,
+      items: merged.importedItems.length,
+    },
+  }].slice(-200);
+  await barEvent.save();
+  return { synced: true, items: merged.importedItems.length };
 };
 
 const listAllEventFiles = async () => {
@@ -318,12 +374,14 @@ const syncOperationalEvent = async (event) => {
   event.catereaseOperations = snapshot;
   event.markModified('catereaseOperations');
   await event.save();
+  const barSync = await syncCatereaseOperationalBarItems(event, snapshot);
   return {
     status: previousChecksum === snapshot.checksum ? 'unchanged' : 'updated',
     eventId,
     packOutRows: snapshot.packOut.length,
     kitchenPackOutRows: snapshot.kitchenPackOut.length,
     kitchenMenuRows: snapshot.kitchenMenu.length,
+    barItems: barSync.items,
   };
 };
 
@@ -337,7 +395,7 @@ export const runCatereaseOperationalSync = async () => {
     const summary = { eventsSeen: 0, updated: 0, unchanged: 0, skipped: 0, failed: 0, packOutRows: 0, kitchenPackOutRows: 0, kitchenMenuRows: 0, errors: [] };
     try {
       const events = await Event.find({ date: { $gte: nyToday() }, status: { $ne: 'deleted' } })
-        .select('externalId title date catereaseOperations').sort({ date: 1 });
+        .select('externalId title date client managerId meta catereaseOperations').sort({ date: 1 });
       for (let index = 0; index < events.length; index += 1) {
         const event = events[index];
         summary.eventsSeen += 1;
@@ -770,6 +828,7 @@ router.get('/status', ...requireCatereaseAdmin, async (_req, res) => {
     return res.json({
       configured: Boolean(config.apiKey),
       primaryFiles: config.primaryFiles,
+      operationalSyncEnabled: config.operationalSyncEnabled,
       syncing: Boolean(syncPromise),
       progress: syncProgress,
       recipeSyncing: Boolean(recipeSyncPromise),
@@ -835,7 +894,8 @@ router.get('/operations/preview/:eventId', ...requireCatereaseAdmin, async (req,
 
 router.post('/operations/sync/:id', ...requireCatereaseAdmin, syncRateLimit, async (req, res) => {
   try {
-    const event = await Event.findById(req.params.id).select('externalId title date catereaseOperations');
+    const event = await Event.findById(req.params.id)
+      .select('externalId title date client managerId meta catereaseOperations');
     if (!event) return res.status(404).json({ error: 'Event not found' });
     const result = await syncOperationalEvent(event);
     clearApiCacheGroups('events', 'bar');

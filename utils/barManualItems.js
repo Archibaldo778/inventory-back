@@ -182,3 +182,23 @@ export const schedulePreparedItemsForEvent = (items, eventDate, { at = new Date(
   });
   return items;
 };
+
+export const runImportedBarItemMergePipeline = ({
+  existingItems = [],
+  importedItems = [],
+  documentTypes = [],
+  eventDate = '',
+  scheduledAt = new Date(),
+  scheduledBy = '',
+} = {}) => {
+  const combinedItems = combineImportedBarItems(importedItems);
+  const mergedItems = mergePackoutDocumentItems(existingItems, combinedItems, documentTypes);
+  const preservedItems = preservePackoutOperationalState(existingItems, mergedItems);
+  return {
+    importedItems: combinedItems,
+    items: schedulePreparedItemsForEvent(preservedItems, eventDate, {
+      at: scheduledAt,
+      by: scheduledBy,
+    }),
+  };
+};

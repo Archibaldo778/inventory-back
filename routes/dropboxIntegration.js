@@ -10,10 +10,7 @@ import { clearApiCacheGroups } from '../utils/apiCache.js';
 import { mergeEventDocumentHistory } from '../utils/documentImportAudit.js';
 import { readDropboxDocxMetadata } from '../utils/dropboxDocxMetadata.js';
 import {
-  combineImportedBarItems,
-  mergePackoutDocumentItems,
-  preservePackoutOperationalState,
-  schedulePreparedItemsForEvent,
+  runImportedBarItemMergePipeline,
 } from '../utils/barManualItems.js';
 import { normalizePackoutItems } from './bar.js';
 import {
@@ -284,9 +281,7 @@ const syncDropboxBarItems = async (event) => {
     .map((document) => String(document?.type || ''))
     .filter(Boolean))];
   const guestCount = dashboardEventGuestCount(event);
-  const importedItems = combineImportedBarItems(
-    await normalizePackoutItems(rawItems, { allowFinancials: false, guestCount })
-  );
+  const normalizedItems = await normalizePackoutItems(rawItems, { allowFinancials: false, guestCount });
   let barEvent = await BarEvent.findOne({ linkedEventId: event._id });
   if (!rawItems.length && !barEvent) return false;
   if (!barEvent) {
@@ -303,14 +298,14 @@ const syncDropboxBarItems = async (event) => {
     });
   }
   const existingItems = Array.isArray(barEvent.items) ? barEvent.items : [];
-  barEvent.items = schedulePreparedItemsForEvent(
-    preservePackoutOperationalState(
-      existingItems,
-      mergePackoutDocumentItems(existingItems, importedItems, documentTypes)
-    ),
-    String(event.date || ''),
-    { by: 'Dropbox automatic sync' }
-  );
+  const merged = runImportedBarItemMergePipeline({
+    existingItems,
+    importedItems: normalizedItems,
+    documentTypes,
+    eventDate: String(event.date || ''),
+    scheduledBy: 'Dropbox automatic sync',
+  });
+  barEvent.items = merged.items;
   barEvent.packout = {
     fileName: sourceDocuments.map((document) => document.fileName).filter(Boolean).join(', ').slice(0, 500),
     contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -324,7 +319,7 @@ const syncDropboxBarItems = async (event) => {
     action: 'dropbox_documents_synced',
     username: 'Dropbox automatic sync',
     at: new Date(),
-    details: { documents: sourceDocuments.length, items: importedItems.length },
+    details: { documents: sourceDocuments.length, items: merged.importedItems.length },
   }].slice(-200);
   await barEvent.save();
   return true;

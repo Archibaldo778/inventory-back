@@ -446,7 +446,10 @@ import toolsRoutes from './routes/tools.js';
 import barRoutes from './routes/bar.js';
 import publicBarReturnsRoutes from './routes/publicBarReturns.js';
 import dropboxIntegrationRoutes, { runDropboxDiscoverySync } from './routes/dropboxIntegration.js';
-import catereaseIntegrationRoutes, { runCatereaseFileSync } from './routes/catereaseIntegration.js';
+import catereaseIntegrationRoutes, {
+  runCatereaseFileSync,
+  runCatereaseOperationalSync,
+} from './routes/catereaseIntegration.js';
 import brotherLabelRoutes from './routes/brotherLabels.js';
 import { getCatereaseConfig } from './utils/catereaseApi.js';
 
@@ -658,6 +661,25 @@ export const startServer = async () => {
     console.log('Caterease event-file sync disabled; recipe API remains available and Dropbox supplies event documents');
   }
 
+  let catereaseOperationalSyncTimer = null;
+  let catereaseOperationalStartupTimer = null;
+  if (catereaseConfig.operationalSyncEnabled) {
+    const configuredMinutes = Number(process.env.CATEREASE_OPERATIONAL_SYNC_INTERVAL_MINUTES);
+    const intervalMinutes = Number.isFinite(configuredMinutes)
+      ? Math.max(5, Math.min(180, Math.trunc(configuredMinutes)))
+      : 15;
+    const syncCatereaseOperations = () => runCatereaseOperationalSync().then((summary) => {
+      console.log('✅ Caterease operational sync completed', summary);
+    }).catch((error) => {
+      console.error('Caterease automatic operational sync failed:', error?.message || error);
+    });
+    catereaseOperationalStartupTimer = setTimeout(syncCatereaseOperations, 45_000);
+    catereaseOperationalStartupTimer.unref?.();
+    catereaseOperationalSyncTimer = setInterval(syncCatereaseOperations, intervalMinutes * 60_000);
+    catereaseOperationalSyncTimer.unref?.();
+    console.log(`Caterease automatic operational sync enabled every ${intervalMinutes} minutes`);
+  }
+
   let shuttingDown = false;
   const shutdown = (signal) => {
     if (shuttingDown) return;
@@ -669,6 +691,8 @@ export const startServer = async () => {
     if (dropboxSyncTimer) clearInterval(dropboxSyncTimer);
     if (catereaseStartupTimer) clearTimeout(catereaseStartupTimer);
     if (catereaseSyncTimer) clearInterval(catereaseSyncTimer);
+    if (catereaseOperationalStartupTimer) clearTimeout(catereaseOperationalStartupTimer);
+    if (catereaseOperationalSyncTimer) clearInterval(catereaseOperationalSyncTimer);
 
     const forceExit = setTimeout(() => {
       console.error('Forced shutdown after timeout');

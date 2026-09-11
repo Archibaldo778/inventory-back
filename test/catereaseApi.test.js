@@ -117,6 +117,27 @@ test('Caterease recipes remain configured while event files require an explicit 
   }
 });
 
+test('Caterease operational sync requires its own explicit opt-in', () => {
+  const previousApiKey = process.env.CATEREASE_API_KEY;
+  const previousOperationalEnabled = process.env.CATEREASE_OPERATIONAL_SYNC_ENABLED;
+  try {
+    process.env.CATEREASE_API_KEY = 'cea_test';
+    delete process.env.CATEREASE_OPERATIONAL_SYNC_ENABLED;
+    assert.equal(getCatereaseConfig().operationalSyncEnabled, false);
+
+    process.env.CATEREASE_OPERATIONAL_SYNC_ENABLED = 'true';
+    assert.equal(getCatereaseConfig().operationalSyncEnabled, true);
+
+    delete process.env.CATEREASE_API_KEY;
+    assert.equal(getCatereaseConfig().operationalSyncEnabled, false);
+  } finally {
+    if (previousApiKey === undefined) delete process.env.CATEREASE_API_KEY;
+    else process.env.CATEREASE_API_KEY = previousApiKey;
+    if (previousOperationalEnabled === undefined) delete process.env.CATEREASE_OPERATIONAL_SYNC_ENABLED;
+    else process.env.CATEREASE_OPERATIONAL_SYNC_ENABLED = previousOperationalEnabled;
+  }
+});
+
 test('Caterease Hub catalog client supports recipe resources and pagination', async () => withApiKey(async () => {
   const originalFetch = global.fetch;
   let requestedUrl = '';

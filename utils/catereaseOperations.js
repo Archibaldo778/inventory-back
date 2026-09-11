@@ -25,15 +25,16 @@ const fallbackSourceId = (row) => `row-${crypto.createHash('sha1').update(JSON.s
 export const normalizeCatereasePackOutRows = (rows = []) => (Array.isArray(rows) ? rows : [])
   .slice(0, 10000)
   .map((row) => ({
-    sourceId: clean(first(row, ['UID', 'FSNum', 'ItemNum', 'ItemID', 'ID']), 120) || fallbackSourceId(row),
+    sourceId: clean(first(row, ['UID', 'FdSvNum', 'FSNum', 'ItemNum', 'ItemID', 'ID']), 120) || fallbackSourceId(row),
     itemId: clean(first(row, ['ItemNum', 'ItemID']), 120),
     itemName: clean(first(row, ['ItemName', 'Name', 'Title']), 300),
     quantity: numberOrNull(first(row, ['Qty', 'Quantity'])),
     unit: clean(first(row, ['Unit', 'DUnit']), 80),
     prepArea: clean(first(row, ['PrepArea', 'FSPrepArea']), 160),
     subEvent: clean(first(row, ['SubEvtNum', 'SubEvent']), 120),
+    zoneName: clean(first(row, ['SEDescription', 'Room', 'SubEventName']), 200),
     category: clean(first(row, ['Category']), 160),
-    menuGroup: clean(first(row, ['MenuGroup', 'GroupName']), 160),
+    menuGroup: clean(first(row, ['MenuGroup', 'FSCategory', 'GroupName']), 160),
     notes: clean(first(row, ['Notes', 'Comment', 'Instructions']), 1000),
   }))
   .filter((row) => row.itemName && row.menuGroup.toLowerCase() !== 'standard');
@@ -42,19 +43,37 @@ export const normalizeCatereaseKitchenPackOutRows = (rows = []) => (Array.isArra
   .slice(0, 10000)
   .map((row) => ({
     sourceId: clean(first(row, ['UID', 'ReqItemNum', 'RINum', 'ItemNum', 'ID']), 120) || fallbackSourceId(row),
-    itemName: clean(first(row, ['ItemName', 'Name', 'Title']), 300),
+    itemName: clean(first(row, ['OTFItemName', 'ItemName', 'Name', 'Title']), 300),
     quantity: numberOrNull(first(row, ['Qty', 'Quantity'])),
     unit: clean(first(row, ['Unit', 'DUnit']), 80),
     purchaseUnit: clean(first(row, ['PUnit', 'PurchaseUnit']), 80),
     quantityPerPurchaseUnit: numberOrNull(first(row, ['QtyPerPUnit', 'PUnitQty'])),
     prepArea: clean(first(row, ['FSPrepArea', 'PrepArea']), 160),
     station: clean(first(row, ['FSName', 'FoodServiceName']), 240),
+    subEvent: clean(first(row, ['SubEvtNum', 'SubEvent']), 120),
+    zoneName: clean(first(row, ['SEDescription', 'Room', 'SubEventName']), 200),
     rentalItem: booleanValue(first(row, ['RentalItem', 'IsRental'])),
     vendor: clean(first(row, ['Vendor', 'VendorName']), 200),
     serviceDate: clean(first(row, ['SEvtDate', 'EventDate']), 40),
     startTime: clean(first(row, ['StartTime']), 40),
   }))
   .filter((row) => row.itemName);
+
+export const normalizeCatereaseStaffRequestRows = (rows = []) => (Array.isArray(rows) ? rows : [])
+  .slice(0, 10000)
+  .map((row) => ({
+    sourceId: clean(first(row, ['ShiftNum', 'UID', 'ID']), 120) || fallbackSourceId(row),
+    subEvent: clean(first(row, ['SubEvtNum', 'SubEvent']), 120),
+    zoneName: clean(first(row, ['SEDescription', 'Room', 'SubEventName']), 200),
+    position: clean(first(row, ['Position', 'Title']), 200),
+    required: numberOrNull(first(row, ['Required', 'Qty', 'Quantity'])),
+    startTime: clean(first(row, ['StartTime', 'SftFrom']), 80),
+    endTime: clean(first(row, ['EndTime', 'SftTo']), 80),
+    category: clean(first(row, ['Category']), 160),
+    comments: clean(first(row, ['Comments', 'Comment', 'Notes']), 1000),
+    uniform: clean(first(row, ['Uniform']), 300),
+  }))
+  .filter((row) => row.position);
 
 const isKitchenMenuNoise = (value) => {
   const name = clean(value, 300).toLowerCase();
@@ -66,7 +85,10 @@ export const buildKitchenMenuRows = (kitchenPackOutRows = []) => {
   (Array.isArray(kitchenPackOutRows) ? kitchenPackOutRows : []).forEach((row) => {
     const name = clean(row?.station, 300);
     if (isKitchenMenuNoise(name)) return;
-    const key = name.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    const zoneName = clean(row?.zoneName, 200);
+    const subEvent = clean(row?.subEvent, 120);
+    const zoneKey = (zoneName || subEvent).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    const key = `${zoneKey}|${name.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()}`;
     if (!key) return;
     const existing = dishes.get(key);
     if (existing) {
@@ -83,6 +105,8 @@ export const buildKitchenMenuRows = (kitchenPackOutRows = []) => {
       sourceId: `dish-${crypto.createHash('sha1').update(key).digest('hex').slice(0, 16)}`,
       itemName: name,
       prepArea: clean(row?.prepArea, 160),
+      subEvent,
+      zoneName,
       componentCount: 1,
       components: [{
         name: clean(row?.itemName, 300),
@@ -100,7 +124,8 @@ export const normalizeCatereaseKitchenMenuDishRows = (rows = []) => {
     const itemName = clean(first(row, ['ItemName', 'Name', 'Title']), 300);
     if (isKitchenMenuNoise(itemName)) return;
     const subEvent = clean(first(row, ['SubEvtNum', 'SubEvent']), 120);
-    const key = `${subEvent.toLowerCase()}|${itemName.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()}`;
+    const zoneName = clean(first(row, ['SEDescription', 'Room', 'SubEventName']), 200);
+    const key = `${(zoneName || subEvent).toLowerCase()}|${itemName.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()}`;
     if (!itemName || dishes.has(key)) return;
     dishes.set(key, {
       sourceId: clean(first(row, ['UID', 'FdSvNum', 'FSNum', 'ItemNum', 'ItemID', 'ID']), 120) || fallbackSourceId(row),
@@ -109,8 +134,9 @@ export const normalizeCatereaseKitchenMenuDishRows = (rows = []) => {
       unit: clean(first(row, ['Unit']), 80),
       prepArea: clean(first(row, ['PrepArea', 'FSPrepArea']), 160),
       subEvent,
+      zoneName,
       category: clean(first(row, ['Category', 'FSCategory']), 160),
-      menuGroup: clean(first(row, ['MenuGroup', 'GroupName']), 160),
+      menuGroup: clean(first(row, ['MenuGroup', 'FSCategory', 'GroupName']), 160),
       description: clean(catereaseRichTextToPlain(first(row, ['Description', 'UseDesc'])), 12000),
       notes: clean(catereaseRichTextToPlain(first(row, ['Comment', 'Notes'])), 12000),
     });
@@ -121,11 +147,11 @@ export const normalizeCatereaseKitchenMenuDishRows = (rows = []) => {
 const mergeKitchenMenuRows = (derivedRows = [], directRows = []) => {
   const directByName = new Map();
   directRows.forEach((row) => {
-    const key = clean(row?.itemName, 300).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    const key = `${clean(row?.zoneName || row?.subEvent, 200).toLowerCase()}|${clean(row?.itemName, 300).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()}`;
     if (key && !directByName.has(key)) directByName.set(key, row);
   });
   return derivedRows.map((row) => {
-    const key = clean(row?.itemName, 300).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    const key = `${clean(row?.zoneName || row?.subEvent, 200).toLowerCase()}|${clean(row?.itemName, 300).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()}`;
     const direct = directByName.get(key);
     if (!direct) return row;
     return {
@@ -167,6 +193,7 @@ export const buildCatereaseOperationalSnapshot = ({
   packOutRows = [],
   kitchenPackOutRows = [],
   kitchenMenuRows,
+  staffRequestRows = [],
   sourceErrors = [],
   syncedAt = new Date(),
 } = {}) => {
@@ -185,15 +212,25 @@ export const buildCatereaseOperationalSnapshot = ({
   const kitchenMenu = derivedKitchenMenu.length
     ? mergeKitchenMenuRows(derivedKitchenMenu, directKitchenMenu)
     : directKitchenMenu;
+  const zoneNameBySubEvent = new Map(
+    [...packOut, ...kitchenPackOut, ...directKitchenMenu]
+      .filter((row) => row?.subEvent && row?.zoneName)
+      .map((row) => [clean(row.subEvent, 120).toLowerCase(), clean(row.zoneName, 200)])
+  );
+  const staffRequest = normalizeCatereaseStaffRequestRows(staffRequestRows).map((row) => ({
+    ...row,
+    zoneName: row.zoneName || zoneNameBySubEvent.get(clean(row.subEvent, 120).toLowerCase()) || '',
+  }));
   const checksum = crypto.createHash('sha256').update(JSON.stringify({
     eventId: clean(eventId, 120),
     guestCount,
     packOut: stableRows(packOut),
     kitchenPackOut: stableRows(kitchenPackOut),
     kitchenMenu: stableRows(kitchenMenu),
+    staffRequest: stableRows(staffRequest),
   })).digest('hex');
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     eventId: clean(eventId, 120),
     syncedAt,
     checksum,
@@ -201,6 +238,7 @@ export const buildCatereaseOperationalSnapshot = ({
     packOut,
     kitchenPackOut,
     kitchenMenu,
+    staffRequest,
     sourceErrors: (Array.isArray(sourceErrors) ? sourceErrors : []).slice(0, 3),
   };
 };
@@ -391,23 +429,33 @@ const groupedRows = (rows, groupSelector) => {
   return groups;
 };
 
-const operationalRows = (snapshot, type) => {
+export const catereaseOperationalZoneKey = (row) => clean(row?.subEvent || row?.zoneName, 200).toLowerCase();
+
+const operationalRows = (snapshot, type, zoneKey = '') => {
   const version = Number(snapshot?.schemaVersion) || 1;
-  if (type === 'po') return (version >= 2 ? snapshot?.packOut : snapshot?.kitchenMenu) || [];
+  let rows;
+  if (type === 'po') rows = (version >= 2 ? snapshot?.packOut : snapshot?.kitchenMenu) || [];
   if (type === 'kitchen_packout') {
-    return (version >= 3 ? snapshot?.kitchenPackOut : version >= 2 ? snapshot?.kitchenMenu : snapshot?.packOut) || [];
+    rows = (version >= 3 ? snapshot?.kitchenPackOut : version >= 2 ? snapshot?.kitchenMenu : snapshot?.packOut) || [];
   }
-  if (version >= 3) {
+  if (type === 'staff_request') rows = snapshot?.staffRequest || [];
+  if (['kitchen_menu', 'annotated_kitchen_menu'].includes(type) && version >= 3) {
     const derivedKitchenMenu = buildKitchenMenuRows(snapshot?.kitchenPackOut || []);
-    return derivedKitchenMenu.length
+    rows = derivedKitchenMenu.length
       ? mergeKitchenMenuRows(derivedKitchenMenu, snapshot?.kitchenMenu || [])
       : snapshot?.kitchenMenu || [];
   }
-  const legacyKitchenPackOut = (version >= 2 ? snapshot?.kitchenMenu : snapshot?.packOut) || [];
-  return buildKitchenMenuRows(legacyKitchenPackOut);
+  if (['kitchen_menu', 'annotated_kitchen_menu'].includes(type) && version < 3) {
+    const legacyKitchenPackOut = (version >= 2 ? snapshot?.kitchenMenu : snapshot?.packOut) || [];
+    rows = buildKitchenMenuRows(legacyKitchenPackOut);
+  }
+  const normalizedZoneKey = clean(zoneKey, 200).toLowerCase();
+  return normalizedZoneKey
+    ? (Array.isArray(rows) ? rows : []).filter((row) => catereaseOperationalZoneKey(row) === normalizedZoneKey)
+    : (Array.isArray(rows) ? rows : []);
 };
 
-const kitchenMenuSections = (rows, recipes) => {
+const kitchenMenuSections = (rows, recipes, includeAnnotations = false) => {
   const recipeIndex = buildExactRecipeMatchIndex(recipes);
   const preparedRows = rows.map((row) => {
     const match = resolveExactRecipeMatch(row?.itemName, recipeIndex);
@@ -423,8 +471,8 @@ const kitchenMenuSections = (rows, recipes) => {
       ...row,
       group: clean(row?.menuGroup || row?.category || row?.prepArea, 160) || 'Menu',
       itemName: clean(row?.itemName, 300) || 'Untitled dish',
-      comments,
-      labels,
+      comments: includeAnnotations ? comments : [],
+      labels: includeAnnotations ? labels : [],
     };
   });
   const isBeverage = (row) => /\b(?:bar|beverage|cocktail|wine|beer|liquor)\b/i.test([
@@ -473,17 +521,23 @@ const kitchenStaffingSection = (event) => {
   }`;
 };
 
-const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = false, decorImages = [], includePackOutTemplate = true }) => {
+const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = false, decorImages = [], includePackOutTemplate = true, zoneKey = '' }) => {
   const isKitchenPackOut = type === 'kitchen_packout';
-  const isKitchenMenu = type === 'kitchen_menu';
-  const rows = operationalRows(snapshot, type);
-  const title = isKitchenMenu ? 'KITCHEN MENU' : isKitchenPackOut ? 'KITCHEN PACK OUT' : 'PACK OUT';
+  const isStaffRequest = type === 'staff_request';
+  const isKitchenMenu = ['kitchen_menu', 'annotated_kitchen_menu'].includes(type);
+  const isAnnotatedKitchenMenu = type === 'annotated_kitchen_menu';
+  const rows = operationalRows(snapshot, type, zoneKey);
+  const title = isAnnotatedKitchenMenu ? 'ANNOTATED KITCHEN MENU' : isKitchenMenu ? 'KITCHEN MENU' : isKitchenPackOut ? 'KITCHEN PACK OUT' : isStaffRequest ? 'STAFF REQUEST' : 'PACK OUT';
   const groups = groupedRows(rows, (row) => (
     isKitchenPackOut
       ? row.station || row.prepArea
       : row.menuGroup || row.category || row.prepArea
   ));
-  const sections = isKitchenMenu ? kitchenMenuSections(rows, recipes) : isKitchenPackOut ? [...groups.entries()].map(([group, values]) => {
+  const sections = isKitchenMenu ? kitchenMenuSections(rows, recipes, isAnnotatedKitchenMenu) : isStaffRequest
+    ? table(['#', 'Position', 'Start', 'End', 'Uniform', 'Comments'], rows.map((row) => [
+      formatQuantity(row.required), row.position, row.startTime, row.endTime, row.uniform, row.comments,
+    ]), [700, 2200, 1300, 1300, 2600, 2700])
+    : isKitchenPackOut ? [...groups.entries()].map(([group, values]) => {
     const bodyRows = values.map((row) => (
       isKitchenPackOut
         ? [formatQuantity(row.quantity), row.unit, row.itemName, row.prepArea]
@@ -540,6 +594,7 @@ export const renderCatereaseOperationalDocx = async ({
   brandLogoSvg = null,
   decorImages = [],
   includePackOutTemplate = true,
+  zoneKey = '',
 }) => {
   const includeBrandLogo = Buffer.isBuffer(brandLogoSvg) && brandLogoSvg.length > 0;
   const embeddedDecorImages = (Array.isArray(decorImages) ? decorImages : [])
@@ -563,6 +618,7 @@ export const renderCatereaseOperationalDocx = async ({
     includeBrandLogo,
     decorImages: embeddedDecorImages,
     includePackOutTemplate,
+    zoneKey,
   }));
   word.file('styles.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:rPr><w:rFonts w:ascii="Avenir Medium" w:hAnsi="Avenir Medium"/><w:sz w:val="20"/></w:rPr></w:style></w:styles>`);
   if (includeBrandLogo) word.folder('media').file('logo.svg', brandLogoSvg);

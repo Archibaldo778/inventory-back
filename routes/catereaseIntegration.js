@@ -117,10 +117,11 @@ const loadMatchedDecorImages = async (snapshot) => {
 };
 
 const OPERATIONAL_FIELDS = Object.freeze({
-  eventrequireditem: 'ItemName,Qty,Unit,PUnit,QtyPerPUnit,FSPrepArea,FSName,RentalItem,Vendor,SEvtDate,StartTime',
+  eventrequireditem: 'UID,ItemName,OTFItemName,Qty,Unit,PUnit,QtyPerPUnit,FSPrepArea,FSName,RentalItem,Vendor,SEDescription,SEvtDate,StartTime',
   foodserv: 'ItemName,Qty,Unit,PrepArea,SubEvtNum,Category,Comment,Description,FdSvNum,ItemNum',
-  foodservquery: 'PrepArea,SubEvtNum,ItemName,Qty,Category,MenuGroup,ActGuests,GtdGuests,PlnGuests',
+  foodservquery: 'FdSvNum,ItemNum,PrepArea,SubEvtNum,SEDescription,ItemName,Qty,Unit,Category,FSCategory,MenuGroup,ActGuests,GtdGuests,PlnGuests',
   foodservusage: 'PrepArea,SubEvtNum,ItemName,Qty,Category,MenuGroup',
+  shift: 'ShiftNum,SubEvtNum,Position,Required,StartTime,EndTime,Category,Comments,Uniform',
 });
 
 const isDocx = (fileName, contentType = '') => /\.docx$/i.test(String(fileName || ''))
@@ -354,16 +355,21 @@ export const fetchCatereaseOperationalSnapshot = async (eventId, eventDate = '',
     'eventrequireditem',
     listAllOperationalRows('eventrequireditem', resolvedEventId, eventDate)
   );
+  const staffRequestPromise = captureRows(
+    'shift',
+    listAllOperationalRows('shift', resolvedEventId)
+  );
   const packOutPromise = listAllOperationalRows('foodservquery', resolvedEventId, eventDate)
     .catch((error) => {
       if (![400, 404].includes(Number(error?.statusCode))) throw error;
       return listAllOperationalRows('foodservusage', resolvedEventId, eventDate);
     });
-  const [packOutRows, kitchenPackOutRows] = await Promise.all([
+  const [packOutRows, kitchenPackOutRows, staffRequestRows] = await Promise.all([
     captureRows('foodservquery', packOutPromise),
     kitchenPackOutPromise,
+    staffRequestPromise,
   ]);
-  if (sourceErrors.length === 2) {
+  if (sourceErrors.length === 3) {
     const error = new Error(`Caterease returned no operational sources: ${sourceErrors.map((entry) => entry.message).join('; ')}`);
     error.statusCode = sourceErrors.find((entry) => entry.status)?.status || 502;
     throw error;
@@ -373,6 +379,7 @@ export const fetchCatereaseOperationalSnapshot = async (eventId, eventDate = '',
     packOutRows,
     kitchenPackOutRows,
     kitchenMenuRows: packOutRows,
+    staffRequestRows,
     sourceErrors,
   });
 };
@@ -392,6 +399,7 @@ const syncOperationalEvent = async (event) => {
     packOutRows: snapshot.packOut.length,
     kitchenPackOutRows: snapshot.kitchenPackOut.length,
     kitchenMenuRows: snapshot.kitchenMenu.length,
+    staffRequestRows: snapshot.staffRequest.length,
     barItems: barSync.items,
   };
 };
@@ -403,7 +411,7 @@ export const runCatereaseOperationalSync = async () => {
     integration.lastOperationalSyncStartedAt = new Date();
     integration.lastOperationalSyncError = '';
     await integration.save();
-    const summary = { eventsSeen: 0, updated: 0, unchanged: 0, skipped: 0, failed: 0, packOutRows: 0, kitchenPackOutRows: 0, kitchenMenuRows: 0, errors: [] };
+    const summary = { eventsSeen: 0, updated: 0, unchanged: 0, skipped: 0, failed: 0, packOutRows: 0, kitchenPackOutRows: 0, kitchenMenuRows: 0, staffRequestRows: 0, errors: [] };
     try {
       const events = await Event.find({ date: { $gte: nyToday() }, status: { $ne: 'deleted' } })
         .select('externalId title date client managerId meta catereaseOperations').sort({ date: 1 });
@@ -417,6 +425,7 @@ export const runCatereaseOperationalSync = async () => {
           summary.packOutRows += Number(result.packOutRows || 0);
           summary.kitchenPackOutRows += Number(result.kitchenPackOutRows || 0);
           summary.kitchenMenuRows += Number(result.kitchenMenuRows || 0);
+          summary.staffRequestRows += Number(result.staffRequestRows || 0);
         } catch (error) {
           summary.failed += 1;
           if (summary.errors.length < 12) summary.errors.push({
@@ -939,11 +948,11 @@ router.get('/operations/events/:id', requireAuth, async (req, res) => {
 router.get('/operations/events/:id/export/:type', requireAuth, async (req, res) => {
   try {
     const type = String(req.params.type || '').toLowerCase();
-    if (!['po', 'kitchen_packout', 'kitchen_menu'].includes(type)) return res.status(400).json({ error: 'Unknown operational document type' });
+    if (!['po', 'kitchen_packout', 'staff_request', 'kitchen_menu', 'annotated_kitchen_menu'].includes(type)) return res.status(400).json({ error: 'Unknown operational document type' });
     const event = await loadAuthorizedOperationalEvent(req, res);
     if (!event) return undefined;
     if (!event.catereaseOperations) return res.status(404).json({ error: 'Caterease operational data has not been synced for this event' });
-    const recipes = type === 'kitchen_menu'
+    const recipes = type === 'annotated_kitchen_menu'
       ? await KitchenRecipe.find({ sourceProvider: 'caterease', sourceDeletedAt: null })
         .select('name description instructions notes prepArea ingredients inactive hidden revisedAt updatedAt')
         .lean()
@@ -957,12 +966,14 @@ router.get('/operations/events/:id/export/:type', requireAuth, async (req, res) 
       recipes,
       brandLogoSvg,
       decorImages,
+      zoneKey: String(req.query.zone || ''),
     });
     const safeTitle = String(event.title || 'Event').replace(/[<>:"/\\|?*\u0000-\u001F]/g, '').replace(/\s+/g, ' ').trim().slice(0, 100) || 'Event';
     const dateMatch = String(event.date || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
     const datePrefix = dateMatch ? `${dateMatch[2]}-${dateMatch[3]}-${dateMatch[1].slice(-2)}` : '';
-    const documentCode = type === 'po' ? 'PO' : type === 'kitchen_menu' ? 'KM' : 'KPO';
-    const fileName = [datePrefix, safeTitle, documentCode].filter(Boolean).join(' ');
+    const documentCode = type === 'po' ? 'PO' : type === 'kitchen_packout' ? 'KPO' : type === 'staff_request' ? 'Staff Request' : type === 'annotated_kitchen_menu' ? 'AKM' : 'KM';
+    const safeZone = String(req.query.zoneName || '').replace(/[<>:"/\\|?*\u0000-\u001F]/g, '').replace(/\s+/g, ' ').trim().slice(0, 80);
+    const fileName = [datePrefix, safeTitle, safeZone, documentCode].filter(Boolean).join(' ');
     res.setHeader('Cache-Control', 'private, no-store');
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
     res.setHeader('Content-Disposition', `attachment; filename="${fileName}.docx"`);

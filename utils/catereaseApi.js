@@ -95,6 +95,7 @@ const OPERATIONAL_RESOURCES = new Set([
   'foodserv',
   'foodservquery',
   'foodservusage',
+  'shift',
 ]);
 
 export const listCatereaseHubResource = async (resource, options = {}) => {

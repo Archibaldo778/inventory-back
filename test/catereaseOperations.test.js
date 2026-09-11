@@ -9,6 +9,7 @@ import {
   normalizeCatereaseKitchenMenuDishRows,
   normalizeCatereaseKitchenPackOutRows,
   normalizeCatereasePackOutRows,
+  normalizeCatereaseStaffRequestRows,
   packOutRenderedItemNames,
   renderCatereaseOperationalDocx,
 } from '../utils/catereaseOperations.js';
@@ -144,6 +145,7 @@ test('Caterease Pack Out rows preserve operational grouping', () => {
     unit: 'Each',
     prepArea: 'Operations',
     subEvent: '00001-S1',
+    zoneName: '',
     category: 'Paper goods',
     menuGroup: 'Kitchen Equipment',
     notes: '',
@@ -200,6 +202,84 @@ test('Caterease Kitchen Pack Out rows preserve required item details', () => {
   assert.equal(rows[0].purchaseUnit, 'Case');
 });
 
+test('Caterease operational rows preserve sub-event names for separate document exports', () => {
+  const [packOut] = normalizeCatereasePackOutRows([{
+    ItemName: 'Club Soda',
+    Qty: 2,
+    SubEvtNum: 'S1',
+    SEDescription: 'Green Room',
+  }]);
+  const [kitchenPackOut] = normalizeCatereaseKitchenPackOutRows([{
+    ItemName: 'Cutting Board',
+    Qty: 1,
+    SEDescription: 'Staff Holding',
+  }]);
+  assert.equal(packOut.zoneName, 'Green Room');
+  assert.equal(kitchenPackOut.zoneName, 'Staff Holding');
+});
+
+test('Caterease shifts become Staff Request rows', () => {
+  const [row] = normalizeCatereaseStaffRequestRows([{
+    ShiftNum: 'SHIFT-1',
+    SubEvtNum: 'S1',
+    Position: 'Captain',
+    Required: 2,
+    StartTime: '16:00',
+    EndTime: '23:00',
+    Uniform: 'Black suit',
+  }]);
+  assert.deepEqual(row, {
+    sourceId: 'SHIFT-1',
+    subEvent: 'S1',
+    zoneName: '',
+    position: 'Captain',
+    required: 2,
+    startTime: '16:00',
+    endTime: '23:00',
+    category: '',
+    comments: '',
+    uniform: 'Black suit',
+  });
+});
+
+test('operational DOCX exports only the requested sub-event', async () => {
+  const snapshot = buildCatereaseOperationalSnapshot({
+    eventId: 'E22672',
+    packOutRows: [
+      { ItemName: 'Green Room Ice', Qty: 2, SubEvtNum: 'S1', SEDescription: 'Green Room' },
+      { ItemName: 'Staff Holding Water', Qty: 4, SubEvtNum: 'S2', SEDescription: 'Staff Holding' },
+    ],
+  });
+  const buffer = await renderCatereaseOperationalDocx({
+    event: { title: 'Dinner', date: '2026-09-11', externalId: 'E22672', meta: {} },
+    snapshot,
+    type: 'po',
+    zoneKey: 's1',
+    includePackOutTemplate: false,
+  });
+  const zip = await JSZip.loadAsync(buffer);
+  const xml = await zip.file('word/document.xml').async('string');
+  assert.match(xml, /Green Room Ice/);
+  assert.doesNotMatch(xml, /Staff Holding Water/);
+});
+
+test('Staff Request DOCX is generated from Caterease shifts', async () => {
+  const snapshot = buildCatereaseOperationalSnapshot({
+    eventId: 'E22672',
+    staffRequestRows: [{ ShiftNum: '1', Position: 'Captain', Required: 2, StartTime: '16:00', EndTime: '23:00' }],
+  });
+  const buffer = await renderCatereaseOperationalDocx({
+    event: { title: 'Dinner', date: '2026-09-11', externalId: 'E22672', meta: {} },
+    snapshot,
+    type: 'staff_request',
+  });
+  const zip = await JSZip.loadAsync(buffer);
+  const xml = await zip.file('word/document.xml').async('string');
+  assert.match(xml, /STAFF REQUEST/);
+  assert.match(xml, /Captain/);
+  assert.match(xml, /16:00/);
+});
+
 test('Kitchen Menu contains one dish per Kitchen Pack Out station', () => {
   const rows = buildKitchenMenuRows([
     { station: 'Caramel Apple', prepArea: 'Pastry', itemName: 'Mousse' },
@@ -227,6 +307,7 @@ test('Caterease food service rows preserve Kitchen Menu dish details', () => {
     unit: '',
     prepArea: 'Pastry',
     subEvent: '',
+    zoneName: '',
     category: 'Dessert',
     menuGroup: '',
     description: '',
@@ -289,7 +370,7 @@ test('operational snapshot checksum is stable when API row order changes', () =>
     packOutRows: [{ ItemName: 'B', Qty: 2 }, { ItemName: 'A', Qty: 1 }],
     syncedAt: new Date('2026-09-11T12:00:00Z'),
   });
-  assert.equal(first.schemaVersion, 3);
+  assert.equal(first.schemaVersion, 4);
   const second = buildCatereaseOperationalSnapshot({
     eventId: 'E22672',
     packOutRows: [{ ItemName: 'A', Qty: 1 }, { ItemName: 'B', Qty: 2 }],
@@ -298,7 +379,7 @@ test('operational snapshot checksum is stable when API row order changes', () =>
   assert.equal(first.checksum, second.checksum);
 });
 
-test('Kitchen Menu DOCX uses dish names and matched Caterease instructions', async () => {
+test('Annotated Kitchen Menu DOCX uses dish names and matched Caterease instructions', async () => {
   const buffer = await renderCatereaseOperationalDocx({
     event: {
       title: 'Dinner',
@@ -320,7 +401,7 @@ test('Kitchen Menu DOCX uses dish names and matched Caterease instructions', asy
       instructions: 'Temper apples before service.',
       ingredients: [{ name: 'Green apple puree', quantity: 3, unit: 'lb' }],
     }],
-    type: 'kitchen_menu',
+    type: 'annotated_kitchen_menu',
   });
   const zip = await JSZip.loadAsync(buffer);
   const xml = await zip.file('word/document.xml').async('string');

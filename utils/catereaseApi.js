@@ -40,7 +40,7 @@ const responseError = async (response, fallback) => {
 export const listCatereaseEventFiles = async (eventId, { cursor = '', limit = 200 } = {}) => {
   const params = new URLSearchParams({
     eventId: clean(eventId),
-    fields: 'UID,FileName,Comment,Booked,Shared,SortOrder,Revised',
+    fields: 'UID,FileName,Comment,Booked,Shared,NSort,Revised',
     limit: String(Math.max(1, Math.min(200, Number(limit) || 200))),
   });
   if (clean(cursor)) params.set('cursor', clean(cursor));

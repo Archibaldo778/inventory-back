@@ -26,12 +26,14 @@ test('Caterease metadata keeps UID identity and Revised timestamp', () => {
     UID: 96,
     FileName: 'Event PO.docx',
     Comment: 'latest',
+    NSort: 4,
     Shared: false,
     Revised: '2026-08-14T15:22:41.113Z',
   }, 'E00470');
   assert.equal(file.uid, 96);
   assert.equal(file.catereaseEventId, 'E00470');
   assert.equal(file.documentType, 'po');
+  assert.equal(file.sortOrder, 4);
   assert.equal(catereaseFileRevision(file), '2026-08-14T15:22:41.113Z');
 });
 

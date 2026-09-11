@@ -33,6 +33,8 @@ test('Caterease listing uses EventDto id, UID fields and bearer authentication',
     assert.equal(page.pagination.nextCursor, 'next');
     assert.match(request.url, /eventId=E00470/);
     assert.match(request.url, /UID%2CFileName/);
+    assert.match(request.url, /NSort/);
+    assert.doesNotMatch(request.url, /SortOrder/);
     assert.equal(request.options.headers.Authorization, 'Bearer cea_test');
   } finally { global.fetch = originalFetch; }
 }));

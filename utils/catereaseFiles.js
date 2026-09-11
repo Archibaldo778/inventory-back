@@ -71,7 +71,7 @@ export const normalizeCatereaseFile = (file = {}, eventId = '') => {
     comment: clean(file.Comment ?? file.comment),
     booked: Boolean(file.Booked ?? file.booked),
     shared: Boolean(file.Shared ?? file.shared),
-    sortOrder: Number(file.SortOrder ?? file.sortOrder) || 0,
+    sortOrder: Number(file.NSort ?? file.nSort ?? file.SortOrder ?? file.sortOrder) || 0,
     revisedAt: revised && !Number.isNaN(new Date(revised).getTime()) ? new Date(revised) : null,
     documentType: classifyCatereaseFile(file),
   };

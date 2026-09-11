@@ -263,40 +263,24 @@ const reconcileDeletedFiles = async (event, eventId, seenUids, stats) => {
   return removed.length > 0;
 };
 
-const archiveReplacedDropboxDocuments = (event, latestFiles) => {
-  if (!getCatereaseConfig().primaryFiles) return false;
+const archiveDropboxDocuments = (event) => {
+  if (!getCatereaseConfig().primaryFiles) return 0;
   const currentDocuments = Array.isArray(event?.documents) ? event.documents : [];
-  const latestByType = new Map();
-  latestFiles.forEach((file) => {
-    const type = String(file?.documentType || '');
-    if (!type) return;
-    if (!latestByType.has(type)) latestByType.set(type, []);
-    latestByType.get(type).push(String(file.uid));
-  });
-
-  const readyTypes = new Set();
-  latestByType.forEach((uids, type) => {
-    const activeIds = new Set(currentDocuments
-      .filter((document) => (
-        String(document?.sourceProvider || '') === 'caterease'
-        && String(document?.type || '') === type
-      ))
-      .map((document) => String(document?.sourceId || '')));
-    if (uids.length && uids.every((uid) => activeIds.has(uid))) readyTypes.add(type);
-  });
-  if (!readyTypes.size) return false;
-
   const replaced = currentDocuments.filter((document) => (
-    String(document?.sourceProvider || '') === 'dropbox'
-    && readyTypes.has(String(document?.type || ''))
+    String(document?.sourceProvider || '').toLowerCase() === 'dropbox'
   ));
-  if (!replaced.length) return false;
+  if (!replaced.length) return 0;
   event.documentHistory = mergeEventDocumentHistory(event.documentHistory, replaced);
   event.documents = currentDocuments.filter((document) => !replaced.includes(document));
-  return true;
+  return replaced.length;
 };
 
 const syncOneEvent = async (event, eventId, stats) => {
+  const archivedDropbox = archiveDropboxDocuments(event);
+  if (archivedDropbox) {
+    stats.archivedDropbox += archivedDropbox;
+    await event.save();
+  }
   const rawFiles = await listAllEventFiles(eventId);
   stats.filesSeen += rawFiles.length;
   const seenUids = new Set();
@@ -452,7 +436,6 @@ const syncOneEvent = async (event, eventId, stats) => {
       }, { upsert: true, runValidators: true }).catch(() => null);
     }
   }
-  if (archiveReplacedDropboxDocuments(event, revisionPlan.latest)) eventChanged = true;
   if (await reconcileDeletedFiles(event, eventId, seenUids, stats)) eventChanged = true;
   if (eventChanged) {
     await event.save();
@@ -477,6 +460,7 @@ export const runCatereaseFileSync = async () => {
       unchanged: 0,
       ignored: 0,
       superseded: 0,
+      archivedDropbox: 0,
       deleted: 0,
       failed: 0,
       errorSamples: [],
@@ -512,7 +496,7 @@ export const runCatereaseFileSync = async () => {
       integration.lastSyncCompletedAt = new Date();
       integration.lastSyncSummary = stats;
       await integration.save();
-      if (stats.imported || stats.deleted) clearApiCacheGroups('events', 'bar');
+      if (stats.imported || stats.deleted || stats.archivedDropbox) clearApiCacheGroups('events', 'bar');
       return stats;
     } catch (error) {
       integration.lastSyncError = String(error?.message || 'Caterease sync failed').slice(0, 500);

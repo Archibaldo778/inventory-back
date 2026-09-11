@@ -71,6 +71,11 @@ export const buildKitchenMenuRows = (kitchenPackOutRows = []) => {
     const existing = dishes.get(key);
     if (existing) {
       existing.componentCount += 1;
+      existing.components.push({
+        name: clean(row?.itemName, 300),
+        quantity: numberOrNull(row?.quantity),
+        unit: clean(row?.unit, 80),
+      });
       if (!existing.prepArea && row?.prepArea) existing.prepArea = clean(row.prepArea, 160);
       return;
     }
@@ -79,6 +84,11 @@ export const buildKitchenMenuRows = (kitchenPackOutRows = []) => {
       itemName: name,
       prepArea: clean(row?.prepArea, 160),
       componentCount: 1,
+      components: [{
+        name: clean(row?.itemName, 300),
+        quantity: numberOrNull(row?.quantity),
+        unit: clean(row?.unit, 80),
+      }],
     });
   });
   return [...dishes.values()];
@@ -171,9 +181,13 @@ const imageCell = (image, width) => {
   return `<w:tc><w:tcPr><w:tcW w:w="${width}" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${extent}" cy="${extent}"/><wp:docPr id="${image.documentId}" name="${escapeXml(image.fileName)}"/><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="${image.documentId}" name="${escapeXml(image.fileName)}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${image.relationshipId}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${extent}" cy="${extent}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p></w:tc>`;
 };
 
-const cell = (value, { bold = false, width = 0, shading = '', align = '' } = {}) => (
-  `<w:tc><w:tcPr>${width ? `<w:tcW w:w="${width}" w:type="dxa"/>` : ''}${shading ? `<w:shd w:val="clear" w:fill="${shading}"/>` : ''}</w:tcPr>${paragraph(value, { bold, size: 18, after: 0, align })}</w:tc>`
-);
+const cell = (value, { bold = false, width = 0, shading = '', align = '' } = {}) => {
+  const values = Array.isArray(value) ? value : [value];
+  const contents = (values.length ? values : [''])
+    .map((entry) => paragraph(entry, { bold, size: 18, after: 0, align }))
+    .join('');
+  return `<w:tc><w:tcPr>${width ? `<w:tcW w:w="${width}" w:type="dxa"/>` : ''}${shading ? `<w:shd w:val="clear" w:fill="${shading}"/>` : ''}<w:vAlign w:val="top"/></w:tcPr>${contents}</w:tc>`;
+};
 
 const table = (headers, rows, widths) => `<w:tbl>
   <w:tblPr><w:tblW w:w="5000" w:type="pct"/><w:tblLayout w:type="fixed"/><w:tblBorders><w:top w:val="single" w:sz="8" w:color="000000"/><w:left w:val="single" w:sz="8" w:color="000000"/><w:bottom w:val="single" w:sz="8" w:color="000000"/><w:right w:val="single" w:sz="8" w:color="000000"/><w:insideH w:val="single" w:sz="8" w:color="000000"/><w:insideV w:val="single" w:sz="8" w:color="000000"/></w:tblBorders></w:tblPr>
@@ -329,18 +343,39 @@ const operationalRows = (snapshot, type) => {
 
 const kitchenMenuSections = (rows, recipes) => {
   const recipeIndex = buildExactRecipeMatchIndex(recipes);
-  return rows.map((row) => {
+  const preparedRows = rows.map((row) => {
     const match = resolveExactRecipeMatch(row?.itemName, recipeIndex);
     const recipe = match.status === 'matched' ? match.recipe : null;
+    const dishKey = itemKey(row?.itemName);
     const details = [row?.description, row?.notes, recipe?.description, recipe?.instructions, recipe?.notes]
       .map((value) => clean(catereaseRichTextToPlain(value), 12000))
-      .filter((value, index, values) => value && values.indexOf(value) === index);
-    const componentCount = Number(row?.componentCount) || 0;
-    const meta = [row?.prepArea, componentCount > 0 ? `${componentCount} component${componentCount === 1 ? '' : 's'}` : '']
-      .filter(Boolean).join(' · ');
-    return `${paragraph(row?.itemName || 'Untitled dish', { bold: true, size: 24, before: 260, after: 50 })}${
-      meta ? paragraph(meta, { size: 17, after: 70 }) : ''
-    }${details.length ? details.map((value) => paragraph(value, { size: 20, after: 90 })).join('') : paragraph('No recipe instructions returned by Caterease.', { size: 18, after: 90 })}`;
+      .filter((value, index, values) => value && itemKey(value) !== dishKey && values.indexOf(value) === index);
+    const ingredientSource = Array.isArray(recipe?.ingredients) && recipe.ingredients.length
+      ? recipe.ingredients
+      : Array.isArray(row?.components) ? row.components : [];
+    const ingredients = ingredientSource.map((ingredient) => {
+      const amount = [formatQuantity(ingredient?.quantity), clean(ingredient?.unit, 80)].filter(Boolean).join(' ');
+      const name = clean(ingredient?.name, 300);
+      return [amount, name].filter(Boolean).join(' — ');
+    }).filter(Boolean);
+    return {
+      ...row,
+      group: clean(row?.prepArea || row?.category, 160) || 'Menu',
+      itemName: clean(row?.itemName, 300) || 'Untitled dish',
+      details,
+      ingredients,
+    };
+  });
+  return [...groupedRows(preparedRows, (row) => row.group).entries()].map(([group, values]) => {
+    const bodyRows = values.map((row) => [
+      formatQuantity(row.quantity),
+      row.itemName,
+      row.ingredients.length ? row.ingredients : ['—'],
+      row.details.length ? row.details : ['—'],
+    ]);
+    return `${group.toLowerCase() === 'menu' ? '' : paragraph(group.toUpperCase(), { bold: true, size: 22, before: 220, after: 80 })}${
+      table(['Qty', 'Item', 'Ingredients / Components', 'Comment / Instructions'], bodyRows, [750, 2800, 3400, 3650])
+    }`;
   }).join('');
 };
 

@@ -157,8 +157,20 @@ test('operational snapshot checksum is stable when API row order changes', () =>
 test('Kitchen Menu DOCX uses dish names and matched Caterease instructions', async () => {
   const buffer = await renderCatereaseOperationalDocx({
     event: { title: 'Dinner', date: '2026-09-11', externalId: 'E22672' },
-    snapshot: { schemaVersion: 3, kitchenMenu: [{ itemName: 'Caramel Apple', prepArea: 'Pastry', componentCount: 2 }] },
-    recipes: [{ name: 'Caramel Apple', instructions: 'Temper apples before service.', ingredients: [] }],
+    snapshot: {
+      schemaVersion: 3,
+      kitchenMenu: [{
+        itemName: 'Caramel Apple',
+        prepArea: 'Pastry',
+        componentCount: 2,
+        components: [{ name: 'Apple mousse', quantity: 12, unit: 'Each' }],
+      }],
+    },
+    recipes: [{
+      name: 'Caramel Apple',
+      instructions: 'Temper apples before service.',
+      ingredients: [{ name: 'Green apple puree', quantity: 3, unit: 'lb' }],
+    }],
     type: 'kitchen_menu',
   });
   const zip = await JSZip.loadAsync(buffer);
@@ -166,6 +178,33 @@ test('Kitchen Menu DOCX uses dish names and matched Caterease instructions', asy
   assert.match(xml, /KITCHEN MENU/);
   assert.match(xml, /Caramel Apple/);
   assert.match(xml, /Temper apples before service/);
+  assert.match(xml, /Ingredients \/ Components/);
+  assert.match(xml, /Comment \/ Instructions/);
+  assert.match(xml, /3 lb/);
+  assert.match(xml, /Green apple puree/);
+  assert.ok((xml.match(/<w:tbl>/g) || []).length >= 2, 'metadata and menu must both use tables');
+});
+
+test('Kitchen Menu DOCX lists packout component quantities when no recipe is matched', async () => {
+  const snapshot = buildCatereaseOperationalSnapshot({
+    eventId: 'E22672',
+    kitchenPackOutRows: [
+      { ItemName: 'Mousse', Qty: 12, Unit: 'Each', FSName: 'Caramel Apple', FSPrepArea: 'Pastry' },
+      { ItemName: 'Apple center', Qty: 6, Unit: 'Each', FSName: 'Caramel Apple', FSPrepArea: 'Pastry' },
+    ],
+  });
+  const buffer = await renderCatereaseOperationalDocx({
+    event: { title: 'Dinner', date: '2026-09-11', externalId: 'E22672' },
+    snapshot,
+    recipes: [],
+    type: 'kitchen_menu',
+  });
+  const zip = await JSZip.loadAsync(buffer);
+  const xml = await zip.file('word/document.xml').async('string');
+  assert.match(xml, /12 Each/);
+  assert.match(xml, /Mousse/);
+  assert.match(xml, /6 Each/);
+  assert.match(xml, /Apple center/);
 });
 
 test('generated operational DOCX is a valid Word package and escapes upstream text', async () => {

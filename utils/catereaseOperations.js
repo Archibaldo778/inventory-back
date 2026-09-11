@@ -288,7 +288,7 @@ const documentTitleRow = (title) => `<w:tbl>
   <w:tblPr><w:tblW w:w="5000" w:type="pct"/><w:tblLayout w:type="fixed"/></w:tblPr>
   <w:tblGrid><w:gridCol w:w="8000"/><w:gridCol w:w="2600"/></w:tblGrid>
   <w:tr>
-    <w:tc><w:tcPr><w:tcW w:w="8000" w:type="dxa"/></w:tcPr>${paragraph(title, { bold: true, size: 36, after: 80 })}</w:tc>
+    <w:tc><w:tcPr><w:tcW w:w="8000" w:type="dxa"/></w:tcPr>${paragraph(title, { bold: true, size: 36, color: 'FF0000', after: 80 })}</w:tc>
     <w:tc><w:tcPr><w:tcW w:w="2600" w:type="dxa"/></w:tcPr>${paragraph('Revision', { bold: true, size: 28, align: 'right', after: 80 })}</w:tc>
   </w:tr>
 </w:tbl>`;
@@ -585,8 +585,8 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
     [`Venue Notes: ${event?.meta?.venueNotes || ''}`, `Event Number: ${displayedEventNumber(event?.externalId || snapshot?.eventId || '')}`],
     [`Allergen/Restrictions: ${event?.meta?.allergens || event?.meta?.restrictions || ''}`, ''],
   ], [5300, 5300])}` : isStaffRequest
-    ? `${paragraph(title, { bold: true, size: 30, align: 'center', after: 120 })}${zoneHeading}${eventDetailsTable}`
-    : `${paragraph('Revision', { bold: true, size: 28, align: 'right', after: 80 })}${paragraph(title, { bold: true, size: 30, align: 'center', after: 120 })}${zoneHeading}${eventDetailsTable}`;
+    ? `${paragraph(title, { bold: true, size: 36, color: 'FF0000', align: 'center', after: 120 })}${zoneHeading}${eventDetailsTable}`
+    : `${paragraph('Revision', { bold: true, size: 28, align: 'right', after: 80 })}${paragraph(title, { bold: true, size: 36, color: 'FF0000', align: 'center', after: 120 })}${zoneHeading}${eventDetailsTable}`;
   const documentFooterSections = isKitchenMenu ? kitchenStaffingSection(event) : '';
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><w:body>

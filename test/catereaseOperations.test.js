@@ -266,6 +266,7 @@ test('operational DOCX exports only the requested sub-event', async () => {
   assert.match(xml, />Green Room</);
   assert.match(xml, /<w:color w:val="FF0000"\/[^>]*>/);
   assert.match(xml, /<w:sz w:val="36"\/[^>]*>/);
+  assert.match(xml, /<w:color w:val="FF0000"\/>.*?<w:t xml:space="preserve">PACK OUT<\/w:t>/s);
   assert.doesNotMatch(xml, />Photo</);
   assert.equal((xml.match(/<w:tbl>/g) || []).length, 2, 'Caterease PO uses one event table and one continuous item table');
   assert.match(xml, /<w:gridSpan w:val="5"\/[^>]*>/);
@@ -484,6 +485,7 @@ test('Kitchen Menu keeps Caterease comments in the standard four-column table', 
   const zip = await JSZip.loadAsync(buffer);
   const xml = await zip.file('word/document.xml').async('string');
   assert.match(xml, />KITCHEN MENU</);
+  assert.match(xml, /<w:color w:val="FF0000"\/>.*?<w:t xml:space="preserve">KITCHEN MENU<\/w:t>/s);
   assert.match(xml, />Qty</);
   assert.match(xml, />Item</);
   assert.match(xml, />Comment</);

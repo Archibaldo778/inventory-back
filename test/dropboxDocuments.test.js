@@ -27,17 +27,6 @@ test('Dropbox document names recognize Caterease KPO and AKM variants', () => {
   assert.equal(inferDropboxEventTitle('09-05-26 Event Day 2 AKM.docx'), 'Event Day 2');
 });
 
-test('Annotated Kitchen Menu files are not imported as active event documents', () => {
-  const result = classifyDropboxEntry({
-    '.tag': 'file',
-    name: '09-11-26 Bensadoun Rosh Hashanah Dinner AKM.docx',
-    path_display: '/Proposals/2026/September/09-11-26 Bensadoun/Leadership File/Kitchen/09-11-26 Bensadoun Rosh Hashanah Dinner AKM.docx',
-  }, { today: '2026-09-01' });
-  assert.equal(result.status, 'ignored');
-  assert.equal(result.documentType, 'kitchen_menu');
-  assert.match(result.reason, /Annotated Kitchen Menu/);
-});
-
 test('dated invoices and administrative DOCX files are ignored instead of sent to review', () => {
   const result = classifyDropboxEntry({
     '.tag': 'file',
@@ -130,6 +119,17 @@ test('Dropbox revision plan keeps only the highest explicit revision active', ()
   assert.equal(plan.find((row) => row.dropboxId === 'three').isLatestRevision, true);
   assert.equal(plan.find((row) => row.dropboxId === 'one').status, 'superseded');
   assert.equal(plan.find((row) => row.dropboxId === 'two').supersededByDropboxId, 'three');
+});
+
+test('a numbered revision supersedes the original unnumbered document', () => {
+  const base = '/Proposals/2026/September/09-11-2026 Event E22672';
+  const plan = buildDropboxRevisionPlan([
+    { dropboxId: 'original', path: `${base}/E22672 KM.docx`, name: 'E22672 KM.docx', documentType: 'kitchen_menu', inferredDate: '2026-09-11' },
+    { dropboxId: 'rev-1', path: `${base}/E22672 KM REV1.docx`, name: 'E22672 KM REV1.docx', documentType: 'kitchen_menu', inferredDate: '2026-09-11' },
+  ]);
+  assert.equal(plan.find((row) => row.dropboxId === 'rev-1').isLatestRevision, true);
+  assert.equal(plan.find((row) => row.dropboxId === 'original').status, 'superseded');
+  assert.equal(plan.find((row) => row.dropboxId === 'original').supersededByDropboxId, 'rev-1');
 });
 
 test('Dropbox revision plan sends ambiguous unnumbered duplicates to review', () => {

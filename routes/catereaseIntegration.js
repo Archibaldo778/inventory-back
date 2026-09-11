@@ -20,7 +20,7 @@ import {
   preservePackoutOperationalState,
   schedulePreparedItemsForEvent,
 } from '../utils/barManualItems.js';
-import { normalizePackoutItems } from './bar.js';
+import { canViewEvent, normalizePackoutItems } from './bar.js';
 import {
   downloadCatereaseEventFile,
   getCatereaseConfig,
@@ -57,12 +57,35 @@ const router = Router();
 const requireCatereaseAdmin = [requireAuth, requireAdmin];
 const syncRateLimit = createMemoryRateLimiter({ windowMs: 10 * 60 * 1000, max: 8, message: 'Too many Caterease sync requests' });
 const downloadRateLimit = createMemoryRateLimiter({ windowMs: 60 * 1000, max: 120, message: 'Too many Caterease file downloads' });
+const OPERATIONAL_EVENT_RESTRICTED_ROLES = new Set(['bar captain', 'bartender']);
 let syncPromise = null;
 let syncProgress = null;
 let recipeSyncPromise = null;
 let recipeSyncProgress = null;
 let operationalSyncPromise = null;
 let operationalSyncProgress = null;
+
+const loadAuthorizedOperationalEvent = async (req, res) => {
+  const event = await Event.findById(req.params.id)
+    .select('externalId title date client meta catereaseOperations updatedAt')
+    .lean();
+  if (!event) {
+    res.status(404).json({ error: 'Event not found' });
+    return null;
+  }
+
+  const role = String(req.auth?.role || '').trim().toLowerCase();
+  if (OPERATIONAL_EVENT_RESTRICTED_ROLES.has(role)) {
+    const barEvent = await BarEvent.findOne({ linkedEventId: event._id })
+      .select('assignedUserIds')
+      .lean();
+    if (!barEvent || !canViewEvent(barEvent, req.auth)) {
+      res.status(403).json({ error: 'This event is not assigned to your account' });
+      return null;
+    }
+  }
+  return event;
+};
 const loadMatchedDecorImages = async (snapshot) => {
   const requestedNames = new Map(packOutRenderedItemNames(snapshot?.packOut).map((itemName) => (
     [normalizeKitchenRecipeName(itemName), itemName]
@@ -832,12 +855,22 @@ router.post('/operations/sync', ...requireCatereaseAdmin, syncRateLimit, async (
   }
 });
 
+router.get('/operations/events/:id', requireAuth, async (req, res) => {
+  try {
+    const event = await loadAuthorizedOperationalEvent(req, res);
+    if (!event) return undefined;
+    return res.json({ snapshot: event.catereaseOperations || null });
+  } catch (error) {
+    return sendApiError(res, error, { context: 'Caterease event operational data failed', fallbackMessage: 'Failed to load Caterease operational data' });
+  }
+});
+
 router.get('/operations/events/:id/export/:type', requireAuth, async (req, res) => {
   try {
     const type = String(req.params.type || '').toLowerCase();
     if (!['po', 'kitchen_packout', 'kitchen_menu'].includes(type)) return res.status(400).json({ error: 'Unknown operational document type' });
-    const event = await Event.findById(req.params.id).select('externalId title date client meta catereaseOperations updatedAt').lean();
-    if (!event) return res.status(404).json({ error: 'Event not found' });
+    const event = await loadAuthorizedOperationalEvent(req, res);
+    if (!event) return undefined;
     if (!event.catereaseOperations) return res.status(404).json({ error: 'Caterease operational data has not been synced for this event' });
     const recipes = type === 'kitchen_menu'
       ? await KitchenRecipe.find({ sourceProvider: 'caterease', sourceDeletedAt: null })

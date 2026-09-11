@@ -166,6 +166,12 @@ const paragraph = (value, options = {}) => {
 
 const brandLogoParagraph = () => `<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="100"/></w:pPr><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="1463040" cy="636648"/><wp:docPr id="1" name="Olivier Cheng logo"/><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="1" name="logo.svg"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="rId2"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="1463040" cy="636648"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>`;
 
+const imageCell = (image, width) => {
+  if (!image) return cell('', { width });
+  const extent = 502920;
+  return `<w:tc><w:tcPr><w:tcW w:w="${width}" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${extent}" cy="${extent}"/><wp:docPr id="${image.documentId}" name="${escapeXml(image.fileName)}"/><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="${image.documentId}" name="${escapeXml(image.fileName)}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${image.relationshipId}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${extent}" cy="${extent}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p></w:tc>`;
+};
+
 const cell = (value, { bold = false, width = 0, shading = '', align = '' } = {}) => (
   `<w:tc><w:tcPr>${width ? `<w:tcW w:w="${width}" w:type="dxa"/>` : ''}${shading ? `<w:shd w:val="clear" w:fill="${shading}"/>` : ''}</w:tcPr>${paragraph(value, { bold, size: 18, after: 0, align })}</w:tc>`
 );
@@ -262,15 +268,16 @@ const templatedPackOutGroups = (rows) => {
   return groups;
 };
 
-const packOutTable = (rows) => {
+const packOutTable = (rows, decorImages = []) => {
   const groups = templatedPackOutGroups(rows.filter((row) => clean(row?.menuGroup, 160).toLowerCase() !== 'standard'));
   const orderedGroups = [...groups.entries()].sort(([left], [right]) => {
     const leftIndex = PACK_OUT_SECTION_ORDER.indexOf(left);
     const rightIndex = PACK_OUT_SECTION_ORDER.indexOf(right);
     return (leftIndex < 0 ? 999 : leftIndex) - (rightIndex < 0 ? 999 : rightIndex) || left.localeCompare(right);
   });
-  const widths = [3600, 750, 3800, 1050, 1050];
-  const header = `<w:tr>${['Name', 'Qty', 'Notes/Comments', 'Delivered', 'Returned'].map((value, index) => cell(value, { bold: true, width: widths[index], shading: 'BFBFBF', align: 'center' })).join('')}</w:tr>`;
+  const imageByName = new Map(decorImages.map((image) => [itemKey(image.itemName), image]));
+  const widths = [2900, 700, 3300, 1000, 1000, 1350];
+  const header = `<w:tr>${['Name', 'Qty', 'Notes/Comments', 'Delivered', 'Returned', 'Photo'].map((value, index) => cell(value, { bold: true, width: widths[index], shading: 'BFBFBF', align: 'center' })).join('')}</w:tr>`;
   const borders = '<w:tblBorders><w:top w:val="single" w:sz="8" w:color="000000"/><w:left w:val="single" w:sz="8" w:color="000000"/><w:bottom w:val="single" w:sz="8" w:color="000000"/><w:right w:val="single" w:sz="8" w:color="000000"/><w:insideH w:val="single" w:sz="8" w:color="000000"/><w:insideV w:val="single" w:sz="8" w:color="000000"/></w:tblBorders>';
   return orderedGroups.map(([group, values]) => {
     const body = values.map((row) => `<w:tr>${[
@@ -279,7 +286,7 @@ const packOutTable = (rows) => {
       { value: row.notes || '', align: '' },
       { value: '', align: '' },
       { value: '', align: '' },
-    ].map(({ value, align }, index) => cell(value, { width: widths[index], align })).join('')}</w:tr>`).join('');
+    ].map(({ value, align }, index) => cell(value, { width: widths[index], align })).join('')}${imageCell(imageByName.get(itemKey(row.itemName)), widths[5])}</w:tr>`).join('');
     return `${paragraph(group, { bold: true, size: 24, align: 'center', before: 220, after: 50 })}<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/><w:tblLayout w:type="fixed"/>${borders}</w:tblPr><w:tblGrid>${widths.map((width) => `<w:gridCol w:w="${width}"/>`).join('')}</w:tblGrid>${header}${body}</w:tbl>`;
   }).join('');
 };
@@ -329,7 +336,7 @@ const kitchenMenuSections = (rows, recipes) => {
   }).join('');
 };
 
-const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = false }) => {
+const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = false, decorImages = [] }) => {
   const isKitchenPackOut = type === 'kitchen_packout' || type === 'kitchen_production';
   const isKitchenMenu = type === 'kitchen_menu';
   const rows = operationalRows(snapshot, type);
@@ -350,7 +357,7 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
         ? table(['Qty', 'Unit', 'Required item', 'Prep area'], bodyRows, [900, 1200, 5200, 1800])
         : table(['Qty', 'Name', 'Notes / Comments', 'Delivered', 'Returned'], bodyRows, [750, 3600, 3800, 1050, 1050])
     }`;
-  }).join('') : packOutTable(rows);
+  }).join('') : packOutTable(rows, decorImages);
   const parsedEventGuestCount = Number(event?.meta?.guestCount);
   const legacyGuestRow = rows.find((row) => itemKey(row?.itemName) === 'food' && clean(row?.menuGroup).toLowerCase() === 'standard');
   const parsedSnapshotGuestCount = Number(snapshot?.guestCount ?? legacyGuestRow?.quantity);
@@ -375,15 +382,25 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
 </w:body></w:document>`;
 };
 
-export const renderCatereaseOperationalDocx = async ({ event, snapshot, type, recipes = [], brandLogoSvg = null }) => {
+export const renderCatereaseOperationalDocx = async ({ event, snapshot, type, recipes = [], brandLogoSvg = null, decorImages = [] }) => {
   const includeBrandLogo = Buffer.isBuffer(brandLogoSvg) && brandLogoSvg.length > 0;
+  const embeddedDecorImages = (Array.isArray(decorImages) ? decorImages : [])
+    .filter((image) => Buffer.isBuffer(image?.buffer) && image.buffer.length > 0)
+    .slice(0, 40)
+    .map((image, index) => ({
+      ...image,
+      documentId: index + 2,
+      relationshipId: `rId${index + 3}`,
+      fileName: `decor-${index + 1}.${image.extension === 'png' ? 'png' : 'jpg'}`,
+    }));
   const zip = new JSZip();
-  zip.file('[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>${includeBrandLogo ? '<Default Extension="svg" ContentType="image/svg+xml"/>' : ''}<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/></Types>`);
+  zip.file('[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>${includeBrandLogo ? '<Default Extension="svg" ContentType="image/svg+xml"/>' : ''}${embeddedDecorImages.length ? '<Default Extension="jpg" ContentType="image/jpeg"/><Default Extension="png" ContentType="image/png"/>' : ''}<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/></Types>`);
   zip.folder('_rels').file('.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`);
   const word = zip.folder('word');
-  word.file('document.xml', documentXml({ event, snapshot, type, recipes, includeBrandLogo }));
+  word.file('document.xml', documentXml({ event, snapshot, type, recipes, includeBrandLogo, decorImages: embeddedDecorImages }));
   word.file('styles.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:rPr><w:rFonts w:ascii="Avenir Medium" w:hAnsi="Avenir Medium"/><w:sz w:val="20"/></w:rPr></w:style></w:styles>`);
   if (includeBrandLogo) word.folder('media').file('logo.svg', brandLogoSvg);
-  word.folder('_rels').file('document.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>${includeBrandLogo ? '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/logo.svg"/>' : ''}</Relationships>`);
+  embeddedDecorImages.forEach((image) => word.folder('media').file(image.fileName, image.buffer));
+  word.folder('_rels').file('document.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>${includeBrandLogo ? '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/logo.svg"/>' : ''}${embeddedDecorImages.map((image) => `<Relationship Id="${image.relationshipId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/${image.fileName}"/>`).join('')}</Relationships>`);
   return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
 };

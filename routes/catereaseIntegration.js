@@ -7,6 +7,7 @@ import BarEvent from '../models/BarEvent.js';
 import KitchenIngredient from '../models/KitchenIngredient.js';
 import KitchenIngredientUnit from '../models/KitchenIngredientUnit.js';
 import KitchenRecipe from '../models/KitchenRecipe.js';
+import Product from '../models/Product.js';
 import { requireAdmin, requireAuth } from '../middleware/auth.js';
 import { createMemoryRateLimiter } from '../middleware/rateLimit.js';
 import { sendApiError } from '../utils/apiErrors.js';
@@ -38,12 +39,14 @@ import {
   selectLatestCatereaseFiles,
 } from '../utils/catereaseFiles.js';
 import { nyToday } from '../utils/dropboxDocuments.js';
+import { fetchWithTimeout, readBoundedResponseBuffer } from '../utils/fetchWithTimeout.js';
+import { normalizeProductImages } from '../utils/productImages.js';
 import { buildCatereaseFinancialPreview, buildCatereaseKitchenCatalog } from '../utils/catereaseKitchen.js';
 import {
   buildCatereaseOperationalSnapshot,
   renderCatereaseOperationalDocx,
 } from '../utils/catereaseOperations.js';
-import { syncKitchenRecipeMatches } from '../utils/kitchenRecipeMatching.js';
+import { normalizeKitchenRecipeName, syncKitchenRecipeMatches } from '../utils/kitchenRecipeMatching.js';
 
 const router = Router();
 const requireCatereaseAdmin = [requireAuth, requireAdmin];
@@ -75,6 +78,61 @@ const loadBrandLogoSvg = () => {
     }
   })();
   return brandLogoSvgPromise;
+};
+
+const cloudinaryWordThumbnailUrl = (value) => {
+  try {
+    const url = new URL(String(value || ''));
+    if (url.protocol !== 'https:' || url.hostname !== 'res.cloudinary.com') return '';
+    url.pathname = url.pathname.replace('/upload/', '/upload/f_jpg,c_pad,b_white,w_180,h_180,q_auto/');
+    return url.toString();
+  } catch {
+    return '';
+  }
+};
+
+const loadMatchedDecorImages = async (snapshot) => {
+  const rows = [
+    ...(Array.isArray(snapshot?.packOut) ? snapshot.packOut : []),
+    ...(Array.isArray(snapshot?.kitchenPackOut) ? snapshot.kitchenPackOut : []),
+  ];
+  const requestedNames = new Map(rows.map((row) => [normalizeKitchenRecipeName(row?.itemName), String(row?.itemName || '').trim()]).filter(([key]) => key));
+  if (!requestedNames.size) return [];
+  const products = await Product.find({ inventoryType: { $ne: 'disposable' } })
+    .select('name image imageUrl images')
+    .lean();
+  const candidates = new Map();
+  products.forEach((product) => {
+    const key = normalizeKitchenRecipeName(product?.name);
+    if (!requestedNames.has(key)) return;
+    const url = cloudinaryWordThumbnailUrl(normalizeProductImages(product)[0]);
+    if (!url) return;
+    const matches = candidates.get(key) || [];
+    matches.push({ product, url });
+    candidates.set(key, matches);
+  });
+  const matched = [...candidates.entries()]
+    .filter(([, productsForName]) => productsForName.length === 1)
+    .map(([key, [{ url }]]) => ({
+      itemName: requestedNames.get(key),
+      url,
+    }))
+    .slice(0, 40);
+  const images = [];
+  for (let offset = 0; offset < matched.length; offset += 5) {
+    const batch = await Promise.all(matched.slice(offset, offset + 5).map(async (entry) => {
+      try {
+        const response = await fetchWithTimeout(entry.url, { headers: { Accept: 'image/jpeg' } }, { timeoutMs: 7000 });
+        if (!response.ok) return null;
+        const { buffer } = await readBoundedResponseBuffer(response, { maxBytes: 2 * 1024 * 1024, allowedContentTypes: ['image/jpeg', 'image/jpg'] });
+        return { itemName: entry.itemName, buffer, extension: 'jpg', contentType: 'image/jpeg' };
+      } catch {
+        return null;
+      }
+    }));
+    images.push(...batch.filter(Boolean));
+  }
+  return images;
 };
 
 const OPERATIONAL_FIELDS = Object.freeze({
@@ -833,12 +891,14 @@ router.get('/operations/events/:id/export/:type', requireAuth, async (req, res) 
         .lean()
       : [];
     const brandLogoSvg = await loadBrandLogoSvg();
+    const decorImages = type === 'po' ? await loadMatchedDecorImages(event.catereaseOperations) : [];
     const docx = await renderCatereaseOperationalDocx({
       event,
       snapshot: event.catereaseOperations,
       type,
       recipes,
       brandLogoSvg,
+      decorImages,
     });
     const safeTitle = String(event.title || 'Event').replace(/[<>:"/\\|?*\u0000-\u001F]/g, '').replace(/\s+/g, ' ').trim().slice(0, 100) || 'Event';
     const dateMatch = String(event.date || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);

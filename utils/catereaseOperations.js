@@ -252,9 +252,6 @@ const templatedPackOutGroups = (rows) => {
   return groups;
 };
 
-const blankPackOutRow = (widths) => `<w:tr>${widths.map((width) => cell('', { width })).join('')}</w:tr>`;
-const sectionRow = (value, widths) => `<w:tr>${widths.map((width, index) => cell(index === 0 ? value : '', { width, align: index === 0 ? 'center' : '' })).join('')}</w:tr>`;
-
 const packOutTable = (rows) => {
   const groups = templatedPackOutGroups(rows.filter((row) => clean(row?.menuGroup, 160).toLowerCase() !== 'standard'));
   const orderedGroups = [...groups.entries()].sort(([left], [right]) => {
@@ -264,14 +261,17 @@ const packOutTable = (rows) => {
   });
   const widths = [3600, 750, 3800, 1050, 1050];
   const header = `<w:tr>${['Name', 'Qty', 'Notes/Comments', 'Delivered', 'Returned'].map((value, index) => cell(value, { bold: true, width: widths[index], shading: 'BFBFBF', align: 'center' })).join('')}</w:tr>`;
-  const body = orderedGroups.map(([group, values]) => `${blankPackOutRow(widths)}${sectionRow(group, widths)}${values.map((row) => `<w:tr>${[
-    { value: row.itemName, align: 'center' },
-    { value: formatQuantity(row.quantity), align: '' },
-    { value: row.notes || '', align: '' },
-    { value: '', align: '' },
-    { value: '', align: '' },
-  ].map(({ value, align }, index) => cell(value, { width: widths[index], align })).join('')}</w:tr>`).join('')}`).join('');
-  return `<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/><w:tblLayout w:type="fixed"/><w:tblBorders><w:top w:val="single" w:sz="8" w:color="000000"/><w:left w:val="single" w:sz="8" w:color="000000"/><w:bottom w:val="single" w:sz="8" w:color="000000"/><w:right w:val="single" w:sz="8" w:color="000000"/><w:insideH w:val="single" w:sz="8" w:color="000000"/><w:insideV w:val="single" w:sz="8" w:color="000000"/></w:tblBorders></w:tblPr><w:tblGrid>${widths.map((width) => `<w:gridCol w:w="${width}"/>`).join('')}</w:tblGrid>${header}${body}</w:tbl>`;
+  const borders = '<w:tblBorders><w:top w:val="single" w:sz="8" w:color="000000"/><w:left w:val="single" w:sz="8" w:color="000000"/><w:bottom w:val="single" w:sz="8" w:color="000000"/><w:right w:val="single" w:sz="8" w:color="000000"/><w:insideH w:val="single" w:sz="8" w:color="000000"/><w:insideV w:val="single" w:sz="8" w:color="000000"/></w:tblBorders>';
+  return orderedGroups.map(([group, values]) => {
+    const body = values.map((row) => `<w:tr>${[
+      { value: row.itemName, align: 'center' },
+      { value: formatQuantity(row.quantity), align: '' },
+      { value: row.notes || '', align: '' },
+      { value: '', align: '' },
+      { value: '', align: '' },
+    ].map(({ value, align }, index) => cell(value, { width: widths[index], align })).join('')}</w:tr>`).join('');
+    return `${paragraph(group, { bold: true, size: 24, align: 'center', before: 220, after: 50 })}<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/><w:tblLayout w:type="fixed"/>${borders}</w:tblPr><w:tblGrid>${widths.map((width) => `<w:gridCol w:w="${width}"/>`).join('')}</w:tblGrid>${header}${body}</w:tbl>`;
+  }).join('');
 };
 
 const formatQuantity = (value) => {

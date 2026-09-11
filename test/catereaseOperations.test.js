@@ -264,6 +264,8 @@ test('operational DOCX exports only the requested sub-event', async () => {
   assert.doesNotMatch(xml, /Staff Holding Water/);
   assert.match(xml, />PACK OUT</);
   assert.match(xml, />Green Room</);
+  assert.match(xml, /<w:color w:val="FF0000"\/[^>]*>/);
+  assert.match(xml, /<w:sz w:val="36"\/[^>]*>/);
   assert.doesNotMatch(xml, />Photo</);
   assert.equal((xml.match(/<w:tbl>/g) || []).length, 2, 'Caterease PO uses one event table and one continuous item table');
   assert.match(xml, /<w:gridSpan w:val="5"\/[^>]*>/);
@@ -503,6 +505,7 @@ test('Kitchen Menu prints a non-main zone name below its title', async () => {
   const zip = await JSZip.loadAsync(buffer);
   const xml = await zip.file('word/document.xml').async('string');
   assert.match(xml, />Staff Holding</);
+  assert.match(xml, /<w:color w:val="FF0000"\/[^>]*>/);
 });
 
 test('operational DOCX does not print Main as a zone label', async () => {

@@ -974,8 +974,8 @@ router.get('/operations/events/:id/export/:type', requireAuth, async (req, res) 
     const dateMatch = String(event.date || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
     const datePrefix = dateMatch ? `${dateMatch[2]}-${dateMatch[3]}-${dateMatch[1].slice(-2)}` : '';
     const documentCode = type === 'po' ? 'PO' : type === 'kitchen_packout' ? 'KPO' : type === 'staff_request' ? 'Staff Request' : type === 'annotated_kitchen_menu' ? 'AKM' : 'KM';
-    const safeZone = zoneName.replace(/[<>:"/\\|?*\u0000-\u001F]/g, '').replace(/\s+/g, ' ').trim().slice(0, 80);
-    const fileName = [datePrefix, safeTitle, safeZone, documentCode].filter(Boolean).join(' ');
+    const safeZone = String(req.query.fileZoneName || '').replace(/[<>:"/\\|?*\u0000-\u001F]/g, '').replace(/\s+/g, ' ').trim().slice(0, 80);
+    const fileName = [datePrefix, safeTitle, safeZone.toLowerCase() === 'main' ? '' : safeZone, documentCode].filter(Boolean).join('_');
     res.setHeader('Cache-Control', 'private, no-store');
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
     res.setHeader('Content-Disposition', `attachment; filename="${fileName}.docx"`);

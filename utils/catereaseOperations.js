@@ -250,13 +250,13 @@ const escapeXml = (value) => String(value ?? '')
   .replace(/"/g, '&quot;')
   .replace(/'/g, '&apos;');
 
-const textRun = (value, { bold = false, size = 20 } = {}) => (
-  `<w:r><w:rPr>${bold ? '<w:b/>' : ''}<w:sz w:val="${size}"/><w:szCs w:val="${size}"/></w:rPr><w:t xml:space="preserve">${escapeXml(value)}</w:t></w:r>`
+const textRun = (value, { bold = false, size = 20, color = '' } = {}) => (
+  `<w:r><w:rPr>${bold ? '<w:b/>' : ''}${color ? `<w:color w:val="${escapeXml(color)}"/>` : ''}<w:sz w:val="${size}"/><w:szCs w:val="${size}"/></w:rPr><w:t xml:space="preserve">${escapeXml(value)}</w:t></w:r>`
 );
 
 const paragraph = (value, options = {}) => {
-  const { bold = false, size = 20, align = '', before = 0, after = 0 } = options;
-  return `<w:p><w:pPr>${align ? `<w:jc w:val="${align}"/>` : ''}<w:spacing w:before="${before}" w:after="${after}"/></w:pPr>${textRun(value, { bold, size })}</w:p>`;
+  const { bold = false, size = 20, color = '', align = '', before = 0, after = 0 } = options;
+  return `<w:p><w:pPr>${align ? `<w:jc w:val="${align}"/>` : ''}<w:spacing w:before="${before}" w:after="${after}"/></w:pPr>${textRun(value, { bold, size, color })}</w:p>`;
 };
 
 const brandLogoParagraph = () => `<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="100"/></w:pPr><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="1463040" cy="636648"/><wp:docPr id="1" name="Olivier Cheng logo"/><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="1" name="logo.svg"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="rId2"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="1463040" cy="636648"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>`;
@@ -566,7 +566,7 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
   const deliveryTime = event?.meta?.deliveryTime || '';
   const printableZoneName = clean(zoneName, 200);
   const zoneHeading = printableZoneName && printableZoneName.toLowerCase() !== 'main'
-    ? paragraph(printableZoneName, { bold: true, size: 24, align: 'center', after: 120 })
+    ? paragraph(printableZoneName, { bold: true, size: 36, color: 'FF0000', align: 'center', after: 120 })
     : '';
   const eventDetailsTable = table([], [
     [`Event: ${event?.title || 'Event'}`, `Event Date: ${longDate(event?.date)}`],

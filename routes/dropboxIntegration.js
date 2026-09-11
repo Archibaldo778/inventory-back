@@ -36,6 +36,7 @@ import {
   findDropboxEventMatch,
   getDropboxRevisionMetadata,
   nyToday,
+  shouldReplaceDropboxEventDocument,
 } from '../utils/dropboxDocuments.js';
 
 const DROPBOX_CONTENT_PARSER_VERSION = 2;
@@ -164,7 +165,7 @@ const inspectDropboxDocumentContents = async (accessToken, namespaceId) => {
       nextIndex += 1;
       try {
         const metadata = await readDropboxDocxMetadata(
-          await downloadDropboxFile(accessToken, document.path, { namespaceId }),
+          await downloadDropboxFile(accessToken, document.dropboxId || document.path, { namespaceId }),
           { documentType: document.documentType }
         );
         const inferredDate = metadata.eventDate || document.inferredDate || '';
@@ -366,7 +367,7 @@ const attachDiscoveredDropboxDocuments = async (namespaceId) => {
       const currentDocuments = Array.isArray(event.documents) ? event.documents : [];
       const existing = currentDocuments.find((entry) => (
         String(entry?.sourceProvider || '') === 'dropbox'
-        && String(entry?.sourceSeries || '') === sourceSeries
+        && shouldReplaceDropboxEventDocument(entry, document, sourceSeries)
       ));
       if (
         existing
@@ -384,8 +385,7 @@ const attachDiscoveredDropboxDocuments = async (namespaceId) => {
 
       const version = nextSeriesVersion(event, sourceSeries);
       const replaced = currentDocuments.filter((entry) => (
-        String(entry?.sourceProvider || '') === 'dropbox'
-        && String(entry?.sourceSeries || '') === sourceSeries
+        shouldReplaceDropboxEventDocument(entry, document, sourceSeries)
       ));
       event.documentHistory = mergeEventDocumentHistory(event.documentHistory, replaced);
       event.documents = [
@@ -672,6 +672,7 @@ export const runDropboxDiscoverySync = async () => {
       stats.skippedOld += reclassified.skippedOld;
       stats.discovered += reclassified.discovered;
       stats.ignored += reclassified.ignored;
+      await reconcileDropboxRevisions(root.namespaceId);
       const directAttachments = await attachDiscoveredDropboxDocuments(root.namespaceId);
       const inspected = await inspectDropboxDocumentContents(accessToken, root.namespaceId);
       stats.contentInspected = inspected.inspected;
@@ -811,7 +812,7 @@ router.get('/documents/:dropboxId/download', requireAuth, downloadRateLimit, asy
       return res.status(409).json({ error: 'Dropbox is not connected' });
     }
     const accessToken = await refreshDropboxAccessToken(decryptDropboxSecret(integration.refreshToken));
-    const buffer = await downloadDropboxFile(accessToken, document.path, {
+    const buffer = await downloadDropboxFile(accessToken, document.dropboxId || document.path, {
       namespaceId: document.namespaceId || integration.namespaceId,
     });
     res.setHeader('Cache-Control', 'private, no-store');

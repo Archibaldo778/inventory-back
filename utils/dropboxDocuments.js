@@ -46,6 +46,28 @@ export const inferDropboxDocumentSeries = (value) => clean(value)
   .filter(Boolean)
   .join('/');
 
+export const inferDropboxDocumentFamily = (value) => clean(value)
+  .toLowerCase()
+  .normalize('NFKD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .replace(/\.[^.]+$/, '')
+  .replace(/\b(?:revision|rev(?:ision)?|version|ver)\s*[-_.#:]?\s*\d{1,4}\b/g, ' ')
+  .replace(/(?:^|[\s._-])v\s*[-_.#:]?\s*\d{1,4}(?=$|[\s._-])/g, ' ')
+  .replace(/[^a-z0-9]+/g, ' ')
+  .replace(/\s+/g, ' ')
+  .trim();
+
+export const shouldReplaceDropboxEventDocument = (current, incoming, sourceSeries) => {
+  const currentProvider = clean(current?.sourceProvider).toLowerCase();
+  const currentSourceId = clean(current?.sourceId);
+  const incomingSourceId = clean(incoming?.dropboxId);
+  const currentSeries = clean(current?.sourceSeries);
+  if (currentProvider === 'dropbox' && incomingSourceId && currentSourceId === incomingSourceId) return true;
+  if (currentProvider === 'dropbox' && currentSeries && currentSeries === clean(sourceSeries)) return true;
+  if (currentSeries || clean(current?.type) !== clean(incoming?.documentType)) return false;
+  return inferDropboxDocumentFamily(current?.fileName) === inferDropboxDocumentFamily(incoming?.name);
+};
+
 export const inferDropboxEventTitle = (value) => clean(value)
   .replace(/\.[^.]+$/, '')
   .replace(/\b20\d{2}[-_.\/]\d{1,2}[-_.\/]\d{1,2}\b/g, ' ')
@@ -70,6 +92,33 @@ const normalizedEventName = (value) => clean(value)
 
 const normalizedEventNumber = (value) => clean(value).toUpperCase().replace(/[^A-Z0-9]/g, '');
 const baseEventNumber = (value) => normalizedEventNumber(value).match(/^E\d+/)?.[0] || normalizedEventNumber(value);
+const DERIVATIVE_EVENT_WORDS = /\b(?:invoice|menu|pack out|setup|set up|load out|rental check in)\b/;
+
+const titleSimilarityScore = (source, candidate) => {
+  if (!source || !candidate) return 0;
+  if (source === candidate) return 100;
+  if (source.includes(candidate) || candidate.includes(source)) {
+    return 80 * (Math.min(source.length, candidate.length) / Math.max(source.length, candidate.length));
+  }
+  const sourceTokens = new Set(source.split(' ').filter(Boolean));
+  const candidateTokens = new Set(candidate.split(' ').filter(Boolean));
+  const shared = [...sourceTokens].filter((token) => candidateTokens.has(token)).length;
+  return (200 * shared) / Math.max(1, sourceTokens.size + candidateTokens.size);
+};
+
+const bestTitleMatch = (documents, candidates) => {
+  const titles = inferDropboxEventTitles(documents).map(normalizedEventName).filter(Boolean);
+  if (!titles.length) return null;
+  const documentHasDerivativeWords = titles.some((title) => DERIVATIVE_EVENT_WORDS.test(title));
+  const ranked = candidates.map((event) => {
+    const title = normalizedEventName(event?.title || event?.name);
+    let score = Math.max(0, ...titles.map((source) => titleSimilarityScore(source, title)));
+    if (!documentHasDerivativeWords && DERIVATIVE_EVENT_WORDS.test(title)) score -= 25;
+    return { event, score };
+  }).sort((left, right) => right.score - left.score);
+  if (ranked[0]?.score < 40 || (ranked[1] && ranked[0].score === ranked[1].score)) return null;
+  return ranked[0];
+};
 
 const GENERIC_PATH_SEGMENTS = new Set([
   'proposals',
@@ -105,6 +154,7 @@ export const inferDropboxEventTitles = (document = {}) => {
 
 export const findDropboxEventMatch = (document, events = []) => {
   const candidates = (Array.isArray(events) ? events : []).filter((event) => event?._id || event?.id);
+  const date = clean(document?.inferredDate);
   const eventId = normalizedEventNumber(document?.eventId);
   if (eventId) {
     const numbered = candidates.filter((event) => {
@@ -112,10 +162,18 @@ export const findDropboxEventMatch = (document, events = []) => {
       return candidate && (candidate === eventId || baseEventNumber(candidate) === baseEventNumber(eventId));
     });
     if (numbered.length === 1) return { status: 'matched', event: numbered[0], reason: 'event_id' };
-    if (numbered.length > 1) return { status: 'ambiguous', events: numbered, reason: 'event_id' };
+    if (numbered.length > 1) {
+      const datedNumbered = date
+        ? numbered.filter((event) => clean(event?.date).slice(0, 10) === date)
+        : numbered;
+      const pool = datedNumbered.length ? datedNumbered : numbered;
+      if (pool.length === 1) return { status: 'matched', event: pool[0], reason: 'event_id_date' };
+      const titleMatch = bestTitleMatch(document, pool);
+      if (titleMatch) return { status: 'matched', event: titleMatch.event, reason: 'event_id_title' };
+      return { status: 'ambiguous', events: pool, reason: 'event_id' };
+    }
   }
 
-  const date = clean(document?.inferredDate);
   const titles = inferDropboxEventTitles(document).map(normalizedEventName).filter(Boolean);
   const dated = candidates.filter((event) => clean(event?.date).slice(0, 10) === date);
   const exact = dated.filter((event) => titles.includes(normalizedEventName(event?.title || event?.name)));
@@ -125,6 +183,8 @@ export const findDropboxEventMatch = (document, events = []) => {
     return candidate && titles.some((title) => title.length >= 6 && (candidate.includes(title) || title.includes(candidate)));
   });
   if (similar.length === 1) return { status: 'matched', event: similar[0], reason: 'similar_name_date' };
+  const titleMatch = bestTitleMatch(document, dated);
+  if (titleMatch) return { status: 'matched', event: titleMatch.event, reason: 'fuzzy_name_date' };
   return {
     status: exact.length > 1 || similar.length > 1 ? 'ambiguous' : 'unmatched',
     events: exact.length ? exact : similar,

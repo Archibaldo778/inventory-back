@@ -12,6 +12,7 @@ import {
   inferDropboxPathDate,
   inferDropboxRevision,
   nyToday,
+  shouldReplaceDropboxEventDocument,
 } from '../utils/dropboxDocuments.js';
 
 test('Dropbox document names identify PO and Kitchen Menu files conservatively', () => {
@@ -74,6 +75,32 @@ test('Dropbox documents match the event folder even when the filename is abbrevi
   assert.equal(match.event._id, 'two');
 });
 
+test('duplicate base event ids are resolved by the exact document title', () => {
+  const match = findDropboxEventMatch({
+    name: '09-14-26 Heyvaert Private Boat Cocktail KM.docx',
+    inferredDate: '2026-09-14',
+    eventId: 'E22869',
+  }, [
+    { _id: 'invoice', externalId: 'E22869 - S62700', title: 'Heyvaert Private Boat Cocktail - Invoice', date: '2026-09-14' },
+    { _id: 'event', externalId: 'E22869 - S62704', title: 'Heyvaert Private Boat Cocktail', date: '2026-09-14' },
+  ]);
+  assert.equal(match.status, 'matched');
+  assert.equal(match.event._id, 'event');
+});
+
+test('folder title matching prefers the main event over its pack-out child event', () => {
+  const match = findDropboxEventMatch({
+    name: '09-12-26 Studio Sully Plans Bridgehampton Wedding KPO.docx',
+    path: '/Proposals/09-12-26 Studio Sully Plans Bridgehampton Wedding/Leadership File/Kitchen/KPOs/09-12-26 Studio Sully Plans Bridgehampton Wedding KPO.docx',
+    inferredDate: '2026-09-12',
+  }, [
+    { _id: 'main', externalId: 'E20244 - S57733', title: 'Studio Sully Plans Wedding of Rachael Sonnenberg & Martin de Crane', date: '2026-09-12' },
+    { _id: 'child', externalId: 'E20244 - S62744', title: 'Studio Sully Plans Wedding of Rachael Sonnenberg & Martin de Crane - Pack Out - HD & Raw Bar', date: '2026-09-12' },
+  ]);
+  assert.equal(match.status, 'matched');
+  assert.equal(match.event._id, 'main');
+});
+
 test('Dropbox documents match DOCX metadata when folders and filenames are generic', () => {
   const match = findDropboxEventMatch({
     name: 'Revision 4.docx',
@@ -130,6 +157,31 @@ test('a numbered revision supersedes the original unnumbered document', () => {
   assert.equal(plan.find((row) => row.dropboxId === 'rev-1').isLatestRevision, true);
   assert.equal(plan.find((row) => row.dropboxId === 'original').status, 'superseded');
   assert.equal(plan.find((row) => row.dropboxId === 'original').supersededByDropboxId, 'rev-1');
+});
+
+test('a moved Dropbox file replaces its old event card by stable Dropbox id', () => {
+  const incoming = { dropboxId: 'id:stable', name: 'Event KPO.docx', documentType: 'po' };
+  assert.equal(shouldReplaceDropboxEventDocument({
+    sourceProvider: 'dropbox',
+    sourceId: 'id:stable',
+    sourceSeries: 'old/path',
+    fileName: 'KPO_Event.docx',
+    type: 'po',
+  }, incoming, 'new/path'), true);
+});
+
+test('a Dropbox revision replaces a matching manual document but preserves other Dropbox zones', () => {
+  const incoming = { dropboxId: 'id:new', name: '09-12-26 Event KM REV3.docx', documentType: 'kitchen_menu' };
+  assert.equal(shouldReplaceDropboxEventDocument({
+    fileName: '09-12-26 Event KM REV1.docx', type: 'kitchen_menu', sourceSeries: '',
+  }, incoming, 'event/km'), true);
+  assert.equal(shouldReplaceDropboxEventDocument({
+    sourceProvider: 'dropbox', sourceId: 'id:other', sourceSeries: 'event/other-kitchen',
+    fileName: '09-12-26 Event KM REV1.docx', type: 'kitchen_menu',
+  }, incoming, 'event/km'), false);
+  assert.equal(shouldReplaceDropboxEventDocument({
+    fileName: '09-12-26 Event AKM.docx', type: 'kitchen_menu', sourceSeries: '',
+  }, incoming, 'event/km'), false);
 });
 
 test('Dropbox revision plan sends ambiguous unnumbered duplicates to review', () => {

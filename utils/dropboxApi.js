@@ -6,6 +6,9 @@ const DROPBOX_TOKEN_URL = 'https://api.dropboxapi.com/oauth2/token';
 const DROPBOX_AUTHORIZE_URL = 'https://www.dropbox.com/oauth2/authorize';
 
 const clean = (value) => String(value || '').trim();
+const asciiJson = (value) => JSON.stringify(value).replace(/[^\x20-\x7E]/g, (character) => (
+  `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`
+));
 
 const createHttpError = (statusCode, message) => Object.assign(new Error(message), { statusCode });
 
@@ -171,7 +174,7 @@ export const downloadDropboxFile = async (accessToken, path, { namespaceId = '' 
     method: 'POST',
     headers: {
       Authorization: `Bearer ${accessToken}`,
-      'Dropbox-API-Arg': JSON.stringify({ path }),
+      'Dropbox-API-Arg': asciiJson({ path }),
       ...pathRootHeader(namespaceId),
     },
     signal: AbortSignal.timeout(60_000),

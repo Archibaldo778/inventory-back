@@ -51,16 +51,24 @@ test('Caterease content download returns bytes and ETag', async () => withApiKey
   } finally { global.fetch = originalFetch; }
 }));
 
-test('Caterease becomes the primary file source only through an explicit flag', () => {
+test('Caterease is the primary file source when configured unless explicitly disabled', () => {
   const previous = process.env.CATEREASE_PRIMARY_FILES;
+  const previousApiKey = process.env.CATEREASE_API_KEY;
   try {
+    process.env.CATEREASE_API_KEY = 'cea_test';
     delete process.env.CATEREASE_PRIMARY_FILES;
+    assert.equal(getCatereaseConfig().primaryFiles, true);
+    process.env.CATEREASE_PRIMARY_FILES = 'false';
     assert.equal(getCatereaseConfig().primaryFiles, false);
     process.env.CATEREASE_PRIMARY_FILES = 'true';
     assert.equal(getCatereaseConfig().primaryFiles, true);
+    delete process.env.CATEREASE_API_KEY;
+    assert.equal(getCatereaseConfig().primaryFiles, false);
   } finally {
     if (previous === undefined) delete process.env.CATEREASE_PRIMARY_FILES;
     else process.env.CATEREASE_PRIMARY_FILES = previous;
+    if (previousApiKey === undefined) delete process.env.CATEREASE_API_KEY;
+    else process.env.CATEREASE_API_KEY = previousApiKey;
   }
 });
 

@@ -263,6 +263,39 @@ const reconcileDeletedFiles = async (event, eventId, seenUids, stats) => {
   return removed.length > 0;
 };
 
+const archiveReplacedDropboxDocuments = (event, latestFiles) => {
+  if (!getCatereaseConfig().primaryFiles) return false;
+  const currentDocuments = Array.isArray(event?.documents) ? event.documents : [];
+  const latestByType = new Map();
+  latestFiles.forEach((file) => {
+    const type = String(file?.documentType || '');
+    if (!type) return;
+    if (!latestByType.has(type)) latestByType.set(type, []);
+    latestByType.get(type).push(String(file.uid));
+  });
+
+  const readyTypes = new Set();
+  latestByType.forEach((uids, type) => {
+    const activeIds = new Set(currentDocuments
+      .filter((document) => (
+        String(document?.sourceProvider || '') === 'caterease'
+        && String(document?.type || '') === type
+      ))
+      .map((document) => String(document?.sourceId || '')));
+    if (uids.length && uids.every((uid) => activeIds.has(uid))) readyTypes.add(type);
+  });
+  if (!readyTypes.size) return false;
+
+  const replaced = currentDocuments.filter((document) => (
+    String(document?.sourceProvider || '') === 'dropbox'
+    && readyTypes.has(String(document?.type || ''))
+  ));
+  if (!replaced.length) return false;
+  event.documentHistory = mergeEventDocumentHistory(event.documentHistory, replaced);
+  event.documents = currentDocuments.filter((document) => !replaced.includes(document));
+  return true;
+};
+
 const syncOneEvent = async (event, eventId, stats) => {
   const rawFiles = await listAllEventFiles(eventId);
   stats.filesSeen += rawFiles.length;
@@ -419,6 +452,7 @@ const syncOneEvent = async (event, eventId, stats) => {
       }, { upsert: true, runValidators: true }).catch(() => null);
     }
   }
+  if (archiveReplacedDropboxDocuments(event, revisionPlan.latest)) eventChanged = true;
   if (await reconcileDeletedFiles(event, eventId, seenUids, stats)) eventChanged = true;
   if (eventChanged) {
     await event.save();

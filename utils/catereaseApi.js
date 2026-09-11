@@ -3,13 +3,19 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
 
 const clean = (value) => String(value || '').trim();
-const enabled = (value) => ['1', 'true', 'yes', 'on'].includes(clean(value).toLowerCase());
+const disabled = (value) => ['0', 'false', 'no', 'off'].includes(clean(value).toLowerCase());
 
-export const getCatereaseConfig = () => ({
-  apiKey: clean(process.env.CATEREASE_API_KEY),
-  baseUrl: clean(process.env.CATEREASE_BASE_URL || DEFAULT_BASE_URL).replace(/\/+$/, ''),
-  primaryFiles: enabled(process.env.CATEREASE_PRIMARY_FILES),
-});
+export const getCatereaseConfig = () => {
+  const apiKey = clean(process.env.CATEREASE_API_KEY);
+  const primarySetting = clean(process.env.CATEREASE_PRIMARY_FILES);
+  return {
+    apiKey,
+    baseUrl: clean(process.env.CATEREASE_BASE_URL || DEFAULT_BASE_URL).replace(/\/+$/, ''),
+    // Once the API key is configured, CaterEase is the production source by default.
+    // An explicit false value keeps the old validation mode available as an opt-out.
+    primaryFiles: Boolean(apiKey) && (primarySetting ? !disabled(primarySetting) : true),
+  };
+};
 
 const catereaseFetch = async (path, options = {}) => {
   const config = getCatereaseConfig();

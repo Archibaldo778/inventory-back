@@ -399,20 +399,49 @@ const kitchenMenuSections = (rows, recipes) => {
       labels,
     };
   });
-  const bodyRows = [];
-  [...groupedRows(preparedRows, (row) => row.group).entries()].forEach(([group, values]) => {
-    if (!['menu', 'unassigned'].includes(group.toLowerCase())) {
-      bodyRows.push(['', group.toUpperCase(), '', '']);
-    }
-    values.forEach((row) => bodyRows.push([
-      formatQuantity(row.quantity),
-      row.itemName,
-      row.comments,
-      row.labels,
-    ]));
-  });
-  return `${paragraph('MENU', { bold: true, size: 28, before: 220, after: 80 })}${
-    table(['Qty', 'Item', 'Comment', 'Label (OCC; Rentals)'], bodyRows, [570, 4580, 2825, 3105])
+  const isBeverage = (row) => /\b(?:bar|beverage|cocktail|wine|beer|liquor)\b/i.test([
+    row?.menuGroup, row?.category, row?.prepArea,
+  ].filter(Boolean).join(' '));
+  const renderSection = (heading, values) => {
+    const bodyRows = [];
+    [...groupedRows(values, (row) => row.group).entries()].forEach(([group, grouped]) => {
+      if (!['menu', 'unassigned', heading.toLowerCase()].includes(group.toLowerCase())) {
+        bodyRows.push(['', group.toUpperCase(), '', '']);
+      }
+      grouped.forEach((row) => bodyRows.push([
+        formatQuantity(row.quantity),
+        row.itemName,
+        row.comments,
+        row.labels,
+      ]));
+    });
+    return `${paragraph(heading, { bold: true, size: 28, before: 220, after: 80 })}${
+      table(['Qty', 'Item', 'Comment', 'Label (OCC; Rentals)'], bodyRows, [570, 4580, 2825, 3105])
+    }`;
+  };
+  const menuRows = preparedRows.filter((row) => !isBeverage(row));
+  const beverageRows = preparedRows.filter(isBeverage);
+  return `${renderSection('MENU', menuRows)}${beverageRows.length ? renderSection('BEVERAGE', beverageRows) : ''}`;
+};
+
+const kitchenStaffingSection = (event) => {
+  const shifts = Array.isArray(event?.meta?.nowsta?.shifts) ? event.meta.nowsta.shifts : [];
+  if (!shifts.length) return '';
+  const uniform = clean(event?.meta?.nowsta?.uniform, 300);
+  const rows = shifts.map((shift) => {
+    const assigned = Array.isArray(shift?.workers) ? shift.workers.length : 0;
+    const unfilled = Math.max(0, Number(shift?.unfilled) || 0);
+    return [
+      formatQuantity(assigned + unfilled),
+      clean(shift?.position, 200),
+      clean(shift?.startTime, 80),
+      uniform,
+      shift?.endTime ? `End: ${clean(shift.endTime, 80)}` : '',
+    ];
+  }).filter((row) => row[1]);
+  if (!rows.length) return '';
+  return `${paragraph('STAFFING INFO', { bold: true, size: 28, before: 220, after: 80 })}${
+    table(['#', 'Position', 'Start', 'Uniform', 'Comments'], rows, [1000, 2150, 1100, 3950, 2400])
   }`;
 };
 
@@ -464,11 +493,13 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
     [`Guests: ${guestCount}`, `Delivery Time: ${deliveryTime}`],
     [`Event Number: ${displayedEventNumber(event?.externalId || snapshot?.eventId || '')}`, `Date PO Modified: ${new Intl.DateTimeFormat('en-US').format(new Date())}`],
   ], [5300, 5300])}`;
+  const documentFooterSections = isKitchenMenu ? kitchenStaffingSection(event) : '';
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><w:body>
   ${includeBrandLogo ? brandLogoParagraph() : ''}
   ${documentHeader}
   ${sections || paragraph('No rows returned by Caterease.', { size: 20, before: 240 })}
+  ${documentFooterSections}
   <w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="615" w:right="765" w:bottom="600" w:left="810" w:header="720" w:footer="720" w:gutter="0"/></w:sectPr>
 </w:body></w:document>`;
 };

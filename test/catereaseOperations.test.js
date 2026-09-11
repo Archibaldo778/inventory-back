@@ -172,7 +172,12 @@ test('operational snapshot checksum is stable when API row order changes', () =>
 
 test('Kitchen Menu DOCX uses dish names and matched Caterease instructions', async () => {
   const buffer = await renderCatereaseOperationalDocx({
-    event: { title: 'Dinner', date: '2026-09-11', externalId: 'E22672' },
+    event: {
+      title: 'Dinner',
+      date: '2026-09-11',
+      externalId: 'E22672',
+      meta: { nowsta: { uniform: 'Black', shifts: [{ position: 'Captain', startTime: '3:00 PM', endTime: '10:00 PM', workers: [{}], unfilled: 0 }] } },
+    },
     snapshot: {
       schemaVersion: 3,
       kitchenMenu: [{
@@ -196,6 +201,9 @@ test('Kitchen Menu DOCX uses dish names and matched Caterease instructions', asy
   assert.match(xml, /Temper apples before service/);
   assert.match(xml, /Label \(OCC; Rentals\)/);
   assert.match(xml, />Comment</);
+  assert.match(xml, /STAFFING INFO/);
+  assert.match(xml, /Captain/);
+  assert.match(xml, /Black/);
   assert.doesNotMatch(xml, /Green apple puree/);
   assert.ok((xml.match(/<w:tbl>/g) || []).length >= 2, 'metadata and menu must both use tables');
 });

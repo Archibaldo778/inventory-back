@@ -6,6 +6,7 @@ import {
   getCatereaseEventBundle,
   listCatereaseEventFiles,
   listCatereaseHubResource,
+  listCatereaseOperationalResource,
 } from '../utils/catereaseApi.js';
 
 const withApiKey = async (callback) => {
@@ -128,4 +129,32 @@ test('Caterease event bundle client requests the composite event base id safely'
     assert.equal(bundle.event.eventId, 'E00470');
     assert.match(requestedUrl, /\/v1\/events\/E00470\/bundle$/);
   } finally { global.fetch = originalFetch; }
+}));
+
+test('Caterease operational client scopes rows to one event and date', async () => withApiKey(async () => {
+  const originalFetch = global.fetch;
+  let requestedUrl = '';
+  global.fetch = async (url) => {
+    requestedUrl = String(url);
+    return new Response(JSON.stringify({ data: [{ ItemName: '8 Quart Chafing Dish', Qty: 4 }], pagination: { hasMore: false } }), { status: 200 });
+  };
+  try {
+    const page = await listCatereaseOperationalResource('eventrequireditem', 'E22672', {
+      fields: 'ItemName,Qty',
+      dateFrom: '2026-09-11',
+      dateTo: '2026-09-11',
+    });
+    assert.equal(page.data[0].Qty, 4);
+    assert.match(requestedUrl, /\/v1\/eventrequireditem\?/);
+    assert.match(requestedUrl, /eventId=E22672/);
+    assert.match(requestedUrl, /dateFrom=2026-09-11/);
+    assert.match(requestedUrl, /fields=ItemName%2CQty/);
+  } finally { global.fetch = originalFetch; }
+}));
+
+test('Caterease operational client rejects unsupported resources', async () => withApiKey(async () => {
+  await assert.rejects(
+    () => listCatereaseOperationalResource('eventfile', 'E22672'),
+    /Unsupported Caterease operational resource/
+  );
 }));

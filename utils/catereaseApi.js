@@ -69,6 +69,12 @@ const HUB_RESOURCES = new Set([
   'ingredientunit',
 ]);
 
+const OPERATIONAL_RESOURCES = new Set([
+  'eventrequireditem',
+  'foodservquery',
+  'foodservusage',
+]);
+
 export const listCatereaseHubResource = async (resource, options = {}) => {
   const name = clean(resource).toLowerCase();
   if (!HUB_RESOURCES.has(name)) throw Object.assign(new Error('Unsupported Caterease Hub resource'), { statusCode: 400 });
@@ -81,6 +87,33 @@ export const listCatereaseHubResource = async (resource, options = {}) => {
   (Array.isArray(options.itemIds) ? options.itemIds : []).slice(0, 200).forEach((itemId) => {
     if (clean(itemId)) params.append('itemId', clean(itemId));
   });
+  const response = await catereaseFetch(`/v1/${name}?${params.toString()}`);
+  if (!response.ok) throw await responseError(response, `Caterease ${name} listing failed (${response.status})`);
+  const body = await response.json();
+  return {
+    data: Array.isArray(body?.data) ? body.data : [],
+    pagination: {
+      nextCursor: clean(body?.pagination?.nextCursor),
+      hasMore: Boolean(body?.pagination?.hasMore),
+    },
+  };
+};
+
+export const listCatereaseOperationalResource = async (resource, eventId, options = {}) => {
+  const name = clean(resource).toLowerCase();
+  if (!OPERATIONAL_RESOURCES.has(name)) {
+    throw Object.assign(new Error('Unsupported Caterease operational resource'), { statusCode: 400 });
+  }
+  const safeEventId = clean(eventId);
+  if (!safeEventId) throw Object.assign(new Error('Caterease event ID is required'), { statusCode: 400 });
+  const params = new URLSearchParams({
+    eventId: safeEventId,
+    limit: String(Math.max(1, Math.min(200, Number(options.limit) || 200))),
+  });
+  if (clean(options.cursor)) params.set('cursor', clean(options.cursor));
+  if (clean(options.fields)) params.set('fields', clean(options.fields));
+  if (clean(options.dateFrom)) params.set('dateFrom', clean(options.dateFrom));
+  if (clean(options.dateTo)) params.set('dateTo', clean(options.dateTo));
   const response = await catereaseFetch(`/v1/${name}?${params.toString()}`);
   if (!response.ok) throw await responseError(response, `Caterease ${name} listing failed (${response.status})`);
   const body = await response.json();

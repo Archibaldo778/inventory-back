@@ -44,6 +44,7 @@ const eventSchema = new mongoose.Schema(
     meta: { type: Object, default: {} },
     documents: { type: [eventDocumentSchema], default: [] },
     documentHistory: { type: [eventDocumentSchema], default: [] },
+    catereaseOperations: { type: mongoose.Schema.Types.Mixed, default: null },
     deckRevision: { type: Number, default: 0, min: 0, select: false },
   },
   { timestamps: true }

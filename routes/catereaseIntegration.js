@@ -26,6 +26,7 @@ import {
   getCatereaseEventBundle,
   listCatereaseEventFiles,
   listCatereaseHubResource,
+  listCatereaseOperationalResource,
 } from '../utils/catereaseApi.js';
 import {
   catereaseFileRevision,
@@ -37,6 +38,10 @@ import {
 } from '../utils/catereaseFiles.js';
 import { nyToday } from '../utils/dropboxDocuments.js';
 import { buildCatereaseFinancialPreview, buildCatereaseKitchenCatalog } from '../utils/catereaseKitchen.js';
+import {
+  buildCatereaseOperationalSnapshot,
+  renderCatereaseOperationalHtml,
+} from '../utils/catereaseOperations.js';
 import { syncKitchenRecipeMatches } from '../utils/kitchenRecipeMatching.js';
 
 const router = Router();
@@ -47,6 +52,14 @@ let syncPromise = null;
 let syncProgress = null;
 let recipeSyncPromise = null;
 let recipeSyncProgress = null;
+let operationalSyncPromise = null;
+let operationalSyncProgress = null;
+
+const OPERATIONAL_FIELDS = Object.freeze({
+  eventrequireditem: 'ItemName,Qty,Unit,PUnit,QtyPerPUnit,FSPrepArea,FSName,RentalItem,Vendor,SEvtDate,StartTime',
+  foodservquery: 'PrepArea,SubEvtNum,ItemName,Qty,Category,MenuGroup',
+  foodservusage: 'PrepArea,SubEvtNum,ItemName,Qty,Category,MenuGroup',
+});
 
 const isDocx = (fileName, contentType = '') => /\.docx$/i.test(String(fileName || ''))
   || /officedocument\.wordprocessingml\.document/i.test(String(contentType || ''));
@@ -132,6 +145,98 @@ const listAllHubRows = async (resource) => {
     if (pages > 5000) throw new Error(`Caterease ${resource} pagination did not finish`);
   } while (cursor);
   return rows;
+};
+
+const listAllOperationalRows = async (resource, eventId, eventDate = '') => {
+  const rows = [];
+  let cursor = '';
+  let pages = 0;
+  do {
+    const page = await listCatereaseOperationalResource(resource, eventId, {
+      cursor,
+      limit: 200,
+      fields: OPERATIONAL_FIELDS[resource],
+      dateFrom: eventDate,
+      dateTo: eventDate,
+    });
+    rows.push(...page.data);
+    if (page.pagination.hasMore && !page.pagination.nextCursor) throw new Error(`Caterease ${resource} pagination cursor is missing`);
+    cursor = page.pagination.hasMore ? page.pagination.nextCursor : '';
+    pages += 1;
+    if (pages > 1000) throw new Error(`Caterease ${resource} pagination did not finish`);
+  } while (cursor);
+  return rows;
+};
+
+export const fetchCatereaseOperationalSnapshot = async (eventId, eventDate = '') => {
+  const packOutPromise = listAllOperationalRows('eventrequireditem', eventId, eventDate);
+  const kitchenMenuPromise = listAllOperationalRows('foodservquery', eventId, eventDate)
+    .catch((error) => {
+      if (![400, 404].includes(Number(error?.statusCode))) throw error;
+      return listAllOperationalRows('foodservusage', eventId, eventDate);
+    });
+  const [packOutRows, kitchenMenuRows] = await Promise.all([packOutPromise, kitchenMenuPromise]);
+  return buildCatereaseOperationalSnapshot({ eventId, packOutRows, kitchenMenuRows });
+};
+
+const syncOperationalEvent = async (event) => {
+  const eventId = normalizeCatereaseEventId(event?.externalId);
+  if (!eventId) return { status: 'skipped', reason: 'missing_event_id' };
+  const snapshot = await fetchCatereaseOperationalSnapshot(eventId, String(event?.date || ''));
+  const previousChecksum = String(event?.catereaseOperations?.checksum || '');
+  event.catereaseOperations = snapshot;
+  event.markModified('catereaseOperations');
+  await event.save();
+  return {
+    status: previousChecksum === snapshot.checksum ? 'unchanged' : 'updated',
+    eventId,
+    packOutRows: snapshot.packOut.length,
+    kitchenMenuRows: snapshot.kitchenMenu.length,
+  };
+};
+
+export const runCatereaseOperationalSync = async () => {
+  if (operationalSyncPromise) return operationalSyncPromise;
+  operationalSyncPromise = (async () => {
+    const integration = await createIntegration();
+    integration.lastOperationalSyncStartedAt = new Date();
+    integration.lastOperationalSyncError = '';
+    await integration.save();
+    const summary = { eventsSeen: 0, updated: 0, unchanged: 0, skipped: 0, failed: 0, packOutRows: 0, kitchenMenuRows: 0, errors: [] };
+    try {
+      const events = await Event.find({ date: { $gte: nyToday() }, status: { $ne: 'deleted' } })
+        .select('externalId title date catereaseOperations').sort({ date: 1 });
+      for (let index = 0; index < events.length; index += 1) {
+        const event = events[index];
+        summary.eventsSeen += 1;
+        operationalSyncProgress = { event: index + 1, totalEvents: events.length, title: event.title, ...summary };
+        try {
+          const result = await syncOperationalEvent(event);
+          summary[result.status] += 1;
+          summary.packOutRows += Number(result.packOutRows || 0);
+          summary.kitchenMenuRows += Number(result.kitchenMenuRows || 0);
+        } catch (error) {
+          summary.failed += 1;
+          if (summary.errors.length < 12) summary.errors.push({
+            eventId: normalizeCatereaseEventId(event.externalId),
+            title: String(event.title || ''),
+            status: Number(error?.statusCode) || null,
+            message: String(error?.message || 'Caterease operational sync failed').slice(0, 300),
+          });
+        }
+      }
+      integration.lastOperationalSyncCompletedAt = new Date();
+      integration.lastOperationalSyncSummary = summary;
+      await integration.save();
+      clearApiCacheGroups('events', 'bar');
+      return summary;
+    } catch (error) {
+      integration.lastOperationalSyncError = String(error?.message || 'Caterease operational sync failed').slice(0, 500);
+      await integration.save().catch(() => null);
+      throw error;
+    }
+  })();
+  try { return await operationalSyncPromise; } finally { operationalSyncPromise = null; operationalSyncProgress = null; }
 };
 
 const createIntegration = () => CatereaseIntegration.findOneAndUpdate(
@@ -516,7 +621,7 @@ export const runCatereaseFileSync = async () => {
 router.get('/status', ...requireCatereaseAdmin, async (_req, res) => {
   try {
     const config = getCatereaseConfig();
-    const [integration, counts, recentFiles, recipeCount, ingredientCount, recentRecipes] = await Promise.all([
+    const [integration, counts, recentFiles, recipeCount, ingredientCount, recentRecipes, operationalEventCount] = await Promise.all([
       CatereaseIntegration.findOne({ provider: 'caterease' }).lean(),
       CatereaseFile.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }]),
       CatereaseFile.find({ status: { $in: ['imported', 'failed'] } })
@@ -527,6 +632,7 @@ router.get('/status', ...requireCatereaseAdmin, async (_req, res) => {
       KitchenRecipe.find({ sourceProvider: 'caterease', sourceDeletedAt: null })
         .select('sourceId locationId name category servings price cost costPerServing ingredients revisedAt')
         .sort({ updatedAt: -1 }).limit(50).lean(),
+      Event.countDocuments({ 'catereaseOperations.syncedAt': { $ne: null } }),
     ]);
     return res.json({
       configured: Boolean(config.apiKey),
@@ -535,6 +641,9 @@ router.get('/status', ...requireCatereaseAdmin, async (_req, res) => {
       progress: syncProgress,
       recipeSyncing: Boolean(recipeSyncPromise),
       recipeProgress: recipeSyncProgress,
+      operationalSyncing: Boolean(operationalSyncPromise),
+      operationalProgress: operationalSyncProgress,
+      operationalEventCount,
       integration: integration ? {
         enabled: integration.enabled,
         lastSyncStartedAt: integration.lastSyncStartedAt,
@@ -545,6 +654,10 @@ router.get('/status', ...requireCatereaseAdmin, async (_req, res) => {
         lastRecipeSyncCompletedAt: integration.lastRecipeSyncCompletedAt,
         lastRecipeSyncError: integration.lastRecipeSyncError,
         lastRecipeSyncSummary: integration.lastRecipeSyncSummary,
+        lastOperationalSyncStartedAt: integration.lastOperationalSyncStartedAt,
+        lastOperationalSyncCompletedAt: integration.lastOperationalSyncCompletedAt,
+        lastOperationalSyncError: integration.lastOperationalSyncError,
+        lastOperationalSyncSummary: integration.lastOperationalSyncSummary,
       } : null,
       counts: Object.fromEntries(counts.map((entry) => [entry._id, entry.count])),
       recentFiles,
@@ -574,6 +687,56 @@ router.get('/financial-preview/:eventId', ...requireCatereaseAdmin, async (req, 
     return res.json(buildCatereaseFinancialPreview(await getCatereaseEventBundle(eventId)));
   } catch (error) {
     return sendApiError(res, error, { context: 'Caterease financial preview failed', fallbackMessage: 'Failed to load Caterease financial preview' });
+  }
+});
+
+router.get('/operations/preview/:eventId', ...requireCatereaseAdmin, async (req, res) => {
+  try {
+    const eventId = normalizeCatereaseEventId(req.params.eventId);
+    if (!eventId) return res.status(400).json({ error: 'A Caterease E-number is required' });
+    return res.json(await fetchCatereaseOperationalSnapshot(eventId, String(req.query.date || '')));
+  } catch (error) {
+    return sendApiError(res, error, { context: 'Caterease operational preview failed', fallbackMessage: 'Failed to load Caterease operational data' });
+  }
+});
+
+router.post('/operations/sync/:id', ...requireCatereaseAdmin, syncRateLimit, async (req, res) => {
+  try {
+    const event = await Event.findById(req.params.id).select('externalId title date catereaseOperations');
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    const result = await syncOperationalEvent(event);
+    clearApiCacheGroups('events', 'bar');
+    return res.json({ ok: true, result, snapshot: event.catereaseOperations });
+  } catch (error) {
+    return sendApiError(res, error, { context: 'Caterease event operational sync failed', fallbackMessage: 'Failed to sync Caterease operational data' });
+  }
+});
+
+router.post('/operations/sync', ...requireCatereaseAdmin, syncRateLimit, async (_req, res) => {
+  try {
+    if (operationalSyncPromise) return res.status(202).json({ ok: true, started: false, syncing: true });
+    void runCatereaseOperationalSync().catch((error) => console.error('Caterease operational sync failed:', error?.message || error));
+    return res.status(202).json({ ok: true, started: true, syncing: true });
+  } catch (error) {
+    return sendApiError(res, error, { context: 'Caterease operational sync failed', defaultStatus: 502, fallbackMessage: 'Caterease operational sync failed' });
+  }
+});
+
+router.get('/operations/events/:id/export/:type', requireAuth, async (req, res) => {
+  try {
+    const type = String(req.params.type || '').toLowerCase();
+    if (!['po', 'kitchen_menu'].includes(type)) return res.status(400).json({ error: 'Unknown operational document type' });
+    const event = await Event.findById(req.params.id).select('externalId title date catereaseOperations').lean();
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!event.catereaseOperations) return res.status(404).json({ error: 'Caterease operational data has not been synced for this event' });
+    const html = renderCatereaseOperationalHtml({ event, snapshot: event.catereaseOperations, type });
+    const safeName = String(event.title || 'event').replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').slice(0, 80) || 'event';
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Content-Disposition', `inline; filename="${safeName}-${type === 'po' ? 'pack-out' : 'kitchen-menu'}.html"`);
+    return res.send(html);
+  } catch (error) {
+    return sendApiError(res, error, { context: 'Caterease operational export failed', fallbackMessage: 'Failed to generate Caterease operational document' });
   }
 });
 

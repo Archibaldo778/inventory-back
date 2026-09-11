@@ -14,7 +14,10 @@ const catereaseFileSchema = new mongoose.Schema({
   contentType: { type: String, trim: true, default: '' },
   size: { type: Number, min: 0, default: 0 },
   documentType: { type: String, enum: ['po', 'kitchen_menu', 'review'], default: 'review', index: true },
-  status: { type: String, enum: ['imported', 'ignored', 'failed', 'deleted'], default: 'ignored', index: true },
+  sourceSeries: { type: String, trim: true, default: '', index: true },
+  isLatestRevision: { type: Boolean, default: false, index: true },
+  supersededByUid: { type: Number, default: null },
+  status: { type: String, enum: ['imported', 'superseded', 'ignored', 'failed', 'deleted'], default: 'ignored', index: true },
   reason: { type: String, trim: true, default: '' },
   kitchenItems: { type: [mongoose.Schema.Types.Mixed], default: undefined },
   barItems: { type: [mongoose.Schema.Types.Mixed], default: undefined },
@@ -28,4 +31,3 @@ const catereaseFileSchema = new mongoose.Schema({
 catereaseFileSchema.index({ catereaseEventId: 1, status: 1 });
 
 export default mongoose.model('CatereaseFile', catereaseFileSchema);
-

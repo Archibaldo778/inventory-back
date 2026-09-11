@@ -31,6 +31,7 @@ import {
   catereaseFileRevision,
   normalizeCatereaseEventId,
   normalizeCatereaseFile,
+  selectLatestCatereaseFiles,
 } from '../utils/catereaseFiles.js';
 import { nyToday } from '../utils/dropboxDocuments.js';
 import { buildCatereaseFinancialPreview, buildCatereaseKitchenCatalog } from '../utils/catereaseKitchen.js';
@@ -225,11 +226,19 @@ export const runCatereaseRecipeSync = async () => {
   try { return await recipeSyncPromise; } finally { recipeSyncPromise = null; recipeSyncProgress = null; }
 };
 
-const nextFileVersion = (event, uid) => Math.max(0, ...[
-  ...(Array.isArray(event?.documents) ? event.documents : []),
-  ...(Array.isArray(event?.documentHistory) ? event.documentHistory : []),
-].filter((document) => String(document?.sourceProvider || '') === 'caterease' && String(document?.sourceId || '') === String(uid))
-  .map((document) => Number(document?.version) || 0)) + 1;
+const nextFileVersion = (event, sourceSeries, seriesUids = []) => {
+  const uidSet = new Set(seriesUids.map(String));
+  return Math.max(0, ...[
+    ...(Array.isArray(event?.documents) ? event.documents : []),
+    ...(Array.isArray(event?.documentHistory) ? event.documentHistory : []),
+  ].filter((document) => (
+    String(document?.sourceProvider || '') === 'caterease'
+    && (
+      String(document?.sourceSeries || '') === String(sourceSeries || '')
+      || uidSet.has(String(document?.sourceId || ''))
+    )
+  )).map((document) => Number(document?.version) || 0)) + 1;
+};
 
 const reconcileDeletedFiles = async (event, eventId, seenUids, stats) => {
   const missing = await CatereaseFile.find({
@@ -248,7 +257,7 @@ const reconcileDeletedFiles = async (event, eventId, seenUids, stats) => {
     await event.save();
   }
   await CatereaseFile.updateMany({ uid: { $in: missing.map((file) => file.uid) } }, {
-    $set: { status: 'deleted', reason: 'No longer returned by Caterease', deletedAt: new Date(), lastSeenAt: new Date() },
+    $set: { status: 'deleted', reason: 'No longer returned by Caterease', isLatestRevision: false, supersededByUid: null, deletedAt: new Date(), lastSeenAt: new Date() },
   });
   stats.deleted += missing.length;
   return removed.length > 0;
@@ -258,6 +267,7 @@ const syncOneEvent = async (event, eventId, stats) => {
   const rawFiles = await listAllEventFiles(eventId);
   stats.filesSeen += rawFiles.length;
   const seenUids = new Set();
+  const recognizedFiles = [];
   let eventChanged = false;
   for (const rawFile of rawFiles) {
     const file = normalizeCatereaseFile(rawFile, eventId);
@@ -266,7 +276,6 @@ const syncOneEvent = async (event, eventId, stats) => {
       continue;
     }
     seenUids.add(file.uid);
-    const existingRecord = await CatereaseFile.findOne({ uid: file.uid }).lean();
     if (file.documentType === 'review') {
       await CatereaseFile.findOneAndUpdate({ uid: file.uid }, {
         $set: { ...file, status: 'ignored', reason: 'Not named as a PO/KPO/Pack Out or KM/AKM', lastSeenAt: new Date(), deletedAt: null },
@@ -275,13 +284,65 @@ const syncOneEvent = async (event, eventId, stats) => {
       stats.ignored += 1;
       continue;
     }
+    recognizedFiles.push(file);
+  }
+
+  const revisionPlan = selectLatestCatereaseFiles(recognizedFiles, eventId);
+  for (const file of revisionPlan.superseded) {
+    await CatereaseFile.findOneAndUpdate({ uid: file.uid }, {
+      $set: {
+        ...file,
+        status: 'superseded',
+        reason: `Archived; newer revision UID ${file.supersededByUid} is active`,
+        isLatestRevision: false,
+        supersededByUid: file.supersededByUid,
+        lastSeenAt: new Date(),
+        deletedAt: null,
+      },
+      $setOnInsert: { firstSeenAt: new Date() },
+    }, { upsert: true, runValidators: true });
+    stats.superseded += 1;
+  }
+
+  for (const file of revisionPlan.latest) {
+    const { seriesUids: seriesUidValues, ...storedFile } = file;
+    const existingRecord = await CatereaseFile.findOne({ uid: file.uid }).lean();
     const revision = catereaseFileRevision(file);
+    const seriesUids = new Set((seriesUidValues || [file.uid]).map(String));
     const current = (event.documents || []).find((document) => (
-      String(document?.sourceProvider || '') === 'caterease' && String(document?.sourceId || '') === String(file.uid)
+      String(document?.sourceProvider || '') === 'caterease'
+      && (
+        String(document?.sourceSeries || '') === String(file.sourceSeries || '')
+        || String(document?.sourceId || '') === String(file.uid)
+      )
     ));
-    const unchanged = current && String(current.sourceRevision || '') === revision && existingRecord?.status === 'imported';
+    const unchanged = current
+      && String(current.sourceId || '') === String(file.uid)
+      && String(current.sourceRevision || '') === revision
+      && existingRecord?.status === 'imported';
     if (unchanged) {
-      await CatereaseFile.updateOne({ uid: file.uid }, { $set: { ...file, status: 'imported', reason: 'Attached to event; unchanged', lastSeenAt: new Date(), deletedAt: null } });
+      const staleDocuments = (event.documents || []).filter((document) => (
+        document !== current
+        && String(document?.sourceProvider || '') === 'caterease'
+        && (
+          String(document?.sourceSeries || '') === String(file.sourceSeries || '')
+          || seriesUids.has(String(document?.sourceId || ''))
+        )
+      ));
+      if (staleDocuments.length) {
+        event.documentHistory = mergeEventDocumentHistory(event.documentHistory, staleDocuments);
+        event.documents = (event.documents || []).filter((document) => !staleDocuments.includes(document));
+        eventChanged = true;
+      }
+      await CatereaseFile.updateOne({ uid: file.uid }, { $set: {
+        ...storedFile,
+        status: 'imported',
+        reason: 'Attached to event; latest revision unchanged',
+        isLatestRevision: true,
+        supersededByUid: null,
+        lastSeenAt: new Date(),
+        deletedAt: null,
+      } });
       stats.unchanged += 1;
       continue;
     }
@@ -298,7 +359,11 @@ const syncOneEvent = async (event, eventId, stats) => {
       }
       const currentDocuments = Array.isArray(event.documents) ? event.documents : [];
       const replaced = currentDocuments.filter((document) => (
-        String(document?.sourceProvider || '') === 'caterease' && String(document?.sourceId || '') === String(file.uid)
+        String(document?.sourceProvider || '') === 'caterease'
+        && (
+          String(document?.sourceSeries || '') === String(file.sourceSeries || '')
+          || seriesUids.has(String(document?.sourceId || ''))
+        )
       ));
       event.documentHistory = mergeEventDocumentHistory(event.documentHistory, replaced);
       event.documents = [
@@ -310,13 +375,13 @@ const syncOneEvent = async (event, eventId, stats) => {
           size: downloaded.buffer.length,
           checksum: downloaded.etag || revision,
           url: `/api/integrations/caterease/files/${file.uid}/content`,
-          version: nextFileVersion(event, file.uid),
+          version: nextFileVersion(event, file.sourceSeries, seriesUidValues),
           uploadedAt: file.revisedAt || new Date(),
           uploadedBy: 'Caterease automatic sync',
           sourceProvider: 'caterease',
           sourceId: String(file.uid),
           sourcePath: `event:${eventId}`,
-          sourceSeries: `caterease:${file.uid}`,
+          sourceSeries: file.sourceSeries,
           sourceRevision: revision,
           kitchenItems: file.documentType === 'kitchen_menu' ? metadata.kitchenItems : undefined,
           barItems: Array.isArray(metadata.barItems) ? metadata.barItems : undefined,
@@ -326,7 +391,7 @@ const syncOneEvent = async (event, eventId, stats) => {
       eventChanged = true;
       await CatereaseFile.findOneAndUpdate({ uid: file.uid }, {
         $set: {
-          ...file,
+          ...storedFile,
           etag: downloaded.etag,
           contentType: downloaded.contentType,
           size: downloaded.buffer.length,
@@ -334,7 +399,9 @@ const syncOneEvent = async (event, eventId, stats) => {
           barItems: metadata.barItems,
           packoutType: metadata.packoutType,
           status: 'imported',
-          reason: parseWarning ? `Attached to event; content not parsed: ${parseWarning}` : 'Attached to event',
+          reason: parseWarning ? `Latest revision attached; content not parsed: ${parseWarning}` : 'Latest revision attached to event',
+          isLatestRevision: true,
+          supersededByUid: null,
           importedEventId: event._id,
           lastSeenAt: new Date(),
           deletedAt: null,
@@ -347,13 +414,16 @@ const syncOneEvent = async (event, eventId, stats) => {
     } catch (error) {
       stats.failed += 1;
       await CatereaseFile.findOneAndUpdate({ uid: file.uid }, {
-        $set: { ...file, status: 'failed', reason: String(error?.message || 'Import failed').slice(0, 500), lastSeenAt: new Date(), deletedAt: null },
+        $set: { ...storedFile, status: 'failed', reason: String(error?.message || 'Import failed').slice(0, 500), isLatestRevision: true, supersededByUid: null, lastSeenAt: new Date(), deletedAt: null },
         $setOnInsert: { firstSeenAt: new Date() },
       }, { upsert: true, runValidators: true }).catch(() => null);
     }
   }
   if (await reconcileDeletedFiles(event, eventId, seenUids, stats)) eventChanged = true;
-  if (eventChanged) await syncCatereaseBarItems(event);
+  if (eventChanged) {
+    await event.save();
+    await syncCatereaseBarItems(event);
+  }
 };
 
 export const runCatereaseFileSync = async () => {
@@ -372,6 +442,7 @@ export const runCatereaseFileSync = async () => {
       updated: 0,
       unchanged: 0,
       ignored: 0,
+      superseded: 0,
       deleted: 0,
       failed: 0,
       errorSamples: [],

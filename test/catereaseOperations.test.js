@@ -6,7 +6,7 @@ import {
   buildCatereaseOperationalSnapshot,
   buildKitchenMenuRows,
   normalizeCatereaseKitchenMenuDishRows,
-  normalizeCatereaseKitchenMenuRows,
+  normalizeCatereaseKitchenPackOutRows,
   normalizeCatereasePackOutRows,
   renderCatereaseOperationalDocx,
 } from '../utils/catereaseOperations.js';
@@ -55,8 +55,8 @@ test('operational snapshot keeps guest count from the Standard Food service row'
   assert.equal(snapshot.packOut.length, 0);
 });
 
-test('Caterease Kitchen Production rows preserve required item details', () => {
-  const rows = normalizeCatereaseKitchenMenuRows([{
+test('Caterease Kitchen Pack Out rows preserve required item details', () => {
+  const rows = normalizeCatereaseKitchenPackOutRows([{
     UID: 42,
     ItemName: 'Green apple mousse',
     Qty: 120,

@@ -304,7 +304,7 @@ export const fetchCatereaseOperationalSnapshot = async (eventId, eventDate = '',
       return [];
     }
   };
-  const kitchenProductionPromise = captureRows(
+  const kitchenPackOutPromise = captureRows(
     'eventrequireditem',
     listAllOperationalRows('eventrequireditem', resolvedEventId, eventDate)
   );
@@ -316,7 +316,7 @@ export const fetchCatereaseOperationalSnapshot = async (eventId, eventDate = '',
     });
   const [packOutRows, kitchenPackOutRows, kitchenMenuRows] = await Promise.all([
     captureRows('foodservquery', packOutPromise),
-    kitchenProductionPromise,
+    kitchenPackOutPromise,
     kitchenMenuPromise,
   ]);
   if (sourceErrors.length === 3) {
@@ -881,7 +881,7 @@ router.post('/operations/sync', ...requireCatereaseAdmin, syncRateLimit, async (
 router.get('/operations/events/:id/export/:type', requireAuth, async (req, res) => {
   try {
     const type = String(req.params.type || '').toLowerCase();
-    if (!['po', 'kitchen_packout', 'kitchen_production', 'kitchen_menu'].includes(type)) return res.status(400).json({ error: 'Unknown operational document type' });
+    if (!['po', 'kitchen_packout', 'kitchen_menu'].includes(type)) return res.status(400).json({ error: 'Unknown operational document type' });
     const event = await Event.findById(req.params.id).select('externalId title date meta catereaseOperations').lean();
     if (!event) return res.status(404).json({ error: 'Event not found' });
     if (!event.catereaseOperations) return res.status(404).json({ error: 'Caterease operational data has not been synced for this event' });

@@ -55,9 +55,6 @@ export const normalizeCatereaseKitchenPackOutRows = (rows = []) => (Array.isArra
   }))
   .filter((row) => row.itemName);
 
-// Kept for callers created before Kitchen Pack Out and Kitchen Menu were split.
-export const normalizeCatereaseKitchenMenuRows = normalizeCatereaseKitchenPackOutRows;
-
 const isKitchenMenuNoise = (value) => {
   const name = clean(value, 300).toLowerCase();
   return !name || /^option\s+[a-z0-9]+\s*:/.test(name) || /^\d+(?:\.\d+)?\+?\s*hours?\b/.test(name);
@@ -312,7 +309,7 @@ const groupedRows = (rows, groupSelector) => {
 const operationalRows = (snapshot, type) => {
   const version = Number(snapshot?.schemaVersion) || 1;
   if (type === 'po') return (version >= 2 ? snapshot?.packOut : snapshot?.kitchenMenu) || [];
-  if (type === 'kitchen_packout' || type === 'kitchen_production') {
+  if (type === 'kitchen_packout') {
     return (version >= 3 ? snapshot?.kitchenPackOut : version >= 2 ? snapshot?.kitchenMenu : snapshot?.packOut) || [];
   }
   if (version >= 3) return snapshot?.kitchenMenu || [];
@@ -337,7 +334,7 @@ const kitchenMenuSections = (rows, recipes) => {
 };
 
 const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = false, decorImages = [] }) => {
-  const isKitchenPackOut = type === 'kitchen_packout' || type === 'kitchen_production';
+  const isKitchenPackOut = type === 'kitchen_packout';
   const isKitchenMenu = type === 'kitchen_menu';
   const rows = operationalRows(snapshot, type);
   const title = isKitchenMenu ? 'KITCHEN MENU' : isKitchenPackOut ? 'KITCHEN PACK OUT' : 'PACK OUT';

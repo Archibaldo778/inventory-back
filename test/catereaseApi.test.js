@@ -32,10 +32,24 @@ test('Caterease listing uses EventDto id, UID fields and bearer authentication',
     assert.equal(page.data[0].UID, 96);
     assert.equal(page.pagination.nextCursor, 'next');
     assert.match(request.url, /eventId=E00470/);
-    assert.match(request.url, /UID%2CFileName/);
+    assert.match(request.url, /UID%2CEvtNum%2CFileName/);
     assert.match(request.url, /NSort/);
     assert.doesNotMatch(request.url, /SortOrder/);
     assert.equal(request.options.headers.Authorization, 'Bearer cea_test');
+  } finally { global.fetch = originalFetch; }
+}));
+
+test('Caterease event file catalog can be listed without an event filter', async () => withApiKey(async () => {
+  const originalFetch = global.fetch;
+  let requestedUrl = '';
+  global.fetch = async (url) => {
+    requestedUrl = String(url);
+    return new Response(JSON.stringify({ data: [], pagination: { hasMore: false } }), { status: 200 });
+  };
+  try {
+    await listCatereaseEventFiles('');
+    assert.doesNotMatch(requestedUrl, /eventId=/);
+    assert.match(requestedUrl, /EvtNum/);
   } finally { global.fetch = originalFetch; }
 }));
 

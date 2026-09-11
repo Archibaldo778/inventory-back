@@ -39,10 +39,10 @@ const responseError = async (response, fallback) => {
 
 export const listCatereaseEventFiles = async (eventId, { cursor = '', limit = 200 } = {}) => {
   const params = new URLSearchParams({
-    eventId: clean(eventId),
-    fields: 'UID,FileName,Comment,Booked,Shared,NSort,Revised',
+    fields: 'UID,EvtNum,FileName,Comment,Booked,Shared,NSort,Revised',
     limit: String(Math.max(1, Math.min(200, Number(limit) || 200))),
   });
+  if (clean(eventId)) params.set('eventId', clean(eventId));
   if (clean(cursor)) params.set('cursor', clean(cursor));
   const response = await catereaseFetch(`/v1/eventfile?${params.toString()}`);
   if (!response.ok) throw await responseError(response, `Caterease file listing failed (${response.status})`);

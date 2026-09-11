@@ -1,11 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  catereaseEventIdCandidates,
   catereaseFileSeries,
   catereaseFileRevision,
   classifyCatereaseFile,
   normalizeCatereaseEventId,
   normalizeCatereaseFile,
+  normalizeCatereaseRawEventId,
   selectLatestCatereaseFiles,
 } from '../utils/catereaseFiles.js';
 
@@ -13,6 +15,8 @@ test('Caterease event ids are extracted from Nowsta composite event numbers', ()
   assert.equal(normalizeCatereaseEventId('E22824 - S62561'), 'E22824');
   assert.equal(normalizeCatereaseEventId('e-22824'), 'E22824');
   assert.equal(normalizeCatereaseEventId('S62561'), '');
+  assert.deepEqual(catereaseEventIdCandidates('E22824 - S62561'), ['E22824', '22824']);
+  assert.equal(normalizeCatereaseRawEventId('022824'), 'E22824');
 });
 
 test('Caterease files recognize operational PO and KM names and comments', () => {

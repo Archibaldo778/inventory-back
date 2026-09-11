@@ -28,10 +28,10 @@ import {
   listCatereaseHubResource,
 } from '../utils/catereaseApi.js';
 import {
-  catereaseEventIdCandidates,
   catereaseFileRevision,
   normalizeCatereaseEventId,
   normalizeCatereaseFile,
+  normalizeCatereaseRawEventId,
   selectLatestCatereaseFiles,
 } from '../utils/catereaseFiles.js';
 import { nyToday } from '../utils/dropboxDocuments.js';
@@ -102,22 +102,19 @@ const syncCatereaseBarItems = async (event) => {
   return true;
 };
 
-const listAllEventFiles = async (eventId) => {
-  for (const candidate of catereaseEventIdCandidates(eventId)) {
-    const files = [];
-    let cursor = '';
-    let pages = 0;
-    do {
-      const page = await listCatereaseEventFiles(candidate, { cursor, limit: 200 });
-      files.push(...page.data);
-      if (page.pagination.hasMore && !page.pagination.nextCursor) throw new Error(`Caterease file pagination cursor is missing for ${candidate}`);
-      cursor = page.pagination.hasMore ? page.pagination.nextCursor : '';
-      pages += 1;
-      if (pages > 1000) throw new Error(`Caterease pagination did not finish for ${candidate}`);
-    } while (cursor);
-    if (files.length) return files;
-  }
-  return [];
+const listAllEventFiles = async () => {
+  const files = [];
+  let cursor = '';
+  let pages = 0;
+  do {
+    const page = await listCatereaseEventFiles('', { cursor, limit: 200 });
+    files.push(...page.data);
+    if (page.pagination.hasMore && !page.pagination.nextCursor) throw new Error('Caterease file pagination cursor is missing');
+    cursor = page.pagination.hasMore ? page.pagination.nextCursor : '';
+    pages += 1;
+    if (pages > 1000) throw new Error('Caterease file pagination did not finish');
+  } while (cursor);
+  return files;
 };
 
 const listAllHubRows = async (resource) => {
@@ -279,13 +276,12 @@ const archiveDropboxDocuments = (event) => {
   return replaced.length;
 };
 
-const syncOneEvent = async (event, eventId, stats) => {
+const syncOneEvent = async (event, eventId, rawFiles, stats) => {
   const archivedDropbox = archiveDropboxDocuments(event);
   if (archivedDropbox) {
     stats.archivedDropbox += archivedDropbox;
     await event.save();
   }
-  const rawFiles = await listAllEventFiles(eventId);
   stats.filesSeen += rawFiles.length;
   const seenUids = new Set();
   const recognizedFiles = [];
@@ -457,6 +453,7 @@ export const runCatereaseFileSync = async () => {
     const stats = {
       eventsSeen: 0,
       eventsWithoutCatereaseId: 0,
+      filesAvailable: 0,
       filesSeen: 0,
       imported: 0,
       added: 0,
@@ -470,6 +467,16 @@ export const runCatereaseFileSync = async () => {
       errorSamples: [],
     };
     try {
+      const allEventFiles = await listAllEventFiles();
+      stats.filesAvailable = allEventFiles.length;
+      const filesByEventId = new Map();
+      allEventFiles.forEach((file) => {
+        const eventId = normalizeCatereaseRawEventId(file?.EvtNum ?? file?.evtNum);
+        if (!eventId) return;
+        const files = filesByEventId.get(eventId) || [];
+        files.push(file);
+        filesByEventId.set(eventId, files);
+      });
       const events = await Event.find({ date: { $gte: nyToday() }, status: { $ne: 'deleted' } })
         .select('externalId title date client managerId meta documents documentHistory')
         .sort({ date: 1 });
@@ -483,7 +490,7 @@ export const runCatereaseFileSync = async () => {
           continue;
         }
         try {
-          await syncOneEvent(event, eventId, stats);
+          await syncOneEvent(event, eventId, filesByEventId.get(eventId) || [], stats);
         } catch (error) {
           stats.failed += 1;
           if (stats.errorSamples.length < 12) {

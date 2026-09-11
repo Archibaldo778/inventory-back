@@ -10,6 +10,13 @@ export const normalizeCatereaseEventId = (value) => {
   return match ? `E${match[1]}` : '';
 };
 
+export const normalizeCatereaseRawEventId = (value) => {
+  const normalized = normalizeCatereaseEventId(value);
+  if (normalized) return normalized;
+  const numeric = clean(value).match(/^0*(\d{2,})$/)?.[1];
+  return numeric ? `E${numeric}` : '';
+};
+
 export const catereaseEventIdCandidates = (value) => {
   const normalized = normalizeCatereaseEventId(value);
   if (!normalized) return [];
@@ -72,7 +79,7 @@ export const normalizeCatereaseFile = (file = {}, eventId = '') => {
   const revised = clean(file.Revised ?? file.revisedAt);
   const normalized = {
     uid,
-    catereaseEventId: normalizeCatereaseEventId(eventId),
+    catereaseEventId: normalizeCatereaseRawEventId(eventId || file.EvtNum || file.evtNum),
     fileName: clean(file.FileName ?? file.fileName),
     comment: clean(file.Comment ?? file.comment),
     booked: Boolean(file.Booked ?? file.booked),

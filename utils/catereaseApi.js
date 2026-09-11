@@ -89,6 +89,7 @@ const HUB_RESOURCES = new Set([
 
 const OPERATIONAL_RESOURCES = new Set([
   'eventrequireditem',
+  'foodserv',
   'foodservquery',
   'foodservusage',
 ]);

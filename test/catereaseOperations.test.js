@@ -4,6 +4,8 @@ import JSZip from 'jszip';
 
 import {
   buildCatereaseOperationalSnapshot,
+  buildKitchenMenuRows,
+  normalizeCatereaseKitchenMenuDishRows,
   normalizeCatereaseKitchenMenuRows,
   normalizeCatereasePackOutRows,
   renderCatereaseOperationalDocx,
@@ -70,19 +72,79 @@ test('Caterease Kitchen Production rows preserve required item details', () => {
   assert.equal(rows[0].purchaseUnit, 'Case');
 });
 
+test('Kitchen Menu contains one dish per Kitchen Pack Out station', () => {
+  const rows = buildKitchenMenuRows([
+    { station: 'Caramel Apple', prepArea: 'Pastry', itemName: 'Mousse' },
+    { station: 'Caramel Apple', prepArea: 'Pastry', itemName: 'Apple center' },
+    { station: 'Option C: 7.5+ hours', prepArea: 'Staff', itemName: 'Cook' },
+  ]);
+  assert.deepEqual(rows.map(({ itemName, prepArea, componentCount }) => ({ itemName, prepArea, componentCount })), [
+    { itemName: 'Caramel Apple', prepArea: 'Pastry', componentCount: 2 },
+  ]);
+});
+
+test('Caterease food service rows preserve Kitchen Menu dish details', () => {
+  const rows = normalizeCatereaseKitchenMenuDishRows([{
+    FdSvNum: 17,
+    ItemName: 'Caramel Apple',
+    Qty: 12,
+    PrepArea: 'Pastry',
+    Category: 'Dessert',
+    Comment: 'Plate cold.',
+  }]);
+  assert.deepEqual(rows[0], {
+    sourceId: '17',
+    itemName: 'Caramel Apple',
+    quantity: 12,
+    unit: '',
+    prepArea: 'Pastry',
+    subEvent: '',
+    category: 'Dessert',
+    description: '',
+    notes: 'Plate cold.',
+  });
+});
+
+test('operational snapshot separates Kitchen Pack Out components from Kitchen Menu dishes', () => {
+  const snapshot = buildCatereaseOperationalSnapshot({
+    eventId: 'E22672',
+    kitchenPackOutRows: [
+      { ItemName: 'Mousse', Qty: 12, FSName: 'Caramel Apple', FSPrepArea: 'Pastry' },
+      { ItemName: 'Apple center', Qty: 12, FSName: 'Caramel Apple', FSPrepArea: 'Pastry' },
+    ],
+  });
+  assert.equal(snapshot.kitchenPackOut.length, 2);
+  assert.equal(snapshot.kitchenMenu.length, 1);
+  assert.equal(snapshot.kitchenMenu[0].itemName, 'Caramel Apple');
+});
+
 test('operational snapshot checksum is stable when API row order changes', () => {
   const first = buildCatereaseOperationalSnapshot({
     eventId: 'E22672',
     packOutRows: [{ ItemName: 'B', Qty: 2 }, { ItemName: 'A', Qty: 1 }],
     syncedAt: new Date('2026-09-11T12:00:00Z'),
   });
-  assert.equal(first.schemaVersion, 2);
+  assert.equal(first.schemaVersion, 3);
   const second = buildCatereaseOperationalSnapshot({
     eventId: 'E22672',
     packOutRows: [{ ItemName: 'A', Qty: 1 }, { ItemName: 'B', Qty: 2 }],
     syncedAt: new Date('2026-09-11T13:00:00Z'),
   });
   assert.equal(first.checksum, second.checksum);
+});
+
+test('Kitchen Menu DOCX uses dish names and matched Caterease instructions', async () => {
+  const buffer = await renderCatereaseOperationalDocx({
+    event: { title: 'Dinner', date: '2026-09-11', externalId: 'E22672' },
+    snapshot: { schemaVersion: 3, kitchenMenu: [{ itemName: 'Caramel Apple', prepArea: 'Pastry', componentCount: 2 }] },
+    recipes: [{ name: 'Caramel Apple', instructions: 'Temper apples before service.', ingredients: [] }],
+    type: 'kitchen_menu',
+  });
+  const zip = await JSZip.loadAsync(buffer);
+  const xml = await zip.file('word/document.xml').async('string');
+  assert.match(xml, /KITCHEN MENU/);
+  assert.match(xml, /Caramel Apple/);
+  assert.match(xml, /Temper apples before service/);
 });
 
 test('generated operational DOCX is a valid Word package and escapes upstream text', async () => {

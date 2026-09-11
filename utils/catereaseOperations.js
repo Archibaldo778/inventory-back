@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import JSZip from 'jszip';
+import { buildExactRecipeMatchIndex, resolveExactRecipeMatch } from './kitchenRecipeMatching.js';
 
 const clean = (value, maxLength = 1000) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, maxLength);
 const numberOrNull = (value) => {
@@ -36,7 +37,7 @@ export const normalizeCatereasePackOutRows = (rows = []) => (Array.isArray(rows)
   }))
   .filter((row) => row.itemName && row.menuGroup.toLowerCase() !== 'standard');
 
-export const normalizeCatereaseKitchenMenuRows = (rows = []) => (Array.isArray(rows) ? rows : [])
+export const normalizeCatereaseKitchenPackOutRows = (rows = []) => (Array.isArray(rows) ? rows : [])
   .slice(0, 10000)
   .map((row) => ({
     sourceId: clean(first(row, ['UID', 'ReqItemNum', 'RINum', 'ItemNum', 'ID']), 120) || fallbackSourceId(row),
@@ -54,29 +55,87 @@ export const normalizeCatereaseKitchenMenuRows = (rows = []) => (Array.isArray(r
   }))
   .filter((row) => row.itemName);
 
+// Kept for callers created before Kitchen Pack Out and Kitchen Menu were split.
+export const normalizeCatereaseKitchenMenuRows = normalizeCatereaseKitchenPackOutRows;
+
+const isKitchenMenuNoise = (value) => {
+  const name = clean(value, 300).toLowerCase();
+  return !name || /^option\s+[a-z0-9]+\s*:/.test(name) || /^\d+(?:\.\d+)?\+?\s*hours?\b/.test(name);
+};
+
+export const buildKitchenMenuRows = (kitchenPackOutRows = []) => {
+  const dishes = new Map();
+  (Array.isArray(kitchenPackOutRows) ? kitchenPackOutRows : []).forEach((row) => {
+    const name = clean(row?.station, 300);
+    if (isKitchenMenuNoise(name)) return;
+    const key = name.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    if (!key) return;
+    const existing = dishes.get(key);
+    if (existing) {
+      existing.componentCount += 1;
+      if (!existing.prepArea && row?.prepArea) existing.prepArea = clean(row.prepArea, 160);
+      return;
+    }
+    dishes.set(key, {
+      sourceId: `dish-${crypto.createHash('sha1').update(key).digest('hex').slice(0, 16)}`,
+      itemName: name,
+      prepArea: clean(row?.prepArea, 160),
+      componentCount: 1,
+    });
+  });
+  return [...dishes.values()];
+};
+
+export const normalizeCatereaseKitchenMenuDishRows = (rows = []) => {
+  const dishes = new Map();
+  (Array.isArray(rows) ? rows : []).slice(0, 10000).forEach((row) => {
+    const itemName = clean(first(row, ['ItemName', 'Name', 'Title']), 300);
+    if (isKitchenMenuNoise(itemName)) return;
+    const subEvent = clean(first(row, ['SubEvtNum', 'SubEvent']), 120);
+    const key = `${subEvent.toLowerCase()}|${itemName.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()}`;
+    if (!itemName || dishes.has(key)) return;
+    dishes.set(key, {
+      sourceId: clean(first(row, ['UID', 'FdSvNum', 'FSNum', 'ItemNum', 'ItemID', 'ID']), 120) || fallbackSourceId(row),
+      itemName,
+      quantity: numberOrNull(first(row, ['Qty', 'Quantity', 'Servings', 'RServings'])),
+      unit: clean(first(row, ['Unit']), 80),
+      prepArea: clean(first(row, ['PrepArea', 'FSPrepArea']), 160),
+      subEvent,
+      category: clean(first(row, ['Category', 'FSCategory']), 160),
+      description: clean(first(row, ['Description', 'UseDesc']), 12000),
+      notes: clean(first(row, ['Comment', 'Notes']), 12000),
+    });
+  });
+  return [...dishes.values()];
+};
+
 const stableRows = (rows) => [...rows].sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
 
-export const buildCatereaseOperationalSnapshot = ({ eventId, packOutRows = [], kitchenMenuRows = [], syncedAt = new Date() } = {}) => {
+export const buildCatereaseOperationalSnapshot = ({ eventId, packOutRows = [], kitchenPackOutRows = [], kitchenMenuRows, syncedAt = new Date() } = {}) => {
   const guestRow = (Array.isArray(packOutRows) ? packOutRows : []).find((row) => (
     clean(first(row, ['ItemName', 'Name', 'Title'])).toLowerCase() === 'food'
     && clean(first(row, ['MenuGroup', 'GroupName'])).toLowerCase() === 'standard'
   ));
   const guestCount = numberOrNull(first(guestRow, ['Qty', 'Quantity']));
   const packOut = normalizeCatereasePackOutRows(packOutRows);
-  const kitchenMenu = normalizeCatereaseKitchenMenuRows(kitchenMenuRows);
+  const kitchenPackOut = normalizeCatereaseKitchenPackOutRows(kitchenPackOutRows);
+  const directKitchenMenu = normalizeCatereaseKitchenMenuDishRows(kitchenMenuRows);
+  const kitchenMenu = directKitchenMenu.length ? directKitchenMenu : buildKitchenMenuRows(kitchenPackOut);
   const checksum = crypto.createHash('sha256').update(JSON.stringify({
     eventId: clean(eventId, 120),
     guestCount,
     packOut: stableRows(packOut),
+    kitchenPackOut: stableRows(kitchenPackOut),
     kitchenMenu: stableRows(kitchenMenu),
   })).digest('hex');
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     eventId: clean(eventId, 120),
     syncedAt,
     checksum,
     guestCount,
     packOut,
+    kitchenPackOut,
     kitchenMenu,
   };
 };
@@ -233,26 +292,51 @@ const groupedRows = (rows, groupSelector) => {
   return groups;
 };
 
-const documentXml = ({ event, snapshot, type }) => {
-  const isKitchenProduction = type === 'kitchen_production' || type === 'kitchen_menu';
-  const currentMapping = Number(snapshot?.schemaVersion) >= 2;
-  const rows = isKitchenProduction
-    ? (currentMapping ? snapshot?.kitchenMenu : snapshot?.packOut) || []
-    : (currentMapping ? snapshot?.packOut : snapshot?.kitchenMenu) || [];
-  const title = isKitchenProduction ? 'KITCHEN PRODUCTION' : '';
+const operationalRows = (snapshot, type) => {
+  const version = Number(snapshot?.schemaVersion) || 1;
+  if (type === 'po') return (version >= 2 ? snapshot?.packOut : snapshot?.kitchenMenu) || [];
+  if (type === 'kitchen_packout' || type === 'kitchen_production') {
+    return (version >= 3 ? snapshot?.kitchenPackOut : version >= 2 ? snapshot?.kitchenMenu : snapshot?.packOut) || [];
+  }
+  if (version >= 3) return snapshot?.kitchenMenu || [];
+  const legacyKitchenPackOut = (version >= 2 ? snapshot?.kitchenMenu : snapshot?.packOut) || [];
+  return buildKitchenMenuRows(legacyKitchenPackOut);
+};
+
+const kitchenMenuSections = (rows, recipes) => {
+  const recipeIndex = buildExactRecipeMatchIndex(recipes);
+  return rows.map((row) => {
+    const match = resolveExactRecipeMatch(row?.itemName, recipeIndex);
+    const recipe = match.status === 'matched' ? match.recipe : null;
+    const details = [row?.description, row?.notes, recipe?.description, recipe?.instructions, recipe?.notes]
+      .map((value) => clean(value, 12000))
+      .filter((value, index, values) => value && values.indexOf(value) === index);
+    const meta = [row?.prepArea, `${Number(row?.componentCount) || 0} component${Number(row?.componentCount) === 1 ? '' : 's'}`]
+      .filter(Boolean).join(' · ');
+    return `${paragraph(row?.itemName || 'Untitled dish', { bold: true, size: 24, before: 260, after: 50 })}${
+      meta ? paragraph(meta, { size: 17, after: 70 }) : ''
+    }${details.length ? details.map((value) => paragraph(value, { size: 20, after: 90 })).join('') : paragraph('No recipe instructions returned by Caterease.', { size: 18, after: 90 })}`;
+  }).join('');
+};
+
+const documentXml = ({ event, snapshot, type, recipes = [] }) => {
+  const isKitchenPackOut = type === 'kitchen_packout' || type === 'kitchen_production';
+  const isKitchenMenu = type === 'kitchen_menu';
+  const rows = operationalRows(snapshot, type);
+  const title = isKitchenMenu ? 'KITCHEN MENU' : isKitchenPackOut ? 'KITCHEN PACK OUT' : '';
   const groups = groupedRows(rows, (row) => (
-    isKitchenProduction
+    isKitchenPackOut
       ? row.station || row.prepArea
       : row.menuGroup || row.category || row.prepArea
   ));
-  const sections = isKitchenProduction ? [...groups.entries()].map(([group, values]) => {
+  const sections = isKitchenMenu ? kitchenMenuSections(rows, recipes) : isKitchenPackOut ? [...groups.entries()].map(([group, values]) => {
     const bodyRows = values.map((row) => (
-      isKitchenProduction
+      isKitchenPackOut
         ? [formatQuantity(row.quantity), row.unit, row.itemName, row.prepArea]
         : [formatQuantity(row.quantity), row.itemName, [row.category, row.subEvent].filter(Boolean).join(' · '), '', '']
     ));
     return `${paragraph(group.toUpperCase(), { bold: true, size: 22, before: 220, after: 80 })}${
-      isKitchenProduction
+      isKitchenPackOut
         ? table(['Qty', 'Unit', 'Required item', 'Prep area'], bodyRows, [900, 1200, 5200, 1800])
         : table(['Qty', 'Name', 'Notes / Comments', 'Delivered', 'Returned'], bodyRows, [750, 3600, 3800, 1050, 1050])
     }`;
@@ -280,12 +364,12 @@ const documentXml = ({ event, snapshot, type }) => {
 </w:body></w:document>`;
 };
 
-export const renderCatereaseOperationalDocx = async ({ event, snapshot, type }) => {
+export const renderCatereaseOperationalDocx = async ({ event, snapshot, type, recipes = [] }) => {
   const zip = new JSZip();
   zip.file('[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/></Types>`);
   zip.folder('_rels').file('.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`);
   const word = zip.folder('word');
-  word.file('document.xml', documentXml({ event, snapshot, type }));
+  word.file('document.xml', documentXml({ event, snapshot, type, recipes }));
   word.file('styles.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:rPr><w:rFonts w:ascii="Avenir Medium" w:hAnsi="Avenir Medium"/><w:sz w:val="20"/></w:rPr></w:style></w:styles>`);
   word.folder('_rels').file('document.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`);
   return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });

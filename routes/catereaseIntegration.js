@@ -58,6 +58,7 @@ let operationalSyncProgress = null;
 
 const OPERATIONAL_FIELDS = Object.freeze({
   eventrequireditem: 'ItemName,Qty,Unit,PUnit,QtyPerPUnit,FSPrepArea,FSName,RentalItem,Vendor,SEvtDate,StartTime',
+  foodserv: 'ItemName,Qty,Unit,PrepArea,SubEvtNum,Category,Comment,Description,FdSvNum,ItemNum',
   foodservquery: 'PrepArea,SubEvtNum,ItemName,Qty,Category,MenuGroup',
   foodservusage: 'PrepArea,SubEvtNum,ItemName,Qty,Category,MenuGroup',
 });
@@ -212,13 +213,17 @@ export const resolveCatereaseOperationalEventId = async (eventId, eventDate = ''
 export const fetchCatereaseOperationalSnapshot = async (eventId, eventDate = '', eventTitle = '') => {
   const resolvedEventId = await resolveCatereaseOperationalEventId(eventId, eventDate, eventTitle);
   const kitchenProductionPromise = listAllOperationalRows('eventrequireditem', resolvedEventId, eventDate);
+  const kitchenMenuPromise = listAllOperationalRows('foodserv', resolvedEventId, '').catch((error) => {
+    if (![400, 404].includes(Number(error?.statusCode))) throw error;
+    return [];
+  });
   const packOutPromise = listAllOperationalRows('foodservquery', resolvedEventId, eventDate)
     .catch((error) => {
       if (![400, 404].includes(Number(error?.statusCode))) throw error;
       return listAllOperationalRows('foodservusage', resolvedEventId, eventDate);
     });
-  const [packOutRows, kitchenMenuRows] = await Promise.all([packOutPromise, kitchenProductionPromise]);
-  return buildCatereaseOperationalSnapshot({ eventId: resolvedEventId, packOutRows, kitchenMenuRows });
+  const [packOutRows, kitchenPackOutRows, kitchenMenuRows] = await Promise.all([packOutPromise, kitchenProductionPromise, kitchenMenuPromise]);
+  return buildCatereaseOperationalSnapshot({ eventId: resolvedEventId, packOutRows, kitchenPackOutRows, kitchenMenuRows });
 };
 
 const syncOperationalEvent = async (event) => {
@@ -233,6 +238,7 @@ const syncOperationalEvent = async (event) => {
     status: previousChecksum === snapshot.checksum ? 'unchanged' : 'updated',
     eventId,
     packOutRows: snapshot.packOut.length,
+    kitchenPackOutRows: snapshot.kitchenPackOut.length,
     kitchenMenuRows: snapshot.kitchenMenu.length,
   };
 };
@@ -244,7 +250,7 @@ export const runCatereaseOperationalSync = async () => {
     integration.lastOperationalSyncStartedAt = new Date();
     integration.lastOperationalSyncError = '';
     await integration.save();
-    const summary = { eventsSeen: 0, updated: 0, unchanged: 0, skipped: 0, failed: 0, packOutRows: 0, kitchenMenuRows: 0, errors: [] };
+    const summary = { eventsSeen: 0, updated: 0, unchanged: 0, skipped: 0, failed: 0, packOutRows: 0, kitchenPackOutRows: 0, kitchenMenuRows: 0, errors: [] };
     try {
       const events = await Event.find({ date: { $gte: nyToday() }, status: { $ne: 'deleted' } })
         .select('externalId title date catereaseOperations').sort({ date: 1 });
@@ -256,6 +262,7 @@ export const runCatereaseOperationalSync = async () => {
           const result = await syncOperationalEvent(event);
           summary[result.status] += 1;
           summary.packOutRows += Number(result.packOutRows || 0);
+          summary.kitchenPackOutRows += Number(result.kitchenPackOutRows || 0);
           summary.kitchenMenuRows += Number(result.kitchenMenuRows || 0);
         } catch (error) {
           summary.failed += 1;
@@ -767,15 +774,20 @@ router.post('/operations/sync', ...requireCatereaseAdmin, syncRateLimit, async (
 router.get('/operations/events/:id/export/:type', requireAuth, async (req, res) => {
   try {
     const type = String(req.params.type || '').toLowerCase();
-    if (!['po', 'kitchen_production', 'kitchen_menu'].includes(type)) return res.status(400).json({ error: 'Unknown operational document type' });
+    if (!['po', 'kitchen_packout', 'kitchen_production', 'kitchen_menu'].includes(type)) return res.status(400).json({ error: 'Unknown operational document type' });
     const event = await Event.findById(req.params.id).select('externalId title date meta catereaseOperations').lean();
     if (!event) return res.status(404).json({ error: 'Event not found' });
     if (!event.catereaseOperations) return res.status(404).json({ error: 'Caterease operational data has not been synced for this event' });
-    const docx = await renderCatereaseOperationalDocx({ event, snapshot: event.catereaseOperations, type });
+    const recipes = type === 'kitchen_menu'
+      ? await KitchenRecipe.find({ sourceProvider: 'caterease', sourceDeletedAt: null })
+        .select('name description instructions notes prepArea ingredients inactive hidden revisedAt updatedAt')
+        .lean()
+      : [];
+    const docx = await renderCatereaseOperationalDocx({ event, snapshot: event.catereaseOperations, type, recipes });
     const safeTitle = String(event.title || 'Event').replace(/[<>:"/\\|?*\u0000-\u001F]/g, '').replace(/\s+/g, ' ').trim().slice(0, 100) || 'Event';
     const dateMatch = String(event.date || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
     const datePrefix = dateMatch ? `${dateMatch[2]}-${dateMatch[3]}-${dateMatch[1].slice(-2)}` : '';
-    const documentCode = type === 'po' ? 'PO' : 'KPO';
+    const documentCode = type === 'po' ? 'PO' : type === 'kitchen_menu' ? 'KM' : 'KPO';
     const fileName = [datePrefix, safeTitle, documentCode].filter(Boolean).join(' ');
     res.setHeader('Cache-Control', 'private, no-store');
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');

@@ -255,13 +255,15 @@ test('operational DOCX exports only the requested sub-event', async () => {
     snapshot,
     type: 'po',
     zoneKey: 's1',
+    zoneName: 'Green Room',
     includePackOutTemplate: false,
   });
   const zip = await JSZip.loadAsync(buffer);
   const xml = await zip.file('word/document.xml').async('string');
   assert.match(xml, /Green Room Ice/);
   assert.doesNotMatch(xml, /Staff Holding Water/);
-  assert.doesNotMatch(xml, />PACK OUT</);
+  assert.match(xml, />PACK OUT</);
+  assert.match(xml, />Green Room</);
   assert.doesNotMatch(xml, />Photo</);
   assert.equal((xml.match(/<w:tbl>/g) || []).length, 2, 'Caterease PO uses one event table and one continuous item table');
   assert.match(xml, /<w:gridSpan w:val="5"\/[^>]*>/);
@@ -281,7 +283,7 @@ test('Kitchen Pack Out uses the Caterease PO table layout', async () => {
   });
   const zip = await JSZip.loadAsync(buffer);
   const xml = await zip.file('word/document.xml').async('string');
-  assert.doesNotMatch(xml, />KITCHEN PACK OUT</);
+  assert.match(xml, />KITCHEN PACK OUT</);
   assert.match(xml, />Name</);
   assert.match(xml, />Qty</);
   assert.match(xml, />Notes\/Comments</);
@@ -487,6 +489,37 @@ test('Kitchen Menu keeps Caterease comments in the standard four-column table', 
   assert.match(xml, />Plate cold\.</);
 });
 
+test('Kitchen Menu prints a non-main zone name below its title', async () => {
+  const buffer = await renderCatereaseOperationalDocx({
+    event: { title: 'Dinner', date: '2026-09-11', externalId: 'E22672' },
+    snapshot: {
+      schemaVersion: 3,
+      kitchenPackOut: [],
+      kitchenMenu: [{ itemName: 'Family Meal', quantity: 12, category: 'Dinner' }],
+    },
+    type: 'kitchen_menu',
+    zoneName: 'Staff Holding',
+  });
+  const zip = await JSZip.loadAsync(buffer);
+  const xml = await zip.file('word/document.xml').async('string');
+  assert.match(xml, />Staff Holding</);
+});
+
+test('operational DOCX does not print Main as a zone label', async () => {
+  for (const zoneName of ['', 'Main']) {
+    const buffer = await renderCatereaseOperationalDocx({
+      event: { title: 'Dinner', date: '2026-09-11', externalId: 'E22672', meta: {} },
+      snapshot: { schemaVersion: 3, packOut: [{ itemName: 'Water', quantity: 1, menuGroup: 'Beverage' }] },
+      type: 'po',
+      zoneName,
+      includePackOutTemplate: false,
+    });
+    const zip = await JSZip.loadAsync(buffer);
+    const xml = await zip.file('word/document.xml').async('string');
+    assert.doesNotMatch(xml, />Main</);
+  }
+});
+
 test('generated operational DOCX is a valid Word package and escapes upstream text', async () => {
   const logoSvg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><path d="M0 0h10v10H0z"/></svg>');
   const decorPhoto = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
@@ -503,7 +536,7 @@ test('generated operational DOCX is a valid Word package and escapes upstream te
   const embeddedPhoto = await zip.file('word/media/decor-1.jpg').async('nodebuffer');
   assert.deepEqual(embeddedLogo, logoSvg);
   assert.deepEqual(embeddedPhoto, decorPhoto);
-  assert.doesNotMatch(xml, />PACK OUT</);
+  assert.match(xml, />PACK OUT</);
   assert.match(xml, /r:embed="rId2"/);
   assert.match(xml, /r:embed="rId3"/);
   assert.match(xml, /Photo/);
@@ -523,7 +556,7 @@ test('decor Pack Out uses the shared layout without unrelated blank template row
   });
   const zip = await JSZip.loadAsync(buffer);
   const xml = await zip.file('word/document.xml').async('string');
-  assert.doesNotMatch(xml, />PACK OUT</);
+  assert.match(xml, />PACK OUT</);
   assert.match(xml, /Gold Candelabra/);
   assert.match(xml, /OCC00440/);
   assert.doesNotMatch(xml, /Paper plates/);

@@ -959,6 +959,7 @@ router.get('/operations/events/:id/export/:type', requireAuth, async (req, res) 
       : [];
     const brandLogoSvg = await loadBrandLogoSvg();
     const decorImages = type === 'po' ? await loadMatchedDecorImages(event.catereaseOperations) : [];
+    const zoneName = String(req.query.zoneName || '');
     const docx = await renderCatereaseOperationalDocx({
       event,
       snapshot: event.catereaseOperations,
@@ -967,12 +968,13 @@ router.get('/operations/events/:id/export/:type', requireAuth, async (req, res) 
       brandLogoSvg,
       decorImages,
       zoneKey: String(req.query.zone || ''),
+      zoneName,
     });
     const safeTitle = String(event.title || 'Event').replace(/[<>:"/\\|?*\u0000-\u001F]/g, '').replace(/\s+/g, ' ').trim().slice(0, 100) || 'Event';
     const dateMatch = String(event.date || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
     const datePrefix = dateMatch ? `${dateMatch[2]}-${dateMatch[3]}-${dateMatch[1].slice(-2)}` : '';
     const documentCode = type === 'po' ? 'PO' : type === 'kitchen_packout' ? 'KPO' : type === 'staff_request' ? 'Staff Request' : type === 'annotated_kitchen_menu' ? 'AKM' : 'KM';
-    const safeZone = String(req.query.zoneName || '').replace(/[<>:"/\\|?*\u0000-\u001F]/g, '').replace(/\s+/g, ' ').trim().slice(0, 80);
+    const safeZone = zoneName.replace(/[<>:"/\\|?*\u0000-\u001F]/g, '').replace(/\s+/g, ' ').trim().slice(0, 80);
     const fileName = [datePrefix, safeTitle, safeZone, documentCode].filter(Boolean).join(' ');
     res.setHeader('Cache-Control', 'private, no-store');
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');

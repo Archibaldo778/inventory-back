@@ -532,7 +532,7 @@ const kitchenStaffingSection = (event) => {
   }`;
 };
 
-const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = false, decorImages = [], includePackOutTemplate = true, zoneKey = '' }) => {
+const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = false, decorImages = [], includePackOutTemplate = true, zoneKey = '', zoneName = '' }) => {
   const isKitchenPackOut = type === 'kitchen_packout';
   const isStaffRequest = type === 'staff_request';
   const isKitchenMenu = ['kitchen_menu', 'annotated_kitchen_menu'].includes(type);
@@ -564,13 +564,17 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
     : Number.isFinite(parsedSnapshotGuestCount) && parsedSnapshotGuestCount > 0 ? parsedSnapshotGuestCount : '';
   const eventTiming = event?.meta?.eventTime || event?.meta?.nowsta?.eventTime || '';
   const deliveryTime = event?.meta?.deliveryTime || '';
+  const printableZoneName = clean(zoneName, 200);
+  const zoneHeading = printableZoneName && printableZoneName.toLowerCase() !== 'main'
+    ? paragraph(printableZoneName, { bold: true, size: 24, align: 'center', after: 120 })
+    : '';
   const eventDetailsTable = table([], [
     [`Event: ${event?.title || 'Event'}`, `Event Date: ${longDate(event?.date)}`],
     [`Sales Rep: ${event?.meta?.salesRep || ''}`, `Event Timing: ${eventTiming}`],
     [`Guests: ${guestCount}`, `Delivery Time: ${deliveryTime}`],
     [`Event Number: ${displayedEventNumber(event?.externalId || snapshot?.eventId || '')}`, `Date PO Modified: ${new Intl.DateTimeFormat('en-US').format(new Date())}`],
   ], [5300, 5300]);
-  const documentHeader = isKitchenMenu ? `${documentTitleRow(title)}${table([], [
+  const documentHeader = isKitchenMenu ? `${documentTitleRow(title)}${zoneHeading}${table([], [
     [`Event Name: ${event?.title || 'Event'}`, `Event Timing: ${eventTiming}`],
     [`Date: ${longDate(event?.date)}`, `Staff Arrival on Site: ${event?.meta?.staffArrivalTime || ''}`],
     [`Guest Count: ${guestCount}`, `Sales Rep: ${event?.meta?.salesRep || ''}`],
@@ -581,8 +585,8 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
     [`Venue Notes: ${event?.meta?.venueNotes || ''}`, `Event Number: ${displayedEventNumber(event?.externalId || snapshot?.eventId || '')}`],
     [`Allergen/Restrictions: ${event?.meta?.allergens || event?.meta?.restrictions || ''}`, ''],
   ], [5300, 5300])}` : isStaffRequest
-    ? `${paragraph(title, { bold: true, size: 30, align: 'center', after: 120 })}${eventDetailsTable}`
-    : eventDetailsTable;
+    ? `${paragraph(title, { bold: true, size: 30, align: 'center', after: 120 })}${zoneHeading}${eventDetailsTable}`
+    : `${paragraph('Revision', { bold: true, size: 28, align: 'right', after: 80 })}${paragraph(title, { bold: true, size: 30, align: 'center', after: 120 })}${zoneHeading}${eventDetailsTable}`;
   const documentFooterSections = isKitchenMenu ? kitchenStaffingSection(event) : '';
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><w:body>
@@ -603,6 +607,7 @@ export const renderCatereaseOperationalDocx = async ({
   decorImages = [],
   includePackOutTemplate = true,
   zoneKey = '',
+  zoneName = '',
 }) => {
   const includeBrandLogo = Buffer.isBuffer(brandLogoSvg) && brandLogoSvg.length > 0;
   const embeddedDecorImages = (Array.isArray(decorImages) ? decorImages : [])
@@ -627,6 +632,7 @@ export const renderCatereaseOperationalDocx = async ({
     decorImages: embeddedDecorImages,
     includePackOutTemplate,
     zoneKey,
+    zoneName,
   }));
   word.file('styles.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:rPr><w:rFonts w:ascii="Avenir Medium" w:hAnsi="Avenir Medium"/><w:sz w:val="20"/></w:rPr></w:style></w:styles>`);
   if (includeBrandLogo) word.folder('media').file('logo.svg', brandLogoSvg);

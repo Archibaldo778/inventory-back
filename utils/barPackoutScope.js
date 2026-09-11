@@ -4,6 +4,23 @@ export const PREPARED_BEVERAGE_RATES = Object.freeze({
 });
 
 const sourceText = (item = {}) => `${String(item?.section || '')} ${String(item?.name || '')}`.trim();
+export const MAX_REASONABLE_BAR_ITEM_QUANTITY = 100000;
+const PACKOUT_METADATA_ROW_PATTERN = /^(?:event(?:\s+name|\s+date|\s+number)?|guest\s+count|client|location|address|delivery|date\s+po\s+modified)\s*:/i;
+
+export const isPackoutMetadataRow = (item = {}) => {
+  const name = String(item?.name || '').trim();
+  if (!name) return false;
+  if (PACKOUT_METADATA_ROW_PATTERN.test(name)) return true;
+  const markers = name.match(/\b(?:event\s+name|event\s+date|guest\s+count|client|location|address)\s*:/gi) || [];
+  return markers.length >= 2;
+};
+
+const hasReasonableBarQuantity = (item = {}) => {
+  const raw = item?.sentQty ?? item?.quantity;
+  if (raw === undefined || raw === null || raw === '') return true;
+  const quantity = Number(raw);
+  return Number.isFinite(quantity) && quantity >= 0 && quantity <= MAX_REASONABLE_BAR_ITEM_QUANTITY;
+};
 const FOOD_MENU_SECTION_PATTERN = /^(?:\d+\s+)?(?:(?:first|second|third|fourth)\s+courses?|plated\s+desserts?|proteins?|sides?|salads?|soups?|appetizers?|hors\s+d[’']?oeuvres?|canap[eé]s?|entr[eé]es?|main\s+courses?|desserts?|breads?|starches?|vegetables?|vendor\s+meals?)\s*:?(?:\s*\([^)]*\))?$/i;
 export const isFoodMenuItem = (item = {}) => (
   FOOD_MENU_SECTION_PATTERN.test(String(item?.name || '').trim())
@@ -47,6 +64,8 @@ export const isExternalJelloItem = (item = {}) => (
 export const isBarAccountingItem = (item = {}) => (
   !isExternalJelloItem(item)
   && !isFoodMenuItem(item)
+  && !isPackoutMetadataRow(item)
+  && hasReasonableBarQuantity(item)
   && (
     String(item?.scope || '') === 'alcohol'
     || isTrackedBarWater(item)

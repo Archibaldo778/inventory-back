@@ -166,6 +166,21 @@ test('fallback OCR keeps alcohol rows whose names also look like section heading
   ]);
 });
 
+test('recognized PO tables discard a document header merged into an item row', () => {
+  const result = parseRecognizedPackout({
+    tables: [{
+      headerRows: [['Name', 'Qty', 'Notes/Comments']],
+      bodyRows: [[
+        'Event Name: Lombardo Cocktail Date: Friday, September 11, 2026 Guest Count: 50 Client: Lombardo Location: 46 East 66th Street',
+        '12320916904700',
+        'Kitchen Pack Out',
+      ]],
+    }],
+  });
+
+  assert.deepEqual(result.items, []);
+});
+
 test('recognized names match exact aliases and leave ambiguous suggestions unconfirmed', () => {
   const catalog = [
     { _id: 'a1', name: 'Tito’s Handmade Vodka', aliases: ['Titos Vodka', 'Titos Vodka 1L'] },

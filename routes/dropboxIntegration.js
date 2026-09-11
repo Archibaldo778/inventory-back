@@ -13,6 +13,7 @@ import {
   runImportedBarItemMergePipeline,
 } from '../utils/barManualItems.js';
 import { normalizePackoutItems } from './bar.js';
+import { getCatereaseConfig } from '../utils/catereaseApi.js';
 import {
   buildDropboxAuthorizeUrl,
   createDropboxOauthState,
@@ -509,6 +510,12 @@ const resolveDropboxTeamRoot = async (accessToken, account, configuredRootPath) 
 };
 
 export const runDropboxDiscoverySync = async () => {
+  if (getCatereaseConfig().operationalSyncEnabled) {
+    throw Object.assign(
+      new Error('Dropbox sync is disabled because Caterease operational sync is enabled'),
+      { statusCode: 409 }
+    );
+  }
   if (syncPromise) return syncPromise;
   syncPromise = (async () => {
     const integration = await loadIntegrationWithSecrets();
@@ -788,6 +795,9 @@ router.get('/status', ...requireDropboxAdmin, async (_req, res) => {
 
 router.post('/sync', ...requireDropboxAdmin, syncRateLimit, async (_req, res) => {
   try {
+    if (getCatereaseConfig().operationalSyncEnabled) {
+      return res.status(409).json({ error: 'Dropbox sync is disabled because Caterease operational sync is enabled' });
+    }
     if (syncPromise) return res.status(202).json({ ok: true, started: false, syncing: true });
     void runDropboxDiscoverySync().catch((error) => {
       console.error('Dropbox background sync failed:', error?.message || error);

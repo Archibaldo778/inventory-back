@@ -8,6 +8,7 @@ import {
   normalizeCatereaseKitchenMenuDishRows,
   normalizeCatereaseKitchenPackOutRows,
   normalizeCatereasePackOutRows,
+  packOutRenderedItemNames,
   renderCatereaseOperationalDocx,
 } from '../utils/catereaseOperations.js';
 
@@ -269,4 +270,24 @@ test('decor Pack Out uses the shared layout without unrelated blank template row
   assert.match(xml, /Gold Candelabra/);
   assert.match(xml, /OCC00440/);
   assert.doesNotMatch(xml, /Paper plates/);
+});
+
+test('shared Pack Out template exposes item names used for photo matching', () => {
+  const names = packOutRenderedItemNames([]);
+  assert.ok(names.includes('Milano Stainless Steel Champagne Bucket'));
+});
+
+test('shared Pack Out template embeds a matched Milano product photo', async () => {
+  const photo = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
+  const buffer = await renderCatereaseOperationalDocx({
+    event: { title: 'Dinner', date: '2026-09-11', externalId: 'E22672' },
+    snapshot: { schemaVersion: 3, packOut: [] },
+    type: 'po',
+    decorImages: [{ itemName: 'Milano Stainless Steel Champagne Bucket', buffer: photo, extension: 'jpg' }],
+  });
+  const zip = await JSZip.loadAsync(buffer);
+  const xml = await zip.file('word/document.xml').async('string');
+  assert.match(xml, /Milano Stainless Steel Champagne Bucket/);
+  assert.match(xml, /r:embed="rId3"/);
+  assert.deepEqual(await zip.file('word/media/decor-1.jpg').async('nodebuffer'), photo);
 });

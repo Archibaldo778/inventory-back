@@ -43,6 +43,7 @@ import { normalizeProductImages } from '../utils/productImages.js';
 import { buildCatereaseFinancialPreview, buildCatereaseKitchenCatalog } from '../utils/catereaseKitchen.js';
 import {
   buildCatereaseOperationalSnapshot,
+  packOutRenderedItemNames,
   renderCatereaseOperationalDocx,
 } from '../utils/catereaseOperations.js';
 import { normalizeKitchenRecipeName, syncKitchenRecipeMatches } from '../utils/kitchenRecipeMatching.js';
@@ -63,11 +64,9 @@ let recipeSyncProgress = null;
 let operationalSyncPromise = null;
 let operationalSyncProgress = null;
 const loadMatchedDecorImages = async (snapshot) => {
-  const rows = [
-    ...(Array.isArray(snapshot?.packOut) ? snapshot.packOut : []),
-    ...(Array.isArray(snapshot?.kitchenPackOut) ? snapshot.kitchenPackOut : []),
-  ];
-  const requestedNames = new Map(rows.map((row) => [normalizeKitchenRecipeName(row?.itemName), String(row?.itemName || '').trim()]).filter(([key]) => key));
+  const requestedNames = new Map(packOutRenderedItemNames(snapshot?.packOut).map((itemName) => (
+    [normalizeKitchenRecipeName(itemName), itemName]
+  )).filter(([key]) => key));
   if (!requestedNames.size) return [];
   const products = await Product.find({ inventoryType: { $ne: 'disposable' } })
     .select('name image imageUrl images')
@@ -76,7 +75,7 @@ const loadMatchedDecorImages = async (snapshot) => {
   products.forEach((product) => {
     const key = normalizeKitchenRecipeName(product?.name);
     if (!requestedNames.has(key)) return;
-    const url = cloudinaryWordThumbnailUrl(normalizeProductImages(product)[0]);
+    const url = normalizeProductImages(product).find((value) => cloudinaryWordThumbnailUrl(value));
     if (!url) return;
     const matches = candidates.get(key) || [];
     matches.push({ product, url });

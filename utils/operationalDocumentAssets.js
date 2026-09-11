@@ -25,7 +25,9 @@ export const cloudinaryWordThumbnailUrl = (value) => {
   try {
     const url = new URL(String(value || ''));
     if (url.protocol !== 'https:' || url.hostname !== 'res.cloudinary.com') return '';
-    url.pathname = url.pathname.replace('/upload/', '/upload/f_jpg,c_pad,b_white,w_180,h_180,q_auto/');
+    if (!url.pathname.includes('/upload/f_jpg,c_pad,b_white,w_180,h_180,q_auto/')) {
+      url.pathname = url.pathname.replace('/upload/', '/upload/f_jpg,c_pad,b_white,w_180,h_180,q_auto/');
+    }
     return url.toString();
   } catch {
     return '';

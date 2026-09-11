@@ -319,6 +319,13 @@ const templatedPackOutGroups = (rows, includeTemplate = true) => {
   return groups;
 };
 
+export const packOutRenderedItemNames = (rows = [], includeTemplate = true) => [
+  ...templatedPackOutGroups(
+    (Array.isArray(rows) ? rows : []).filter((row) => clean(row?.menuGroup, 160).toLowerCase() !== 'standard'),
+    includeTemplate
+  ).values(),
+].flat().map((row) => clean(row?.itemName, 300)).filter(Boolean);
+
 const packOutTable = (rows, decorImages = [], includeTemplate = true) => {
   const groups = templatedPackOutGroups(
     rows.filter((row) => clean(row?.menuGroup, 160).toLowerCase() !== 'standard'),

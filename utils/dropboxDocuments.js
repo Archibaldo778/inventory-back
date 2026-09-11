@@ -13,6 +13,8 @@ export const inferDropboxDocumentType = (name) => {
   return 'review';
 };
 
+export const isAnnotatedKitchenMenu = (name) => /(?:^|[\s._-])AKM(?:$|[\s._-])/i.test(clean(name));
+
 export const inferDropboxEventId = (value) => {
   const source = clean(value).toUpperCase();
   const primary = source.match(/\bE\s*[-_ ]?\s*(\d{2,})\b/);
@@ -257,6 +259,14 @@ export const classifyDropboxEntry = (entry, { today = nyToday() } = {}) => {
   if (tag === 'deleted') return { status: 'deleted', reason: 'Removed from Dropbox', inferredDate: '', documentType: 'review' };
   if (tag !== 'file' || !/\.docx$/i.test(name) || /^~\$/i.test(name)) {
     return { status: 'ignored', reason: 'Not a DOCX PO/Kitchen Menu', inferredDate: '', documentType: 'review' };
+  }
+  if (isAnnotatedKitchenMenu(name)) {
+    return {
+      status: 'ignored',
+      reason: 'Annotated Kitchen Menu (AKM) is not an active event document',
+      inferredDate: inferDropboxPathDate(path),
+      documentType: 'kitchen_menu',
+    };
   }
   const inferredDate = inferDropboxPathDate(path);
   const folderDatePrefix = inferYearMonth(path);

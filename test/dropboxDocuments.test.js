@@ -27,6 +27,17 @@ test('Dropbox document names recognize Caterease KPO and AKM variants', () => {
   assert.equal(inferDropboxEventTitle('09-05-26 Event Day 2 AKM.docx'), 'Event Day 2');
 });
 
+test('Annotated Kitchen Menu files are not imported as active event documents', () => {
+  const result = classifyDropboxEntry({
+    '.tag': 'file',
+    name: '09-11-26 Bensadoun Rosh Hashanah Dinner AKM.docx',
+    path_display: '/Proposals/2026/September/09-11-26 Bensadoun/Leadership File/Kitchen/09-11-26 Bensadoun Rosh Hashanah Dinner AKM.docx',
+  }, { today: '2026-09-01' });
+  assert.equal(result.status, 'ignored');
+  assert.equal(result.documentType, 'kitchen_menu');
+  assert.match(result.reason, /Annotated Kitchen Menu/);
+});
+
 test('dated invoices and administrative DOCX files are ignored instead of sent to review', () => {
   const result = classifyDropboxEntry({
     '.tag': 'file',

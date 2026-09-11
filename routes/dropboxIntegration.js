@@ -618,7 +618,8 @@ export const runDropboxDiscoverySync = async () => {
           if (!existing) stats.new += 1;
           else if (revisionChanged || classificationChanged) stats.updated += 1;
           else stats.unchanged += 1;
-          const unchangedImported = existing?.status === 'imported'
+          const unchangedImported = classification.status === 'discovered'
+            && existing?.status === 'imported'
             && String(existing.rev || '') === String(entry.rev || '')
             && String(existing.contentHash || '') === String(entry.content_hash || '')
             && !classificationChanged;

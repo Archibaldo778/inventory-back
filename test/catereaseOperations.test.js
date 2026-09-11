@@ -254,7 +254,7 @@ test('operational DOCX exports only the requested sub-event', async () => {
     event: { title: 'Dinner', date: '2026-09-11', externalId: 'E22672', meta: {} },
     snapshot,
     type: 'po',
-    zoneKey: 's1',
+    zoneKey: 'green room',
     zoneName: 'Green Room',
     includePackOutTemplate: false,
   });
@@ -271,6 +271,28 @@ test('operational DOCX exports only the requested sub-event', async () => {
   assert.doesNotMatch(xml, />Photo</);
   assert.equal((xml.match(/<w:tbl>/g) || []).length, 2, 'Caterease PO uses one event table and one continuous item table');
   assert.match(xml, /<w:gridSpan w:val="5"\/[^>]*>/);
+});
+
+test('operational DOCX filters shared sub-event rows by their human zone description', async () => {
+  const snapshot = buildCatereaseOperationalSnapshot({
+    eventId: 'E22672',
+    packOutRows: [
+      { ItemName: 'Green Room Ice', Qty: 2, SubEvtNum: 'S1', SEDescription: 'Green Room' },
+      { ItemName: 'Staff Holding Water', Qty: 4, SubEvtNum: 'S1', SEDescription: 'Staff Holding' },
+    ],
+  });
+  const buffer = await renderCatereaseOperationalDocx({
+    event: { title: 'Dinner', date: '2026-09-11', externalId: 'E22672', meta: {} },
+    snapshot,
+    type: 'po',
+    zoneKey: 'staff holding',
+    zoneName: 'Staff Holding',
+    includePackOutTemplate: false,
+  });
+  const zip = await JSZip.loadAsync(buffer);
+  const xml = await zip.file('word/document.xml').async('string');
+  assert.match(xml, /Staff Holding Water/);
+  assert.doesNotMatch(xml, /Green Room Ice/);
 });
 
 test('Kitchen Pack Out uses the Caterease PO table layout', async () => {

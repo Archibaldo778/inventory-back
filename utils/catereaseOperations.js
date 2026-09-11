@@ -454,7 +454,7 @@ const groupedRows = (rows, groupSelector) => {
   return groups;
 };
 
-export const catereaseOperationalZoneKey = (row) => clean(row?.subEvent || row?.zoneName, 200).toLowerCase();
+export const catereaseOperationalZoneKey = (row) => clean(row?.zoneName || row?.subEvent, 200).toLowerCase();
 
 const operationalRows = (snapshot, type, zoneKey = '') => {
   const version = Number(snapshot?.schemaVersion) || 1;

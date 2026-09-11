@@ -92,7 +92,7 @@ const normalizedEventName = (value) => clean(value)
 
 const normalizedEventNumber = (value) => clean(value).toUpperCase().replace(/[^A-Z0-9]/g, '');
 const baseEventNumber = (value) => normalizedEventNumber(value).match(/^E\d+/)?.[0] || normalizedEventNumber(value);
-const DERIVATIVE_EVENT_WORDS = /\b(?:invoice|menu|pack out|setup|set up|load out|rental check in)\b/;
+const DERIVATIVE_EVENT_WORDS = /\b(?:invoice|menu|pack out|staffing|setup|set up|load out|rental check in)\b/;
 
 const titleSimilarityScore = (source, candidate) => {
   if (!source || !candidate) return 0;

@@ -96,6 +96,7 @@ test('folder title matching prefers the main event over its pack-out child event
   }, [
     { _id: 'main', externalId: 'E20244 - S57733', title: 'Studio Sully Plans Wedding of Rachael Sonnenberg & Martin de Crane', date: '2026-09-12' },
     { _id: 'child', externalId: 'E20244 - S62744', title: 'Studio Sully Plans Wedding of Rachael Sonnenberg & Martin de Crane - Pack Out - HD & Raw Bar', date: '2026-09-12' },
+    { _id: 'staffing', externalId: '', title: 'Studio Sully Plans Wedding of Rachel Sonnenberg & Martin de Crane - Staffing', date: '2026-09-12' },
   ]);
   assert.equal(match.status, 'matched');
   assert.equal(match.event._id, 'main');

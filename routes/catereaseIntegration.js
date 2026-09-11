@@ -17,7 +17,10 @@ import { readDropboxDocxMetadata } from '../utils/dropboxDocxMetadata.js';
 import {
   runImportedBarItemMergePipeline,
 } from '../utils/barManualItems.js';
-import { catereaseOperationalPackOutToBarItems } from '../utils/catereaseOperationalBarItems.js';
+import {
+  catereaseOperationalPackOutToBarItems,
+  hasAppliedCatereaseOperationalChecksum,
+} from '../utils/catereaseOperationalBarItems.js';
 import { canViewEvent, normalizePackoutItems } from './bar.js';
 import {
   downloadCatereaseEventFile,
@@ -178,6 +181,10 @@ const syncCatereaseBarItems = async (event) => {
 };
 
 const syncCatereaseOperationalBarItems = async (event, snapshot) => {
+  let barEvent = await BarEvent.findOne({ linkedEventId: event._id });
+  if (hasAppliedCatereaseOperationalChecksum(barEvent, snapshot?.checksum)) {
+    return { synced: false, items: 0, reason: 'unchanged' };
+  }
   const rawItems = catereaseOperationalPackOutToBarItems(snapshot?.packOut);
   const dashboardGuestCount = dashboardEventGuestCount(event);
   const snapshotGuestCount = Number(snapshot?.guestCount);
@@ -185,7 +192,6 @@ const syncCatereaseOperationalBarItems = async (event, snapshot) => {
     Number.isFinite(snapshotGuestCount) && snapshotGuestCount >= 0 ? snapshotGuestCount : null
   );
   const normalizedItems = await normalizePackoutItems(rawItems, { allowFinancials: false, guestCount });
-  let barEvent = await BarEvent.findOne({ linkedEventId: event._id });
   if (!barEvent && !rawItems.length) return { synced: false, items: 0 };
   if (!barEvent) {
     barEvent = new BarEvent({

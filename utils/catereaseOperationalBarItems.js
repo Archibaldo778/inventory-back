@@ -28,3 +28,15 @@ export const catereaseOperationalPackOutToBarItems = (rows) => (
     }];
   })
 );
+
+export const hasAppliedCatereaseOperationalChecksum = (barEvent, checksum) => {
+  const expected = clean(checksum);
+  if (!expected) return false;
+  const audit = Array.isArray(barEvent?.audit) ? barEvent.audit : [];
+  for (let index = audit.length - 1; index >= 0; index -= 1) {
+    const entry = audit[index];
+    if (clean(entry?.action) !== 'caterease_operations_synced') continue;
+    return clean(entry?.details?.checksum) === expected;
+  }
+  return false;
+};

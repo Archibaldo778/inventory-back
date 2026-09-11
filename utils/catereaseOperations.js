@@ -275,8 +275,10 @@ const cell = (value, { bold = false, width = 0, shading = '', align = '' } = {})
   return `<w:tc><w:tcPr>${width ? `<w:tcW w:w="${width}" w:type="dxa"/>` : ''}${shading ? `<w:shd w:val="clear" w:fill="${shading}"/>` : ''}<w:vAlign w:val="top"/></w:tcPr>${contents}</w:tc>`;
 };
 
+const tableBorders = '<w:tblBorders><w:top w:val="single" w:sz="4" w:color="BFBFBF"/><w:left w:val="single" w:sz="4" w:color="BFBFBF"/><w:bottom w:val="single" w:sz="4" w:color="BFBFBF"/><w:right w:val="single" w:sz="4" w:color="BFBFBF"/><w:insideH w:val="single" w:sz="4" w:color="BFBFBF"/><w:insideV w:val="single" w:sz="4" w:color="BFBFBF"/></w:tblBorders>';
+
 const table = (headers, rows, widths) => `<w:tbl>
-  <w:tblPr><w:tblW w:w="5000" w:type="pct"/><w:tblLayout w:type="fixed"/><w:tblBorders><w:top w:val="single" w:sz="8" w:color="000000"/><w:left w:val="single" w:sz="8" w:color="000000"/><w:bottom w:val="single" w:sz="8" w:color="000000"/><w:right w:val="single" w:sz="8" w:color="000000"/><w:insideH w:val="single" w:sz="8" w:color="000000"/><w:insideV w:val="single" w:sz="8" w:color="000000"/></w:tblBorders></w:tblPr>
+  <w:tblPr><w:tblW w:w="5000" w:type="pct"/><w:tblLayout w:type="fixed"/>${tableBorders}</w:tblPr>
   <w:tblGrid>${widths.map((width) => `<w:gridCol w:w="${width}"/>`).join('')}</w:tblGrid>
   ${headers.length ? `<w:tr>${headers.map((header, index) => cell(header, { bold: true, width: widths[index], shading: 'E7E6E6' })).join('')}</w:tr>` : ''}
   ${rows.map((row) => `<w:tr>${row.map((value, index) => cell(value, { width: widths[index] })).join('')}</w:tr>`).join('')}
@@ -385,6 +387,28 @@ export const packOutRenderedItemNames = (rows = [], includeTemplate = true) => [
   ).values(),
 ].flat().map((row) => clean(row?.itemName, 300)).filter(Boolean);
 
+const catereasePackOutTable = (groups, decorImages = []) => {
+  const includePhotos = decorImages.length > 0;
+  const imageByName = new Map(decorImages.map((image) => [itemKey(image.itemName), image]));
+  const widths = includePhotos ? [2900, 700, 2800, 1000, 1000, 1700] : [3700, 700, 3500, 1100, 1100];
+  const headers = ['Name', 'Qty', 'Notes/Comments', 'Delivered', 'Returned', ...(includePhotos ? ['Photo'] : [])];
+  const header = `<w:tr>${headers.map((value, index) => cell(value, {
+    bold: true,
+    width: widths[index],
+    shading: 'E7E6E6',
+    align: 'center',
+  })).join('')}</w:tr>`;
+  const sectionRow = (name) => `<w:tr><w:tc><w:tcPr><w:gridSpan w:val="${widths.length}"/><w:tcW w:w="${widths.reduce((total, width) => total + width, 0)}" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr>${paragraph(name, { bold: true, size: 20, align: 'center', after: 0 })}</w:tc></w:tr>`;
+  const body = [...groups.entries()].map(([group, values]) => `${sectionRow(group.toUpperCase())}${values.map((row) => `<w:tr>${[
+    { value: row.itemName, align: 'center' },
+    { value: formatQuantity(row.quantity), align: 'center' },
+    { value: row.notes || '', align: '' },
+    { value: '', align: '' },
+    { value: '', align: '' },
+  ].map(({ value, align }, index) => cell(value, { width: widths[index], align })).join('')}${includePhotos ? imageCell(imageByName.get(itemKey(row.itemName)), widths[5]) : ''}</w:tr>`).join('')}`).join('');
+  return `<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/><w:tblLayout w:type="fixed"/>${tableBorders}</w:tblPr><w:tblGrid>${widths.map((width) => `<w:gridCol w:w="${width}"/>`).join('')}</w:tblGrid>${header}${body}</w:tbl>`;
+};
+
 const packOutTable = (rows, decorImages = [], includeTemplate = true) => {
   const groups = templatedPackOutGroups(
     rows.filter((row) => clean(row?.menuGroup, 160).toLowerCase() !== 'standard'),
@@ -395,20 +419,7 @@ const packOutTable = (rows, decorImages = [], includeTemplate = true) => {
     const rightIndex = PACK_OUT_SECTION_ORDER.indexOf(right);
     return (leftIndex < 0 ? 999 : leftIndex) - (rightIndex < 0 ? 999 : rightIndex) || left.localeCompare(right);
   });
-  const imageByName = new Map(decorImages.map((image) => [itemKey(image.itemName), image]));
-  const widths = [2900, 700, 3300, 1000, 1000, 1350];
-  const header = `<w:tr>${['Name', 'Qty', 'Notes/Comments', 'Delivered', 'Returned', 'Photo'].map((value, index) => cell(value, { bold: true, width: widths[index], shading: 'BFBFBF', align: 'center' })).join('')}</w:tr>`;
-  const borders = '<w:tblBorders><w:top w:val="single" w:sz="8" w:color="000000"/><w:left w:val="single" w:sz="8" w:color="000000"/><w:bottom w:val="single" w:sz="8" w:color="000000"/><w:right w:val="single" w:sz="8" w:color="000000"/><w:insideH w:val="single" w:sz="8" w:color="000000"/><w:insideV w:val="single" w:sz="8" w:color="000000"/></w:tblBorders>';
-  return orderedGroups.map(([group, values]) => {
-    const body = values.map((row) => `<w:tr>${[
-      { value: row.itemName, align: 'center' },
-      { value: formatQuantity(row.quantity), align: '' },
-      { value: row.notes || '', align: '' },
-      { value: '', align: '' },
-      { value: '', align: '' },
-    ].map(({ value, align }, index) => cell(value, { width: widths[index], align })).join('')}${imageCell(imageByName.get(itemKey(row.itemName)), widths[5])}</w:tr>`).join('');
-    return `${paragraph(group, { bold: true, size: 24, align: 'center', before: 220, after: 50 })}<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/><w:tblLayout w:type="fixed"/>${borders}</w:tblPr><w:tblGrid>${widths.map((width) => `<w:gridCol w:w="${width}"/>`).join('')}</w:tblGrid>${header}${body}</w:tbl>`;
-  }).join('');
+  return catereasePackOutTable(new Map(orderedGroups), decorImages);
 };
 
 const formatQuantity = (value) => {
@@ -471,7 +482,7 @@ const kitchenMenuSections = (rows, recipes, includeAnnotations = false) => {
       ...row,
       group: clean(row?.menuGroup || row?.category || row?.prepArea, 160) || 'Menu',
       itemName: clean(row?.itemName, 300) || 'Untitled dish',
-      comments: includeAnnotations ? comments : [],
+      comments,
       labels: includeAnnotations ? labels : [],
     };
   });
@@ -537,18 +548,14 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
     ? table(['#', 'Position', 'Start', 'End', 'Uniform', 'Comments'], rows.map((row) => [
       formatQuantity(row.required), row.position, row.startTime, row.endTime, row.uniform, row.comments,
     ]), [700, 2200, 1300, 1300, 2600, 2700])
-    : isKitchenPackOut ? [...groups.entries()].map(([group, values]) => {
-    const bodyRows = values.map((row) => (
-      isKitchenPackOut
-        ? [formatQuantity(row.quantity), row.unit, row.itemName, row.prepArea]
-        : [formatQuantity(row.quantity), row.itemName, [row.category, row.subEvent].filter(Boolean).join(' · '), '', '']
-    ));
-    return `${paragraph(group.toUpperCase(), { bold: true, size: 22, before: 220, after: 80 })}${
-      isKitchenPackOut
-        ? table(['Qty', 'Unit', 'Required item', 'Prep area'], bodyRows, [900, 1200, 5200, 1800])
-        : table(['Qty', 'Name', 'Notes / Comments', 'Delivered', 'Returned'], bodyRows, [750, 3600, 3800, 1050, 1050])
-    }`;
-  }).join('') : packOutTable(rows, decorImages, includePackOutTemplate);
+    : isKitchenPackOut ? catereasePackOutTable(new Map([...groups.entries()].map(([group, values]) => [
+      group,
+      values.map((row) => ({
+        itemName: row.itemName,
+        quantity: row.quantity,
+        notes: [row.unit, row.prepArea].filter(Boolean).join(' · '),
+      })),
+    ]))) : packOutTable(rows, decorImages, includePackOutTemplate);
   const parsedEventGuestCount = Number(event?.meta?.guestCount);
   const legacyGuestRow = rows.find((row) => itemKey(row?.itemName) === 'food' && clean(row?.menuGroup).toLowerCase() === 'standard');
   const parsedSnapshotGuestCount = Number(snapshot?.guestCount ?? legacyGuestRow?.quantity);
@@ -557,6 +564,12 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
     : Number.isFinite(parsedSnapshotGuestCount) && parsedSnapshotGuestCount > 0 ? parsedSnapshotGuestCount : '';
   const eventTiming = event?.meta?.eventTime || event?.meta?.nowsta?.eventTime || '';
   const deliveryTime = event?.meta?.deliveryTime || '';
+  const eventDetailsTable = table([], [
+    [`Event: ${event?.title || 'Event'}`, `Event Date: ${longDate(event?.date)}`],
+    [`Sales Rep: ${event?.meta?.salesRep || ''}`, `Event Timing: ${eventTiming}`],
+    [`Guests: ${guestCount}`, `Delivery Time: ${deliveryTime}`],
+    [`Event Number: ${displayedEventNumber(event?.externalId || snapshot?.eventId || '')}`, `Date PO Modified: ${new Intl.DateTimeFormat('en-US').format(new Date())}`],
+  ], [5300, 5300]);
   const documentHeader = isKitchenMenu ? `${documentTitleRow(title)}${table([], [
     [`Event Name: ${event?.title || 'Event'}`, `Event Timing: ${eventTiming}`],
     [`Date: ${longDate(event?.date)}`, `Staff Arrival on Site: ${event?.meta?.staffArrivalTime || ''}`],
@@ -567,14 +580,9 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
     [`Client Notes: ${event?.meta?.clientNotes || ''}`, `Meeting Point: ${event?.meta?.meetingPoint || ''}`],
     [`Venue Notes: ${event?.meta?.venueNotes || ''}`, `Event Number: ${displayedEventNumber(event?.externalId || snapshot?.eventId || '')}`],
     [`Allergen/Restrictions: ${event?.meta?.allergens || event?.meta?.restrictions || ''}`, ''],
-  ], [5300, 5300])}` : `${paragraph('Revision', { bold: true, size: 28, align: 'right', after: 80 })}${
-    title ? paragraph(title, { bold: true, size: 30, align: 'center', after: 120 }) : ''
-  }${table([], [
-    [`Event: ${event?.title || 'Event'}`, `Event Date: ${longDate(event?.date)}`],
-    [`Sales Rep: ${event?.meta?.salesRep || ''}`, `Event Timing: ${eventTiming}`],
-    [`Guests: ${guestCount}`, `Delivery Time: ${deliveryTime}`],
-    [`Event Number: ${displayedEventNumber(event?.externalId || snapshot?.eventId || '')}`, `Date PO Modified: ${new Intl.DateTimeFormat('en-US').format(new Date())}`],
-  ], [5300, 5300])}`;
+  ], [5300, 5300])}` : isStaffRequest
+    ? `${paragraph(title, { bold: true, size: 30, align: 'center', after: 120 })}${eventDetailsTable}`
+    : eventDetailsTable;
   const documentFooterSections = isKitchenMenu ? kitchenStaffingSection(event) : '';
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><w:body>

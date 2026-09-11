@@ -28,6 +28,7 @@ import {
   listCatereaseHubResource,
 } from '../utils/catereaseApi.js';
 import {
+  catereaseEventIdCandidates,
   catereaseFileRevision,
   normalizeCatereaseEventId,
   normalizeCatereaseFile,
@@ -102,18 +103,21 @@ const syncCatereaseBarItems = async (event) => {
 };
 
 const listAllEventFiles = async (eventId) => {
-  const files = [];
-  let cursor = '';
-  let pages = 0;
-  do {
-    const page = await listCatereaseEventFiles(eventId, { cursor, limit: 200 });
-    files.push(...page.data);
-    if (page.pagination.hasMore && !page.pagination.nextCursor) throw new Error(`Caterease file pagination cursor is missing for ${eventId}`);
-    cursor = page.pagination.hasMore ? page.pagination.nextCursor : '';
-    pages += 1;
-    if (pages > 1000) throw new Error(`Caterease pagination did not finish for ${eventId}`);
-  } while (cursor);
-  return files;
+  for (const candidate of catereaseEventIdCandidates(eventId)) {
+    const files = [];
+    let cursor = '';
+    let pages = 0;
+    do {
+      const page = await listCatereaseEventFiles(candidate, { cursor, limit: 200 });
+      files.push(...page.data);
+      if (page.pagination.hasMore && !page.pagination.nextCursor) throw new Error(`Caterease file pagination cursor is missing for ${candidate}`);
+      cursor = page.pagination.hasMore ? page.pagination.nextCursor : '';
+      pages += 1;
+      if (pages > 1000) throw new Error(`Caterease pagination did not finish for ${candidate}`);
+    } while (cursor);
+    if (files.length) return files;
+  }
+  return [];
 };
 
 const listAllHubRows = async (resource) => {

@@ -10,6 +10,12 @@ export const normalizeCatereaseEventId = (value) => {
   return match ? `E${match[1]}` : '';
 };
 
+export const catereaseEventIdCandidates = (value) => {
+  const normalized = normalizeCatereaseEventId(value);
+  if (!normalized) return [];
+  return [normalized, normalized.slice(1)];
+};
+
 export const classifyCatereaseFile = (file = {}) => inferDropboxDocumentType(
   `${clean(file.FileName || file.fileName)} ${clean(file.Comment || file.comment)}`
 );

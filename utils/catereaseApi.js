@@ -6,10 +6,14 @@ const clean = (value) => String(value || '').trim();
 
 export const getCatereaseConfig = () => {
   const apiKey = clean(process.env.CATEREASE_API_KEY);
+  // The Caterease Hub (recipes/menu) sync can stay on even while file sync is disabled, so
+  // this is a separate switch from `apiKey` — e.g. while /v1/eventfile does not return the
+  // generated Pack Out / Kitchen Menu documents and Dropbox remains the active file source.
+  const filesEnabled = Boolean(apiKey) && clean(process.env.CATEREASE_FILES_ENABLED).toLowerCase() === 'true';
   return {
     apiKey,
     baseUrl: clean(process.env.CATEREASE_BASE_URL || DEFAULT_BASE_URL).replace(/\/+$/, ''),
-    primaryFiles: Boolean(apiKey),
+    primaryFiles: filesEnabled,
   };
 };
 

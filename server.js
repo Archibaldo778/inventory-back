@@ -619,7 +619,6 @@ export const startServer = async () => {
   let dropboxSyncTimer = null;
   let dropboxStartupTimer = null;
   const catereaseConfig = getCatereaseConfig();
-  const catereaseConfigured = Boolean(catereaseConfig.apiKey);
   if (!catereaseConfig.primaryFiles && String(process.env.DROPBOX_APP_KEY || '').trim() && String(process.env.DROPBOX_APP_SECRET || '').trim()) {
     const configuredMinutes = Number(process.env.DROPBOX_SYNC_INTERVAL_MINUTES);
     const intervalMinutes = Number.isFinite(configuredMinutes)
@@ -639,7 +638,7 @@ export const startServer = async () => {
 
   let catereaseSyncTimer = null;
   let catereaseStartupTimer = null;
-  if (catereaseConfigured) {
+  if (catereaseConfig.primaryFiles) {
     const configuredMinutes = Number(process.env.CATEREASE_SYNC_INTERVAL_MINUTES);
     const intervalMinutes = Number.isFinite(configuredMinutes)
       ? Math.max(5, Math.min(180, Math.trunc(configuredMinutes)))
@@ -654,11 +653,9 @@ export const startServer = async () => {
     catereaseSyncTimer = setInterval(syncCaterease, intervalMinutes * 60_000);
     catereaseSyncTimer.unref?.();
     console.log(`Caterease automatic file sync enabled every ${intervalMinutes} minutes`);
-    if (catereaseConfig.primaryFiles) {
-      console.log('Dropbox automatic discovery disabled because Caterease API is configured');
-    } else {
-      console.log('Caterease file sync is in validation mode; Dropbox automatic discovery remains enabled');
-    }
+    console.log('Dropbox automatic discovery disabled because Caterease event-file sync is enabled');
+  } else if (catereaseConfig.apiKey) {
+    console.log('Caterease event-file sync disabled; recipe API remains available and Dropbox supplies event documents');
   }
 
   let shuttingDown = false;

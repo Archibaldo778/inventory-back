@@ -67,22 +67,34 @@ test('Caterease content download returns bytes and ETag', async () => withApiKey
   } finally { global.fetch = originalFetch; }
 }));
 
-test('Caterease is always the primary file source when its API key is configured', () => {
-  const previous = process.env.CATEREASE_PRIMARY_FILES;
+test('Caterease recipes remain configured while event files require an explicit opt-in', () => {
+  const previousLegacyFlag = process.env.CATEREASE_PRIMARY_FILES;
+  const previousFilesEnabled = process.env.CATEREASE_FILES_ENABLED;
   const previousApiKey = process.env.CATEREASE_API_KEY;
   try {
     process.env.CATEREASE_API_KEY = 'cea_test';
     delete process.env.CATEREASE_PRIMARY_FILES;
-    assert.equal(getCatereaseConfig().primaryFiles, true);
+    delete process.env.CATEREASE_FILES_ENABLED;
+    assert.equal(getCatereaseConfig().primaryFiles, false);
+
+    // CATEREASE_PRIMARY_FILES is a retired flag and no longer has any effect.
     process.env.CATEREASE_PRIMARY_FILES = 'false';
+    assert.equal(getCatereaseConfig().primaryFiles, false);
+    delete process.env.CATEREASE_PRIMARY_FILES;
+
+    // Event-file sync is opt-in. The API key remains usable for recipes/menu data.
+    process.env.CATEREASE_FILES_ENABLED = 'true';
     assert.equal(getCatereaseConfig().primaryFiles, true);
-    process.env.CATEREASE_PRIMARY_FILES = 'true';
-    assert.equal(getCatereaseConfig().primaryFiles, true);
+    assert.equal(getCatereaseConfig().apiKey, 'cea_test');
+
+    delete process.env.CATEREASE_FILES_ENABLED;
     delete process.env.CATEREASE_API_KEY;
     assert.equal(getCatereaseConfig().primaryFiles, false);
   } finally {
-    if (previous === undefined) delete process.env.CATEREASE_PRIMARY_FILES;
-    else process.env.CATEREASE_PRIMARY_FILES = previous;
+    if (previousLegacyFlag === undefined) delete process.env.CATEREASE_PRIMARY_FILES;
+    else process.env.CATEREASE_PRIMARY_FILES = previousLegacyFlag;
+    if (previousFilesEnabled === undefined) delete process.env.CATEREASE_FILES_ENABLED;
+    else process.env.CATEREASE_FILES_ENABLED = previousFilesEnabled;
     if (previousApiKey === undefined) delete process.env.CATEREASE_API_KEY;
     else process.env.CATEREASE_API_KEY = previousApiKey;
   }

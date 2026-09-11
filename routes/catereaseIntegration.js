@@ -592,6 +592,9 @@ router.get('/recipes', ...requireCatereaseAdmin, async (req, res) => {
 
 router.post('/sync', ...requireCatereaseAdmin, syncRateLimit, async (_req, res) => {
   try {
+    if (!getCatereaseConfig().primaryFiles) {
+      return res.status(409).json({ error: 'Caterease file sync is disabled; Dropbox is the active document source' });
+    }
     if (syncPromise) return res.status(202).json({ ok: true, started: false, syncing: true });
     void runCatereaseFileSync().catch((error) => console.error('Caterease background sync failed:', error?.message || error));
     return res.status(202).json({ ok: true, started: true, syncing: true });

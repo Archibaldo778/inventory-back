@@ -29,6 +29,7 @@ import {
 } from '../utils/catereaseApi.js';
 import {
   catereaseFileRevision,
+  documentZoneKey,
   normalizeCatereaseEventId,
   normalizeCatereaseFile,
   normalizeCatereaseRawEventId,
@@ -264,24 +265,7 @@ const reconcileDeletedFiles = async (event, eventId, seenUids, stats) => {
   return removed.length > 0;
 };
 
-const archiveDropboxDocuments = (event) => {
-  if (!getCatereaseConfig().primaryFiles) return 0;
-  const currentDocuments = Array.isArray(event?.documents) ? event.documents : [];
-  const replaced = currentDocuments.filter((document) => (
-    String(document?.sourceProvider || '').toLowerCase() === 'dropbox'
-  ));
-  if (!replaced.length) return 0;
-  event.documentHistory = mergeEventDocumentHistory(event.documentHistory, replaced);
-  event.documents = currentDocuments.filter((document) => !replaced.includes(document));
-  return replaced.length;
-};
-
 const syncOneEvent = async (event, eventId, rawFiles, stats) => {
-  const archivedDropbox = archiveDropboxDocuments(event);
-  if (archivedDropbox) {
-    stats.archivedDropbox += archivedDropbox;
-    await event.save();
-  }
   stats.filesSeen += rawFiles.length;
   const seenUids = new Set();
   const recognizedFiles = [];
@@ -375,13 +359,24 @@ const syncOneEvent = async (event, eventId, rawFiles, stats) => {
         }
       }
       const currentDocuments = Array.isArray(event.documents) ? event.documents : [];
+      const fileZoneKey = documentZoneKey({ type: file.documentType, sourceSeries: file.sourceSeries });
       const replaced = currentDocuments.filter((document) => (
-        String(document?.sourceProvider || '') === 'caterease'
-        && (
-          String(document?.sourceSeries || '') === String(file.sourceSeries || '')
-          || seriesUids.has(String(document?.sourceId || ''))
+        (
+          String(document?.sourceProvider || '') === 'caterease'
+          && (
+            String(document?.sourceSeries || '') === String(file.sourceSeries || '')
+            || seriesUids.has(String(document?.sourceId || ''))
+          )
+        )
+        || (
+          String(document?.sourceProvider || '').toLowerCase() === 'dropbox'
+          && documentZoneKey(document) === fileZoneKey
         )
       ));
+      const replacedDropboxCount = replaced.filter((document) => (
+        String(document?.sourceProvider || '').toLowerCase() === 'dropbox'
+      )).length;
+      if (replacedDropboxCount) stats.archivedDropbox += replacedDropboxCount;
       event.documentHistory = mergeEventDocumentHistory(event.documentHistory, replaced);
       event.documents = [
         ...currentDocuments.filter((document) => !replaced.includes(document)),

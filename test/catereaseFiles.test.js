@@ -5,6 +5,7 @@ import {
   catereaseFileSeries,
   catereaseFileRevision,
   classifyCatereaseFile,
+  documentZoneKey,
   normalizeCatereaseEventId,
   normalizeCatereaseFile,
   normalizeCatereaseRawEventId,
@@ -54,6 +55,23 @@ test('Caterease revisions share a series while separate zones remain independent
   assert.equal(plan.superseded.length, 1);
   assert.equal(plan.superseded[0].uid, 101);
   assert.equal(plan.superseded[0].supersededByUid, 102);
+});
+
+test('a Caterease document only matches the Dropbox document for the same type and zone', () => {
+  const catereaseRooftopPo = { type: 'po', sourceSeries: 'caterease:E00470:po:rooftop' };
+  const dropboxRooftopPo = { type: 'po', sourceSeries: 'E00470|2026-09-01|po|rooftop' };
+  const dropboxBallroomPo = { type: 'po', sourceSeries: 'E00470|2026-09-01|po|ballroom' };
+  const dropboxRooftopKm = { type: 'kitchen_menu', sourceSeries: 'E00470|2026-09-01|kitchen_menu|rooftop' };
+
+  assert.equal(documentZoneKey(catereaseRooftopPo), documentZoneKey(dropboxRooftopPo));
+  assert.notEqual(documentZoneKey(catereaseRooftopPo), documentZoneKey(dropboxBallroomPo));
+  assert.notEqual(documentZoneKey(catereaseRooftopPo), documentZoneKey(dropboxRooftopKm));
+});
+
+test('a Dropbox document without a recognizable series never accidentally matches a Caterease file', () => {
+  const catereaseRooftopPo = { type: 'po', sourceSeries: 'caterease:E00470:po:rooftop' };
+  const dropboxLegacyFallback = { type: 'po', sourceSeries: 'abc123dropboxid' };
+  assert.notEqual(documentZoneKey(catereaseRooftopPo), documentZoneKey(dropboxLegacyFallback));
 });
 
 test('Caterease generic file names use the zone comment but ignore revision-only comments', () => {

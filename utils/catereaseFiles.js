@@ -95,3 +95,16 @@ export const catereaseFileRevision = (file = {}) => {
   const revised = file?.revisedAt ? new Date(file.revisedAt).toISOString() : '';
   return revised || String(file?.etag || '').trim() || `uid:${Number(file?.uid) || 0}`;
 };
+
+// Identifies a stored event document's "slot" (document type + zone) regardless of which
+// provider (Caterease or Dropbox) it came from, so a Dropbox document is only ever archived
+// once a matching Caterease document for the same slot is actually available — never just
+// because Caterease is configured as the primary source.
+export const documentZoneKey = (document = {}) => {
+  const type = clean(document.type);
+  const series = clean(document.sourceSeries);
+  const zone = series.includes(':') ? series.split(':').pop()
+    : series.includes('|') ? series.split('|').pop()
+    : series;
+  return `${type}:${zone}`;
+};

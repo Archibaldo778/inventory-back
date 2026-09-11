@@ -10,6 +10,7 @@
     "sync:prod-to-dev": "node scripts/sync-prod-to-dev.mjs",
     "migrate:kitchen-images": "node scripts/migrate-kitchen-image-folders.mjs",
     "migrate:board-snapshots": "node scripts/migrate-board-snapshots.mjs",
+    "restore:dropbox-documents": "node scripts/restore-archived-dropbox-documents.mjs",
     "seed:bar-inventory": "node scripts/seed-bar-inventory.mjs"
   },
   "keywords": [],

@@ -5,6 +5,7 @@ import {
   getCatereaseConfig,
   getCatereaseEventBundle,
   listCatereaseEventFiles,
+  listCatereaseEvents,
   listCatereaseHubResource,
   listCatereaseOperationalResource,
 } from '../utils/catereaseApi.js';
@@ -51,6 +52,21 @@ test('Caterease event file catalog can be listed without an event filter', async
     await listCatereaseEventFiles('');
     assert.doesNotMatch(requestedUrl, /eventId=/);
     assert.match(requestedUrl, /EvtNum/);
+  } finally { global.fetch = originalFetch; }
+}));
+
+test('Caterease event catalog resolves full EvtNum values inside a date window', async () => withApiKey(async () => {
+  const originalFetch = global.fetch;
+  let requestedUrl = '';
+  global.fetch = async (url) => {
+    requestedUrl = String(url);
+    return new Response(JSON.stringify({ data: [{ EvtNum: '00001-E000022672', EventNum: 'E22672' }], pagination: { hasMore: false } }), { status: 200 });
+  };
+  try {
+    const page = await listCatereaseEvents({ dateFrom: '2026-09-11', dateTo: '2026-09-11', fields: 'EvtNum,EventNum' });
+    assert.equal(page.data[0].EvtNum, '00001-E000022672');
+    assert.match(requestedUrl, /\/v1\/event\?/);
+    assert.match(requestedUrl, /dateFrom=2026-09-11/);
   } finally { global.fetch = originalFetch; }
 }));
 

@@ -25,6 +25,7 @@ import {
   getCatereaseConfig,
   getCatereaseEventBundle,
   listCatereaseEventFiles,
+  listCatereaseEvents,
   listCatereaseHubResource,
   listCatereaseOperationalResource,
 } from '../utils/catereaseApi.js';
@@ -168,21 +169,62 @@ const listAllOperationalRows = async (resource, eventId, eventDate = '') => {
   return rows;
 };
 
-export const fetchCatereaseOperationalSnapshot = async (eventId, eventDate = '') => {
-  const packOutPromise = listAllOperationalRows('eventrequireditem', eventId, eventDate);
-  const kitchenMenuPromise = listAllOperationalRows('foodservquery', eventId, eventDate)
+const normalizedPrintedEventNumber = (value) => {
+  const match = String(value || '').toUpperCase().match(/\bE\s*0*(\d+)\b/);
+  return match ? `E${match[1]}` : '';
+};
+
+const normalizedEventTitle = (value) => String(value || '')
+  .toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+  .replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, ' ');
+
+export const resolveCatereaseOperationalEventId = async (eventId, eventDate = '', eventTitle = '') => {
+  const requestedNumber = normalizedPrintedEventNumber(eventId);
+  if (!eventDate) return eventId;
+  const rows = [];
+  let cursor = '';
+  let pages = 0;
+  do {
+    const page = await listCatereaseEvents({
+      cursor,
+      limit: 200,
+      fields: 'EvtNum,EventNum,PartyName,Client,EvtDate',
+      dateFrom: eventDate,
+      dateTo: eventDate,
+    });
+    rows.push(...page.data);
+    if (page.pagination.hasMore && !page.pagination.nextCursor) throw new Error('Caterease event pagination cursor is missing');
+    cursor = page.pagination.hasMore ? page.pagination.nextCursor : '';
+    pages += 1;
+    if (pages > 100) throw new Error('Caterease event pagination did not finish');
+  } while (cursor);
+  const numberMatches = rows.filter((row) => (
+    requestedNumber
+    && [row?.EventNum, row?.EvtNum].some((value) => normalizedPrintedEventNumber(value) === requestedNumber)
+  ));
+  if (numberMatches.length === 1 && String(numberMatches[0]?.EvtNum || '').trim()) return String(numberMatches[0].EvtNum).trim();
+  const title = normalizedEventTitle(eventTitle);
+  const titleMatches = rows.filter((row) => title && normalizedEventTitle(row?.PartyName) === title);
+  if (titleMatches.length === 1 && String(titleMatches[0]?.EvtNum || '').trim()) return String(titleMatches[0].EvtNum).trim();
+  return eventId;
+};
+
+export const fetchCatereaseOperationalSnapshot = async (eventId, eventDate = '', eventTitle = '') => {
+  const resolvedEventId = await resolveCatereaseOperationalEventId(eventId, eventDate, eventTitle);
+  const packOutPromise = listAllOperationalRows('eventrequireditem', resolvedEventId, eventDate);
+  const kitchenMenuPromise = listAllOperationalRows('foodservquery', resolvedEventId, eventDate)
     .catch((error) => {
       if (![400, 404].includes(Number(error?.statusCode))) throw error;
-      return listAllOperationalRows('foodservusage', eventId, eventDate);
+      return listAllOperationalRows('foodservusage', resolvedEventId, eventDate);
     });
   const [packOutRows, kitchenMenuRows] = await Promise.all([packOutPromise, kitchenMenuPromise]);
-  return buildCatereaseOperationalSnapshot({ eventId, packOutRows, kitchenMenuRows });
+  return buildCatereaseOperationalSnapshot({ eventId: resolvedEventId, packOutRows, kitchenMenuRows });
 };
 
 const syncOperationalEvent = async (event) => {
   const eventId = normalizeCatereaseEventId(event?.externalId);
   if (!eventId) return { status: 'skipped', reason: 'missing_event_id' };
-  const snapshot = await fetchCatereaseOperationalSnapshot(eventId, String(event?.date || ''));
+  const snapshot = await fetchCatereaseOperationalSnapshot(eventId, String(event?.date || ''), String(event?.title || ''));
   const previousChecksum = String(event?.catereaseOperations?.checksum || '');
   event.catereaseOperations = snapshot;
   event.markModified('catereaseOperations');

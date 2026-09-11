@@ -60,6 +60,24 @@ export const listCatereaseEventFiles = async (eventId, { cursor = '', limit = 20
   };
 };
 
+export const listCatereaseEvents = async ({ cursor = '', limit = 200, fields = '', dateFrom = '', dateTo = '' } = {}) => {
+  const params = new URLSearchParams({ limit: String(Math.max(1, Math.min(200, Number(limit) || 200))) });
+  if (clean(cursor)) params.set('cursor', clean(cursor));
+  if (clean(fields)) params.set('fields', clean(fields));
+  if (clean(dateFrom)) params.set('dateFrom', clean(dateFrom));
+  if (clean(dateTo)) params.set('dateTo', clean(dateTo));
+  const response = await catereaseFetch(`/v1/event?${params.toString()}`);
+  if (!response.ok) throw await responseError(response, `Caterease event listing failed (${response.status})`);
+  const body = await response.json();
+  return {
+    data: Array.isArray(body?.data) ? body.data : [],
+    pagination: {
+      nextCursor: clean(body?.pagination?.nextCursor),
+      hasMore: Boolean(body?.pagination?.hasMore),
+    },
+  };
+};
+
 const HUB_RESOURCES = new Set([
   'location',
   'menuitem',

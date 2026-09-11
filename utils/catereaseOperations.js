@@ -259,6 +259,18 @@ const paragraph = (value, options = {}) => {
   return `<w:p><w:pPr>${align ? `<w:jc w:val="${align}"/>` : ''}<w:spacing w:before="${before}" w:after="${after}"/></w:pPr>${textRun(value, { bold, size, color })}</w:p>`;
 };
 
+const richParagraph = (runs, options = {}) => {
+  const { align = '', before = 0, after = 0 } = options;
+  return `<w:p><w:pPr>${align ? `<w:jc w:val="${align}"/>` : ''}<w:spacing w:before="${before}" w:after="${after}"/></w:pPr>${runs.map((run) => textRun(run.value, run)).join('')}</w:p>`;
+};
+
+const eventNameCell = (label, value) => ({
+  runs: [
+    { value: label, size: 18 },
+    { value: value || 'Event', bold: true, size: 32, color: 'FF0000' },
+  ],
+});
+
 const brandLogoParagraph = () => `<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="100"/></w:pPr><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="1463040" cy="636648"/><wp:docPr id="1" name="Olivier Cheng logo"/><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="1" name="logo.svg"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="rId2"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="1463040" cy="636648"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>`;
 
 const imageCell = (image, width) => {
@@ -270,7 +282,9 @@ const imageCell = (image, width) => {
 const cell = (value, { bold = false, width = 0, shading = '', align = '' } = {}) => {
   const values = Array.isArray(value) ? value : [value];
   const contents = (values.length ? values : [''])
-    .map((entry) => paragraph(entry, { bold, size: 18, after: 0, align }))
+    .map((entry) => (Array.isArray(entry?.runs)
+      ? richParagraph(entry.runs, { after: 0, align })
+      : paragraph(entry, { bold, size: 18, after: 0, align })))
     .join('');
   return `<w:tc><w:tcPr>${width ? `<w:tcW w:w="${width}" w:type="dxa"/>` : ''}${shading ? `<w:shd w:val="clear" w:fill="${shading}"/>` : ''}<w:vAlign w:val="top"/></w:tcPr>${contents}</w:tc>`;
 };
@@ -288,7 +302,7 @@ const documentTitleRow = (title) => `<w:tbl>
   <w:tblPr><w:tblW w:w="5000" w:type="pct"/><w:tblLayout w:type="fixed"/></w:tblPr>
   <w:tblGrid><w:gridCol w:w="8000"/><w:gridCol w:w="2600"/></w:tblGrid>
   <w:tr>
-    <w:tc><w:tcPr><w:tcW w:w="8000" w:type="dxa"/></w:tcPr>${paragraph(title, { bold: true, size: 36, color: 'FF0000', after: 80 })}</w:tc>
+    <w:tc><w:tcPr><w:tcW w:w="8000" w:type="dxa"/></w:tcPr>${paragraph(title, { bold: true, size: 36, after: 80 })}</w:tc>
     <w:tc><w:tcPr><w:tcW w:w="2600" w:type="dxa"/></w:tcPr>${paragraph('Revision', { bold: true, size: 28, align: 'right', after: 80 })}</w:tc>
   </w:tr>
 </w:tbl>`;
@@ -569,13 +583,13 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
     ? paragraph(printableZoneName, { bold: true, size: 36, color: 'FF0000', align: 'center', after: 120 })
     : '';
   const eventDetailsTable = table([], [
-    [`Event: ${event?.title || 'Event'}`, `Event Date: ${longDate(event?.date)}`],
+    [eventNameCell('Event: ', event?.title), `Event Date: ${longDate(event?.date)}`],
     [`Sales Rep: ${event?.meta?.salesRep || ''}`, `Event Timing: ${eventTiming}`],
     [`Guests: ${guestCount}`, `Delivery Time: ${deliveryTime}`],
     [`Event Number: ${displayedEventNumber(event?.externalId || snapshot?.eventId || '')}`, `Date PO Modified: ${new Intl.DateTimeFormat('en-US').format(new Date())}`],
   ], [5300, 5300]);
   const documentHeader = isKitchenMenu ? `${documentTitleRow(title)}${zoneHeading}${table([], [
-    [`Event Name: ${event?.title || 'Event'}`, `Event Timing: ${eventTiming}`],
+    [eventNameCell('Event Name: ', event?.title), `Event Timing: ${eventTiming}`],
     [`Date: ${longDate(event?.date)}`, `Staff Arrival on Site: ${event?.meta?.staffArrivalTime || ''}`],
     [`Guest Count: ${guestCount}`, `Sales Rep: ${event?.meta?.salesRep || ''}`],
     [`Client: ${event?.client || ''}`, `Site Contact: ${event?.meta?.siteContact || ''}`],
@@ -585,8 +599,8 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
     [`Venue Notes: ${event?.meta?.venueNotes || ''}`, `Event Number: ${displayedEventNumber(event?.externalId || snapshot?.eventId || '')}`],
     [`Allergen/Restrictions: ${event?.meta?.allergens || event?.meta?.restrictions || ''}`, ''],
   ], [5300, 5300])}` : isStaffRequest
-    ? `${paragraph(title, { bold: true, size: 36, color: 'FF0000', align: 'center', after: 120 })}${zoneHeading}${eventDetailsTable}`
-    : `${paragraph('Revision', { bold: true, size: 28, align: 'right', after: 80 })}${paragraph(title, { bold: true, size: 36, color: 'FF0000', align: 'center', after: 120 })}${zoneHeading}${eventDetailsTable}`;
+    ? `${paragraph(title, { bold: true, size: 36, align: 'center', after: 120 })}${zoneHeading}${eventDetailsTable}`
+    : `${paragraph('Revision', { bold: true, size: 28, align: 'right', after: 80 })}${paragraph(title, { bold: true, size: 36, align: 'center', after: 120 })}${zoneHeading}${eventDetailsTable}`;
   const documentFooterSections = isKitchenMenu ? kitchenStaffingSection(event) : '';
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><w:body>

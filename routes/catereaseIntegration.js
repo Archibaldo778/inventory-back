@@ -119,7 +119,7 @@ const loadMatchedDecorImages = async (snapshot) => {
 const OPERATIONAL_FIELDS = Object.freeze({
   eventrequireditem: 'ItemName,Qty,Unit,PUnit,QtyPerPUnit,FSPrepArea,FSName,RentalItem,Vendor,SEvtDate,StartTime',
   foodserv: 'ItemName,Qty,Unit,PrepArea,SubEvtNum,Category,Comment,Description,FdSvNum,ItemNum',
-  foodservquery: 'PrepArea,SubEvtNum,ItemName,Qty,Category,MenuGroup',
+  foodservquery: 'PrepArea,SubEvtNum,ItemName,Qty,Category,MenuGroup,ActGuests,GtdGuests,PlnGuests',
   foodservusage: 'PrepArea,SubEvtNum,ItemName,Qty,Category,MenuGroup',
 });
 
@@ -189,9 +189,8 @@ const syncCatereaseOperationalBarItems = async (event, snapshot) => {
   const rawItems = catereaseOperationalPackOutToBarItems(snapshot?.packOut);
   const dashboardGuestCount = dashboardEventGuestCount(event);
   const snapshotGuestCount = Number(snapshot?.guestCount);
-  const guestCount = dashboardGuestCount ?? (
-    Number.isFinite(snapshotGuestCount) && snapshotGuestCount >= 0 ? snapshotGuestCount : null
-  );
+  const hasSnapshotGuestCount = Number.isFinite(snapshotGuestCount) && snapshotGuestCount > 0;
+  const guestCount = hasSnapshotGuestCount ? snapshotGuestCount : dashboardGuestCount;
   const normalizedItems = await normalizePackoutItems(rawItems, { allowFinancials: false, guestCount });
   if (!barEvent && !rawItems.length) return { synced: false, items: 0 };
   if (!barEvent) {
@@ -203,9 +202,12 @@ const syncCatereaseOperationalBarItems = async (event, snapshot) => {
       client: String(event.client || ''),
       salesRep: String(event.managerId || ''),
       guestCount,
-      guestCountSource: dashboardGuestCount === null ? 'packout' : 'dashboard',
+      guestCountSource: hasSnapshotGuestCount ? 'packout' : 'dashboard',
       status: 'draft',
     });
+  } else if (guestCount !== null && String(barEvent.guestCountSource || '') !== 'manual') {
+    barEvent.guestCount = guestCount;
+    barEvent.guestCountSource = hasSnapshotGuestCount ? 'packout' : 'dashboard';
   }
   const existingItems = Array.isArray(barEvent.items) ? barEvent.items : [];
   const merged = runImportedBarItemMergePipeline({
@@ -232,6 +234,7 @@ const syncCatereaseOperationalBarItems = async (event, snapshot) => {
     details: {
       checksum: String(snapshot?.checksum || ''),
       barItemsVersion: CATEREASE_OPERATIONAL_BAR_ITEMS_VERSION,
+      guestCount,
       rows: rawItems.length,
       items: merged.importedItems.length,
     },

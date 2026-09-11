@@ -5,6 +5,7 @@ import JSZip from 'jszip';
 import {
   buildCatereaseOperationalSnapshot,
   buildKitchenMenuRows,
+  catereaseOperationalGuestCount,
   normalizeCatereaseKitchenMenuDishRows,
   normalizeCatereaseKitchenPackOutRows,
   normalizeCatereasePackOutRows,
@@ -164,6 +165,22 @@ test('operational snapshot keeps guest count from the Standard Food service row'
   });
   assert.equal(snapshot.guestCount, 12);
   assert.equal(snapshot.packOut.length, 0);
+});
+
+test('operational snapshot uses Caterease guest fields without a Standard Food row', () => {
+  const rows = [
+    { ItemName: 'Club Soda', Qty: 2, PlnGuests: 150, GtdGuests: 120, ActGuests: 0 },
+    { ItemName: 'Tito\'s Vodka', Qty: 4, PlnGuests: 150, GtdGuests: 120, ActGuests: 0 },
+  ];
+  const snapshot = buildCatereaseOperationalSnapshot({ eventId: 'E22672', packOutRows: rows });
+  assert.equal(snapshot.guestCount, 120);
+  assert.equal(catereaseOperationalGuestCount(rows), 120);
+});
+
+test('Caterease actual guests override planned guests and respect a larger guarantee', () => {
+  assert.equal(catereaseOperationalGuestCount([{ PlnGuests: 150, GtdGuests: 120, ActGuests: 130 }]), 130);
+  assert.equal(catereaseOperationalGuestCount([{ PlnGuests: 150, GtdGuests: 140, ActGuests: 130 }]), 140);
+  assert.equal(catereaseOperationalGuestCount([{ PlnGuests: 150, GtdGuests: 0, ActGuests: 0 }]), 150);
 });
 
 test('Caterease Kitchen Pack Out rows preserve required item details', () => {

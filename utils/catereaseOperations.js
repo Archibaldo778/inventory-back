@@ -144,6 +144,24 @@ const mergeKitchenMenuRows = (derivedRows = [], directRows = []) => {
 
 const stableRows = (rows) => [...rows].sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
 
+const maximumPositiveValue = (rows, keys) => {
+  const values = (Array.isArray(rows) ? rows : []).flatMap((row) => {
+    const value = numberOrNull(first(row, keys));
+    return value !== null && value > 0 ? [value] : [];
+  });
+  return values.length ? Math.max(...values) : null;
+};
+
+export const catereaseOperationalGuestCount = (rows = [], legacyGuestCount = null) => {
+  const actual = maximumPositiveValue(rows, ['ActGuests', 'ActualGuests']);
+  const guaranteed = maximumPositiveValue(rows, ['GtdGuests', 'GuaranteedGuests']);
+  const planned = maximumPositiveValue(rows, ['PlnGuests', 'PlannedGuests']);
+  if (actual !== null) return guaranteed !== null ? Math.max(actual, guaranteed) : actual;
+  if (guaranteed !== null) return guaranteed;
+  if (planned !== null) return planned;
+  return numberOrNull(legacyGuestCount);
+};
+
 export const buildCatereaseOperationalSnapshot = ({
   eventId,
   packOutRows = [],
@@ -156,7 +174,10 @@ export const buildCatereaseOperationalSnapshot = ({
     clean(first(row, ['ItemName', 'Name', 'Title'])).toLowerCase() === 'food'
     && clean(first(row, ['MenuGroup', 'GroupName'])).toLowerCase() === 'standard'
   ));
-  const guestCount = numberOrNull(first(guestRow, ['Qty', 'Quantity']));
+  const guestCount = catereaseOperationalGuestCount(
+    packOutRows,
+    first(guestRow, ['Qty', 'Quantity'])
+  );
   const packOut = normalizeCatereasePackOutRows(packOutRows);
   const kitchenPackOut = normalizeCatereaseKitchenPackOutRows(kitchenPackOutRows);
   const directKitchenMenu = normalizeCatereaseKitchenMenuDishRows(kitchenMenuRows);

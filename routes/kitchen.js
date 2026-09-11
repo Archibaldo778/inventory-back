@@ -11,7 +11,7 @@ import KitchenRecipe from '../models/KitchenRecipe.js';
 import { cleanupManagedImageSafely } from '../utils/managedImageCleanup.js';
 import { INVALID_IMAGE_UPLOAD_RESPONSE, isAllowedImageUpload } from '../utils/imageSignature.js';
 import { sendApiError } from '../utils/apiErrors.js';
-import { syncKitchenRecipeMatches } from '../utils/kitchenRecipeMatching.js';
+import { findKitchenRecipeCandidates, syncKitchenRecipeMatches } from '../utils/kitchenRecipeMatching.js';
 import { catereaseRichTextToPlain } from '../utils/catereaseKitchen.js';
 
 const router = Router();
@@ -316,6 +316,68 @@ router.post('/recipes/rematch', async (_req, res) => {
     return sendApiError(res, err, {
       context: 'Kitchen recipe matching failed',
       fallbackMessage: 'Failed to match kitchen recipes',
+    });
+  }
+});
+
+router.get('/:id/recipe-candidates', async (req, res) => {
+  try {
+    const item = await KitchenItem.findById(req.params.id).select('_id name catereaseRecipeId').lean();
+    if (!item) return res.status(404).json({ error: 'Dish not found' });
+    const search = sanitizeStr(req.query.search);
+    const recipes = await KitchenRecipe.find({ sourceProvider: 'caterease', sourceDeletedAt: null })
+      .select('_id name category itemType cost ingredients revisedAt inactive hidden sourceDeletedAt')
+      .lean();
+    const candidates = findKitchenRecipeCandidates(search || item.name, recipes, req.query.limit || 12)
+      .map(({ recipe, score, exact }) => ({
+        ...sanitizeRecipeOutput(recipe),
+        score,
+        exact,
+      }));
+    return res.json({ dish: item, query: search || item.name, candidates });
+  } catch (err) {
+    return sendApiError(res, err, {
+      context: 'Kitchen recipe candidates failed',
+      fallbackMessage: 'Failed to find recipe candidates',
+    });
+  }
+});
+
+router.patch('/:id/recipe-link', async (req, res) => {
+  try {
+    const recipeId = sanitizeStr(req.body?.recipeId);
+    const item = await KitchenItem.findById(req.params.id);
+    if (!item) return res.status(404).json({ error: 'Dish not found' });
+
+    if (!recipeId) {
+      item.catereaseRecipeId = null;
+      item.recipeMatchMethod = '';
+      item.recipeMatchName = '';
+      item.recipeMatchedAt = null;
+      await item.save();
+      await syncKitchenRecipeMatches();
+    } else {
+      const recipe = await KitchenRecipe.findOne({
+        _id: recipeId,
+        sourceProvider: 'caterease',
+        sourceDeletedAt: null,
+      }).select('_id name');
+      if (!recipe) return res.status(404).json({ error: 'Recipe not found' });
+      item.catereaseRecipeId = recipe._id;
+      item.recipeMatchMethod = 'manual';
+      item.recipeMatchName = sanitizeStr(recipe.name);
+      item.recipeMatchedAt = new Date();
+      await item.save();
+    }
+
+    const updated = await KitchenItem.findById(item._id)
+      .populate('catereaseRecipeId', RECIPE_SUMMARY_FIELDS)
+      .lean();
+    return res.json(sanitizeKitchenItemOutput(updated));
+  } catch (err) {
+    return sendApiError(res, err, {
+      context: 'Kitchen recipe link failed',
+      fallbackMessage: 'Failed to link recipe',
     });
   }
 });

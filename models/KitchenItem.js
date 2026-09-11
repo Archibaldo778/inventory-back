@@ -15,7 +15,7 @@ const KitchenItemSchema = new mongoose.Schema({
   needReview: { type: Boolean, default: false },
   image: { type: String, default: null },
   catereaseRecipeId: { type: mongoose.Schema.Types.ObjectId, ref: 'KitchenRecipe', default: null, index: true },
-  recipeMatchMethod: { type: String, enum: ['', 'auto_exact', 'manual'], default: '' },
+  recipeMatchMethod: { type: String, enum: ['', 'auto_exact', 'auto_canonical', 'manual'], default: '' },
   recipeMatchName: { type: String, default: '', trim: true },
   recipeMatchedAt: { type: Date, default: null },
 }, { timestamps: true });

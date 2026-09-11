@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import JSZip from 'jszip';
+import { catereaseRichTextToPlain } from './catereaseKitchen.js';
 import { buildExactRecipeMatchIndex, resolveExactRecipeMatch } from './kitchenRecipeMatching.js';
 
 const clean = (value, maxLength = 1000) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, maxLength);
@@ -99,8 +100,8 @@ export const normalizeCatereaseKitchenMenuDishRows = (rows = []) => {
       prepArea: clean(first(row, ['PrepArea', 'FSPrepArea']), 160),
       subEvent,
       category: clean(first(row, ['Category', 'FSCategory']), 160),
-      description: clean(first(row, ['Description', 'UseDesc']), 12000),
-      notes: clean(first(row, ['Comment', 'Notes']), 12000),
+      description: clean(catereaseRichTextToPlain(first(row, ['Description', 'UseDesc'])), 12000),
+      notes: clean(catereaseRichTextToPlain(first(row, ['Comment', 'Notes'])), 12000),
     });
   });
   return [...dishes.values()];
@@ -124,7 +125,8 @@ export const buildCatereaseOperationalSnapshot = ({
   const packOut = normalizeCatereasePackOutRows(packOutRows);
   const kitchenPackOut = normalizeCatereaseKitchenPackOutRows(kitchenPackOutRows);
   const directKitchenMenu = normalizeCatereaseKitchenMenuDishRows(kitchenMenuRows);
-  const kitchenMenu = directKitchenMenu.length ? directKitchenMenu : buildKitchenMenuRows(kitchenPackOut);
+  const derivedKitchenMenu = buildKitchenMenuRows(kitchenPackOut);
+  const kitchenMenu = derivedKitchenMenu.length ? derivedKitchenMenu : directKitchenMenu;
   const checksum = crypto.createHash('sha256').update(JSON.stringify({
     eventId: clean(eventId, 120),
     guestCount,
@@ -312,7 +314,10 @@ const operationalRows = (snapshot, type) => {
   if (type === 'kitchen_packout') {
     return (version >= 3 ? snapshot?.kitchenPackOut : version >= 2 ? snapshot?.kitchenMenu : snapshot?.packOut) || [];
   }
-  if (version >= 3) return snapshot?.kitchenMenu || [];
+  if (version >= 3) {
+    const derivedKitchenMenu = buildKitchenMenuRows(snapshot?.kitchenPackOut || []);
+    return derivedKitchenMenu.length ? derivedKitchenMenu : snapshot?.kitchenMenu || [];
+  }
   const legacyKitchenPackOut = (version >= 2 ? snapshot?.kitchenMenu : snapshot?.packOut) || [];
   return buildKitchenMenuRows(legacyKitchenPackOut);
 };
@@ -323,9 +328,10 @@ const kitchenMenuSections = (rows, recipes) => {
     const match = resolveExactRecipeMatch(row?.itemName, recipeIndex);
     const recipe = match.status === 'matched' ? match.recipe : null;
     const details = [row?.description, row?.notes, recipe?.description, recipe?.instructions, recipe?.notes]
-      .map((value) => clean(value, 12000))
+      .map((value) => clean(catereaseRichTextToPlain(value), 12000))
       .filter((value, index, values) => value && values.indexOf(value) === index);
-    const meta = [row?.prepArea, `${Number(row?.componentCount) || 0} component${Number(row?.componentCount) === 1 ? '' : 's'}`]
+    const componentCount = Number(row?.componentCount) || 0;
+    const meta = [row?.prepArea, componentCount > 0 ? `${componentCount} component${componentCount === 1 ? '' : 's'}` : '']
       .filter(Boolean).join(' · ');
     return `${paragraph(row?.itemName || 'Untitled dish', { bold: true, size: 24, before: 260, after: 50 })}${
       meta ? paragraph(meta, { size: 17, after: 70 }) : ''

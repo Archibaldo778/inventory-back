@@ -105,6 +105,14 @@ test('Caterease food service rows preserve Kitchen Menu dish details', () => {
   });
 });
 
+test('Caterease Kitchen Menu converts rich text fields to plain text', () => {
+  const rows = normalizeCatereaseKitchenMenuDishRows([{
+    ItemName: 'Caramel Apple',
+    Description: String.raw`{\rtf1\ansi\uc1\pard\plain\fs20 Plate cold.\par Add garnish.}`,
+  }]);
+  assert.equal(rows[0].description, 'Plate cold. Add garnish.');
+});
+
 test('operational snapshot separates Kitchen Pack Out components from Kitchen Menu dishes', () => {
   const snapshot = buildCatereaseOperationalSnapshot({
     eventId: 'E22672',
@@ -116,6 +124,19 @@ test('operational snapshot separates Kitchen Pack Out components from Kitchen Me
   assert.equal(snapshot.kitchenPackOut.length, 2);
   assert.equal(snapshot.kitchenMenu.length, 1);
   assert.equal(snapshot.kitchenMenu[0].itemName, 'Caramel Apple');
+});
+
+test('Kitchen Menu prefers dishes derived from Kitchen Pack Out over generic food service rows', () => {
+  const snapshot = buildCatereaseOperationalSnapshot({
+    eventId: 'E22672',
+    kitchenPackOutRows: [
+      { ItemName: 'Mousse', Qty: 12, FSName: 'Caramel Apple', FSPrepArea: 'Pastry' },
+      { ItemName: 'Apple center', Qty: 12, FSName: 'Caramel Apple', FSPrepArea: 'Pastry' },
+    ],
+    kitchenMenuRows: [{ ItemName: 'Passed Sweets, select 2', Description: String.raw`{\rtf1\ansi Generic group}` }],
+  });
+  assert.deepEqual(snapshot.kitchenMenu.map((row) => row.itemName), ['Caramel Apple']);
+  assert.equal(snapshot.kitchenMenu[0].componentCount, 2);
 });
 
 test('operational snapshot checksum is stable when API row order changes', () => {

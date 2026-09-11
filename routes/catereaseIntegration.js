@@ -308,18 +308,16 @@ export const fetchCatereaseOperationalSnapshot = async (eventId, eventDate = '',
     'eventrequireditem',
     listAllOperationalRows('eventrequireditem', resolvedEventId, eventDate)
   );
-  const kitchenMenuPromise = captureRows('foodserv', listAllOperationalRows('foodserv', resolvedEventId, ''));
   const packOutPromise = listAllOperationalRows('foodservquery', resolvedEventId, eventDate)
     .catch((error) => {
       if (![400, 404].includes(Number(error?.statusCode))) throw error;
       return listAllOperationalRows('foodservusage', resolvedEventId, eventDate);
     });
-  const [packOutRows, kitchenPackOutRows, kitchenMenuRows] = await Promise.all([
+  const [packOutRows, kitchenPackOutRows] = await Promise.all([
     captureRows('foodservquery', packOutPromise),
     kitchenPackOutPromise,
-    kitchenMenuPromise,
   ]);
-  if (sourceErrors.length === 3) {
+  if (sourceErrors.length === 2) {
     const error = new Error(`Caterease returned no operational sources: ${sourceErrors.map((entry) => entry.message).join('; ')}`);
     error.statusCode = sourceErrors.find((entry) => entry.status)?.status || 502;
     throw error;
@@ -328,7 +326,6 @@ export const fetchCatereaseOperationalSnapshot = async (eventId, eventDate = '',
     eventId: resolvedEventId,
     packOutRows,
     kitchenPackOutRows,
-    kitchenMenuRows,
     sourceErrors,
   });
 };

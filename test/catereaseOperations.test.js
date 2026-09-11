@@ -1,55 +1,56 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import JSZip from 'jszip';
 
 import {
   buildCatereaseOperationalSnapshot,
   normalizeCatereaseKitchenMenuRows,
   normalizeCatereasePackOutRows,
-  renderCatereaseOperationalHtml,
+  renderCatereaseOperationalDocx,
 } from '../utils/catereaseOperations.js';
 
-test('Caterease Pack Out rows preserve quantities, purchase units and station grouping', () => {
+test('Caterease Pack Out rows preserve operational grouping', () => {
   const rows = normalizeCatereasePackOutRows([{
     UID: 42,
-    ItemName: '8 Quart Chafing Dish',
+    ItemNum: 'MI-1',
+    ItemName: 'C-folds',
     Qty: 4,
     Unit: 'Each',
-    PUnit: 'Case',
-    QtyPerPUnit: 2,
-    FSPrepArea: 'Hot Line',
-    FSName: 'Supreme Buffet',
-    RentalItem: false,
+    PrepArea: 'Operations',
+    SubEvtNum: '00001-S1',
+    Category: 'Paper goods',
+    MenuGroup: 'Kitchen Equipment',
   }]);
 
   assert.deepEqual(rows[0], {
     sourceId: '42',
-    itemName: '8 Quart Chafing Dish',
+    itemId: 'MI-1',
+    itemName: 'C-folds',
     quantity: 4,
     unit: 'Each',
-    purchaseUnit: 'Case',
-    quantityPerPurchaseUnit: 2,
-    prepArea: 'Hot Line',
-    station: 'Supreme Buffet',
-    rentalItem: false,
-    vendor: '',
-    serviceDate: '',
-    startTime: '',
+    prepArea: 'Operations',
+    subEvent: '00001-S1',
+    category: 'Paper goods',
+    menuGroup: 'Kitchen Equipment',
+    notes: '',
   });
 });
 
-test('Caterease Kitchen Menu rows retain sub-event zones', () => {
+test('Caterease Kitchen Production rows preserve required item details', () => {
   const rows = normalizeCatereaseKitchenMenuRows([{
-    ItemNum: 'MI-1',
-    ItemName: 'Caramel Apple',
+    UID: 42,
+    ItemName: 'Green apple mousse',
     Qty: 120,
-    PrepArea: 'Pastry',
-    SubEvtNum: 'Rooftop',
-    Category: 'Dessert',
-    MenuGroup: 'Passed',
+    Unit: 'Each',
+    PUnit: 'Case',
+    QtyPerPUnit: 12,
+    FSPrepArea: 'Pastry',
+    FSName: 'Caramel Apple',
   }]);
-  assert.equal(rows[0].itemName, 'Caramel Apple');
-  assert.equal(rows[0].subEvent, 'Rooftop');
+  assert.equal(rows[0].itemName, 'Green apple mousse');
+  assert.equal(rows[0].station, 'Caramel Apple');
   assert.equal(rows[0].prepArea, 'Pastry');
+  assert.equal(rows[0].purchaseUnit, 'Case');
 });
 
 test('operational snapshot checksum is stable when API row order changes', () => {
@@ -58,6 +59,7 @@ test('operational snapshot checksum is stable when API row order changes', () =>
     packOutRows: [{ ItemName: 'B', Qty: 2 }, { ItemName: 'A', Qty: 1 }],
     syncedAt: new Date('2026-09-11T12:00:00Z'),
   });
+  assert.equal(first.schemaVersion, 2);
   const second = buildCatereaseOperationalSnapshot({
     eventId: 'E22672',
     packOutRows: [{ ItemName: 'A', Qty: 1 }, { ItemName: 'B', Qty: 2 }],
@@ -66,13 +68,16 @@ test('operational snapshot checksum is stable when API row order changes', () =>
   assert.equal(first.checksum, second.checksum);
 });
 
-test('generated operational HTML escapes upstream text', () => {
-  const html = renderCatereaseOperationalHtml({
+test('generated operational DOCX is a valid Word package and escapes upstream text', async () => {
+  const buffer = await renderCatereaseOperationalDocx({
     event: { title: '<Bensadoun>', date: '2026-09-11', externalId: 'E22672' },
-    snapshot: { packOut: [{ itemName: '<script>alert(1)</script>', quantity: 1, unit: 'Each', prepArea: 'Hot Line' }] },
+    snapshot: { schemaVersion: 2, packOut: [{ itemName: '<script>alert(1)</script>', quantity: 1, unit: 'Each', menuGroup: 'Kitchen Equipment' }] },
     type: 'po',
   });
-  assert.match(html, /&lt;Bensadoun&gt;/);
-  assert.doesNotMatch(html, /<script>/);
-  assert.match(html, /Hot Line/);
+  const zip = await JSZip.loadAsync(buffer);
+  const xml = await zip.file('word/document.xml').async('string');
+  assert.match(xml, /&lt;Bensadoun&gt;/);
+  assert.doesNotMatch(xml, /<script>/);
+  assert.match(xml, /KITCHEN EQUIPMENT/);
+  assert.match(xml, /PACK OUT/);
 });

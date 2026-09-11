@@ -41,7 +41,7 @@ import { nyToday } from '../utils/dropboxDocuments.js';
 import { buildCatereaseFinancialPreview, buildCatereaseKitchenCatalog } from '../utils/catereaseKitchen.js';
 import {
   buildCatereaseOperationalSnapshot,
-  renderCatereaseOperationalHtml,
+  renderCatereaseOperationalDocx,
 } from '../utils/catereaseOperations.js';
 import { syncKitchenRecipeMatches } from '../utils/kitchenRecipeMatching.js';
 
@@ -211,13 +211,13 @@ export const resolveCatereaseOperationalEventId = async (eventId, eventDate = ''
 
 export const fetchCatereaseOperationalSnapshot = async (eventId, eventDate = '', eventTitle = '') => {
   const resolvedEventId = await resolveCatereaseOperationalEventId(eventId, eventDate, eventTitle);
-  const packOutPromise = listAllOperationalRows('eventrequireditem', resolvedEventId, eventDate);
-  const kitchenMenuPromise = listAllOperationalRows('foodservquery', resolvedEventId, eventDate)
+  const kitchenProductionPromise = listAllOperationalRows('eventrequireditem', resolvedEventId, eventDate);
+  const packOutPromise = listAllOperationalRows('foodservquery', resolvedEventId, eventDate)
     .catch((error) => {
       if (![400, 404].includes(Number(error?.statusCode))) throw error;
       return listAllOperationalRows('foodservusage', resolvedEventId, eventDate);
     });
-  const [packOutRows, kitchenMenuRows] = await Promise.all([packOutPromise, kitchenMenuPromise]);
+  const [packOutRows, kitchenMenuRows] = await Promise.all([packOutPromise, kitchenProductionPromise]);
   return buildCatereaseOperationalSnapshot({ eventId: resolvedEventId, packOutRows, kitchenMenuRows });
 };
 
@@ -767,16 +767,16 @@ router.post('/operations/sync', ...requireCatereaseAdmin, syncRateLimit, async (
 router.get('/operations/events/:id/export/:type', requireAuth, async (req, res) => {
   try {
     const type = String(req.params.type || '').toLowerCase();
-    if (!['po', 'kitchen_menu'].includes(type)) return res.status(400).json({ error: 'Unknown operational document type' });
+    if (!['po', 'kitchen_production', 'kitchen_menu'].includes(type)) return res.status(400).json({ error: 'Unknown operational document type' });
     const event = await Event.findById(req.params.id).select('externalId title date catereaseOperations').lean();
     if (!event) return res.status(404).json({ error: 'Event not found' });
     if (!event.catereaseOperations) return res.status(404).json({ error: 'Caterease operational data has not been synced for this event' });
-    const html = renderCatereaseOperationalHtml({ event, snapshot: event.catereaseOperations, type });
+    const docx = await renderCatereaseOperationalDocx({ event, snapshot: event.catereaseOperations, type });
     const safeName = String(event.title || 'event').replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').slice(0, 80) || 'event';
     res.setHeader('Cache-Control', 'private, no-store');
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.setHeader('Content-Disposition', `inline; filename="${safeName}-${type === 'po' ? 'pack-out' : 'kitchen-menu'}.html"`);
-    return res.send(html);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    res.setHeader('Content-Disposition', `attachment; filename="${safeName}-${type === 'po' ? 'pack-out' : 'kitchen-production'}.docx"`);
+    return res.send(docx);
   } catch (error) {
     return sendApiError(res, error, { context: 'Caterease operational export failed', fallbackMessage: 'Failed to generate Caterease operational document' });
   }

@@ -48,6 +48,7 @@ import {
   packOutRenderedItemNames,
   renderCatereaseOperationalDocx,
 } from '../utils/catereaseOperations.js';
+import { catereasePackOutTemplate, catereasePackOutTemplateRows } from '../utils/catereasePackOutTemplates.js';
 import { normalizeKitchenRecipeName, syncKitchenRecipeMatches } from '../utils/kitchenRecipeMatching.js';
 import {
   cloudinaryWordThumbnailUrl,
@@ -88,8 +89,8 @@ const loadAuthorizedOperationalEvent = async (req, res) => {
   }
   return event;
 };
-const loadMatchedDecorImages = async (snapshot) => {
-  const requestedNames = new Map(packOutRenderedItemNames(snapshot?.packOut).map((itemName) => (
+const loadMatchedDecorImages = async (snapshot, rows = snapshot?.packOut) => {
+  const requestedNames = new Map(packOutRenderedItemNames(rows, false).map((itemName) => (
     [normalizeKitchenRecipeName(itemName), itemName]
   )).filter(([key]) => key));
   if (!requestedNames.size) return [];
@@ -117,7 +118,7 @@ const loadMatchedDecorImages = async (snapshot) => {
 };
 
 const OPERATIONAL_FIELDS = Object.freeze({
-  eventrequireditem: 'UID,ItemName,OTFItemName,Qty,Unit,PUnit,QtyPerPUnit,FSPrepArea,FSName,RentalItem,Vendor,SEDescription,SEvtDate,StartTime',
+  eventrequireditem: 'UID,ItemName,OTFItemName,Qty,Unit,PUnit,QtyPerPUnit,FSPrepArea,FSName,FSType,Category,RentalItem,Vendor,SEDescription,SEvtDate,StartTime',
   foodserv: 'ItemName,Qty,Unit,PrepArea,SubEvtNum,Category,Comment,Description,FdSvNum,ItemNum',
   foodservquery: 'FdSvNum,ItemNum,PrepArea,SubEvtNum,SEDescription,ItemName,Qty,Unit,Category,FSCategory,MenuGroup,ActGuests,GtdGuests,PlnGuests',
   foodservusage: 'PrepArea,SubEvtNum,ItemName,Qty,Category,MenuGroup',
@@ -187,7 +188,7 @@ const syncCatereaseOperationalBarItems = async (event, snapshot) => {
   if (hasAppliedCatereaseOperationalChecksum(barEvent, snapshot?.checksum)) {
     return { synced: false, items: 0, reason: 'unchanged' };
   }
-  const rawItems = catereaseOperationalPackOutToBarItems(snapshot?.packOut);
+  const rawItems = catereaseOperationalPackOutToBarItems(snapshot?.requiredItems || snapshot?.packOut);
   const dashboardGuestCount = dashboardEventGuestCount(event);
   const snapshotGuestCount = Number(snapshot?.guestCount);
   const hasSnapshotGuestCount = Number.isFinite(snapshotGuestCount) && snapshotGuestCount > 0;
@@ -280,12 +281,13 @@ const listAllOperationalRows = async (resource, eventId, eventDate = '') => {
   let cursor = '';
   let pages = 0;
   do {
+    const supportsDateWindow = ['eventrequireditem', 'foodservquery', 'foodservusage'].includes(resource);
     const page = await listCatereaseOperationalResource(resource, eventId, {
       cursor,
       limit: 200,
       fields: OPERATIONAL_FIELDS[resource],
-      dateFrom: eventDate,
-      dateTo: eventDate,
+      dateFrom: supportsDateWindow ? eventDate : '',
+      dateTo: supportsDateWindow ? eventDate : '',
     });
     rows.push(...page.data);
     if (page.pagination.hasMore && !page.pagination.nextCursor) throw new Error(`Caterease ${resource} pagination cursor is missing`);
@@ -359,13 +361,13 @@ export const fetchCatereaseOperationalSnapshot = async (eventId, eventDate = '',
     'shift',
     listAllOperationalRows('shift', resolvedEventId)
   );
-  const packOutPromise = listAllOperationalRows('foodservquery', resolvedEventId, eventDate)
+  const packOutPromise = listAllOperationalRows('foodserv', resolvedEventId, eventDate)
     .catch((error) => {
       if (![400, 404].includes(Number(error?.statusCode))) throw error;
       return listAllOperationalRows('foodservusage', resolvedEventId, eventDate);
     });
   const [packOutRows, kitchenPackOutRows, staffRequestRows] = await Promise.all([
-    captureRows('foodservquery', packOutPromise),
+    captureRows('foodserv', packOutPromise),
     kitchenPackOutPromise,
     staffRequestPromise,
   ]);
@@ -392,7 +394,9 @@ const syncOperationalEvent = async (event) => {
   event.catereaseOperations = snapshot;
   event.markModified('catereaseOperations');
   await event.save();
-  const barSync = await syncCatereaseOperationalBarItems(event, snapshot);
+  const barSync = getCatereaseConfig().primaryFiles
+    ? await syncCatereaseOperationalBarItems(event, snapshot)
+    : { synced: false, items: 0, reason: 'dropbox_primary' };
   return {
     status: previousChecksum === snapshot.checksum ? 'unchanged' : 'updated',
     eventId,
@@ -952,13 +956,19 @@ router.get('/operations/events/:id/export/:type', requireAuth, async (req, res) 
     const event = await loadAuthorizedOperationalEvent(req, res);
     if (!event) return undefined;
     if (!event.catereaseOperations) return res.status(404).json({ error: 'Caterease operational data has not been synced for this event' });
+    const templateKey = String(req.query.template || '').trim();
+    const template = templateKey ? catereasePackOutTemplate(templateKey) : null;
+    if (templateKey && (!template || template.documentType !== type)) return res.status(400).json({ error: 'Unknown Pack Out template' });
     const recipes = type === 'annotated_kitchen_menu'
       ? await KitchenRecipe.find({ sourceProvider: 'caterease', sourceDeletedAt: null })
         .select('name description instructions notes prepArea ingredients inactive hidden revisedAt updatedAt')
         .lean()
       : [];
     const brandLogoSvg = await loadBrandLogoSvg();
-    const decorImages = type === 'po' ? await loadMatchedDecorImages(event.catereaseOperations) : [];
+    const templateRows = template
+      ? catereasePackOutTemplateRows(event.catereaseOperations.requiredItems || event.catereaseOperations.kitchenPackOut || [], template.key)
+      : undefined;
+    const decorImages = type === 'po' ? await loadMatchedDecorImages(event.catereaseOperations, templateRows) : [];
     const zoneName = String(req.query.zoneName || '');
     const docx = await renderCatereaseOperationalDocx({
       event,
@@ -969,11 +979,14 @@ router.get('/operations/events/:id/export/:type', requireAuth, async (req, res) 
       decorImages,
       zoneKey: String(req.query.zone || ''),
       zoneName,
+      templateKey,
     });
     const safeTitle = String(event.title || 'Event').replace(/[<>:"/\\|?*\u0000-\u001F]/g, '').replace(/\s+/g, ' ').trim().slice(0, 100) || 'Event';
     const dateMatch = String(event.date || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
     const datePrefix = dateMatch ? `${dateMatch[2]}-${dateMatch[3]}-${dateMatch[1].slice(-2)}` : '';
-    const documentCode = type === 'po' ? 'PO' : type === 'kitchen_packout' ? 'KPO' : type === 'staff_request' ? 'Staff Request' : type === 'annotated_kitchen_menu' ? 'AKM' : 'KM';
+    const documentCode = template
+      ? (template.key === 'pack_out' ? 'PO' : template.key === 'kitchen_pack_out' ? 'KPO' : template.label)
+      : type === 'po' ? 'PO' : type === 'kitchen_packout' ? 'KPO' : type === 'staff_request' ? 'Staff Request' : type === 'annotated_kitchen_menu' ? 'AKM' : 'KM';
     const safeZone = String(req.query.fileZoneName || '').replace(/[<>:"/\\|?*\u0000-\u001F]/g, '').replace(/\s+/g, ' ').trim().slice(0, 80);
     const fileName = [datePrefix, safeTitle, safeZone.toLowerCase() === 'main' ? '' : safeZone, documentCode].filter(Boolean).join('_');
     res.setHeader('Cache-Control', 'private, no-store');

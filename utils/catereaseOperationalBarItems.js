@@ -1,7 +1,7 @@
 import { classifyRecognizedSection } from './barPackoutRecognition.js';
 
 const clean = (value) => String(value ?? '').trim();
-export const CATEREASE_OPERATIONAL_BAR_ITEMS_VERSION = 3;
+export const CATEREASE_OPERATIONAL_BAR_ITEMS_VERSION = 4;
 
 const normalizedQuantity = (value) => {
   if (value === null || value === undefined || clean(value) === '') return null;
@@ -18,7 +18,7 @@ export const catereaseOperationalPackOutToBarItems = (rows) => (
     return [{
       id: `caterease-operation:${clean(row?.sourceId) || index + 1}`,
       name,
-      section: clean(row?.menuGroup || row?.category),
+      section: clean(row?.menuGroup || row?.category || row?.station || row?.prepArea),
       scope,
       includedByDefault: scope === 'alcohol' || scope === 'bar_support',
       quantity,

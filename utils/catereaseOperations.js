@@ -2,6 +2,11 @@ import crypto from 'node:crypto';
 import JSZip from 'jszip';
 import { catereaseRichTextToPlain } from './catereaseKitchen.js';
 import { buildExactRecipeMatchIndex, resolveExactRecipeMatch } from './kitchenRecipeMatching.js';
+import {
+  buildCatereasePackOutTemplateSummaries,
+  catereasePackOutTemplate,
+  catereasePackOutTemplateRows,
+} from './catereasePackOutTemplates.js';
 
 const clean = (value, maxLength = 1000) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, maxLength);
 const numberOrNull = (value) => {
@@ -50,6 +55,8 @@ export const normalizeCatereaseKitchenPackOutRows = (rows = []) => (Array.isArra
     quantityPerPurchaseUnit: numberOrNull(first(row, ['QtyPerPUnit', 'PUnitQty'])),
     prepArea: clean(first(row, ['FSPrepArea', 'PrepArea']), 160),
     station: clean(first(row, ['FSName', 'FoodServiceName']), 240),
+    category: clean(first(row, ['Category']), 160),
+    fsType: clean(first(row, ['FSType', 'FoodServiceType']), 160),
     subEvent: clean(first(row, ['SubEvtNum', 'SubEvent']), 120),
     zoneName: clean(first(row, ['SEDescription', 'Room', 'SubEventName']), 200),
     rentalItem: booleanValue(first(row, ['RentalItem', 'IsRental'])),
@@ -207,6 +214,7 @@ export const buildCatereaseOperationalSnapshot = ({
   );
   const packOut = normalizeCatereasePackOutRows(packOutRows);
   const kitchenPackOut = normalizeCatereaseKitchenPackOutRows(kitchenPackOutRows);
+  const packOutTemplates = buildCatereasePackOutTemplateSummaries(kitchenPackOut);
   const directKitchenMenu = normalizeCatereaseKitchenMenuDishRows(kitchenMenuRows);
   const derivedKitchenMenu = buildKitchenMenuRows(kitchenPackOut);
   const kitchenMenu = derivedKitchenMenu.length
@@ -228,15 +236,19 @@ export const buildCatereaseOperationalSnapshot = ({
     kitchenPackOut: stableRows(kitchenPackOut),
     kitchenMenu: stableRows(kitchenMenu),
     staffRequest: stableRows(staffRequest),
+    packOutTemplates,
   })).digest('hex');
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     eventId: clean(eventId, 120),
     syncedAt,
     checksum,
     guestCount,
     packOut,
     kitchenPackOut,
+    requiredItems: kitchenPackOut,
+    foodService: packOut,
+    packOutTemplates,
     kitchenMenu,
     staffRequest,
     sourceErrors: (Array.isArray(sourceErrors) ? sourceErrors : []).slice(0, 3),
@@ -456,11 +468,15 @@ const groupedRows = (rows, groupSelector) => {
 
 export const catereaseOperationalZoneKey = (row) => clean(row?.zoneName || row?.subEvent, 200).toLowerCase();
 
-const operationalRows = (snapshot, type, zoneKey = '') => {
+const operationalRows = (snapshot, type, zoneKey = '', templateKey = '') => {
   const version = Number(snapshot?.schemaVersion) || 1;
   let rows;
-  if (type === 'po') rows = (version >= 2 ? snapshot?.packOut : snapshot?.kitchenMenu) || [];
-  if (type === 'kitchen_packout') {
+  const template = catereasePackOutTemplate(templateKey);
+  if (template && template.documentType === type) {
+    rows = catereasePackOutTemplateRows(snapshot?.requiredItems || snapshot?.kitchenPackOut || [], template.key);
+  }
+  if (!template && type === 'po') rows = (version >= 2 ? snapshot?.packOut : snapshot?.kitchenMenu) || [];
+  if (!template && type === 'kitchen_packout') {
     rows = (version >= 3 ? snapshot?.kitchenPackOut : version >= 2 ? snapshot?.kitchenMenu : snapshot?.packOut) || [];
   }
   if (type === 'staff_request') rows = snapshot?.staffRequest || [];
@@ -546,28 +562,33 @@ const kitchenStaffingSection = (event) => {
   }`;
 };
 
-const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = false, decorImages = [], includePackOutTemplate = true, zoneKey = '', zoneName = '' }) => {
+const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = false, decorImages = [], includePackOutTemplate = true, zoneKey = '', zoneName = '', templateKey = '' }) => {
   const isKitchenPackOut = type === 'kitchen_packout';
   const isStaffRequest = type === 'staff_request';
   const isKitchenMenu = ['kitchen_menu', 'annotated_kitchen_menu'].includes(type);
   const isAnnotatedKitchenMenu = type === 'annotated_kitchen_menu';
-  const rows = operationalRows(snapshot, type, zoneKey);
-  const title = isAnnotatedKitchenMenu ? 'ANNOTATED KITCHEN MENU' : isKitchenMenu ? 'KITCHEN MENU' : isKitchenPackOut ? 'KITCHEN PACK OUT' : isStaffRequest ? 'STAFF REQUEST' : 'PACK OUT';
+  const template = catereasePackOutTemplate(templateKey);
+  const rows = operationalRows(snapshot, type, zoneKey, templateKey);
+  const title = template?.label?.toUpperCase() || (isAnnotatedKitchenMenu ? 'ANNOTATED KITCHEN MENU' : isKitchenMenu ? 'KITCHEN MENU' : isKitchenPackOut ? 'KITCHEN PACK OUT' : isStaffRequest ? 'STAFF REQUEST' : 'PACK OUT');
   const groups = groupedRows(rows, (row) => (
-    isKitchenPackOut
-      ? row.station || row.prepArea
+    template?.groupBy?.length
+      ? template.groupBy.map((field) => row?.[field]).filter(Boolean).join(' / ')
+      : template
+        ? 'Required Items'
+        : isKitchenPackOut
+          ? row.station || row.prepArea
       : row.menuGroup || row.category || row.prepArea
   ));
   const sections = isKitchenMenu ? kitchenMenuSections(rows, recipes, isAnnotatedKitchenMenu) : isStaffRequest
     ? table(['#', 'Position', 'Start', 'End', 'Uniform', 'Comments'], rows.map((row) => [
       formatQuantity(row.required), row.position, row.startTime, row.endTime, row.uniform, row.comments,
     ]), [700, 2200, 1300, 1300, 2600, 2700])
-    : isKitchenPackOut ? catereasePackOutTable(new Map([...groups.entries()].map(([group, values]) => [
+    : (template || isKitchenPackOut) ? catereasePackOutTable(new Map([...groups.entries()].map(([group, values]) => [
       group,
       values.map((row) => ({
         itemName: row.itemName,
         quantity: row.quantity,
-        notes: [row.unit, row.prepArea].filter(Boolean).join(' · '),
+        notes: [row.unit, template ? row.vendor : row.prepArea].filter(Boolean).join(' · '),
       })),
     ]))) : packOutTable(rows, decorImages, includePackOutTemplate);
   const parsedEventGuestCount = Number(event?.meta?.guestCount);
@@ -622,6 +643,7 @@ export const renderCatereaseOperationalDocx = async ({
   includePackOutTemplate = true,
   zoneKey = '',
   zoneName = '',
+  templateKey = '',
 }) => {
   const includeBrandLogo = Buffer.isBuffer(brandLogoSvg) && brandLogoSvg.length > 0;
   const embeddedDecorImages = (Array.isArray(decorImages) ? decorImages : [])
@@ -647,6 +669,7 @@ export const renderCatereaseOperationalDocx = async ({
     includePackOutTemplate,
     zoneKey,
     zoneName,
+    templateKey,
   }));
   word.file('styles.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:rPr><w:rFonts w:ascii="Avenir Medium" w:hAnsi="Avenir Medium"/><w:sz w:val="20"/></w:rPr></w:style></w:styles>`);
   if (includeBrandLogo) word.folder('media').file('logo.svg', brandLogoSvg);

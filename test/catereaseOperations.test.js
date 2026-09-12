@@ -19,6 +19,28 @@ import {
   hasAppliedCatereaseOperationalChecksum,
 } from '../utils/catereaseOperationalBarItems.js';
 import { runImportedBarItemMergePipeline } from '../utils/barManualItems.js';
+import {
+  buildCatereasePackOutTemplateSummaries,
+  catereasePackOutTemplateRows,
+} from '../utils/catereasePackOutTemplates.js';
+
+test('Caterease Pack Out templates reproduce the five location grouping rules', () => {
+  const rows = normalizeCatereaseKitchenPackOutRows([
+    { UID: '1', ItemName: 'Chafing Dish', Qty: 2, FSType: 'Equipment', Category: 'Hot', FSName: 'Buffet', FSPrepArea: 'Hot Line' },
+    { UID: '2', ItemName: 'Bread', Qty: 12, FSType: 'Food', Category: 'Bakery', FSName: 'Bread Service', FSPrepArea: 'Pantry' },
+  ]);
+  const summaries = buildCatereasePackOutTemplateSummaries(rows);
+  assert.deepEqual(summaries.map(({ key, rowCount }) => [key, rowCount]), [
+    ['kitchen_pack_out', 2],
+    ['pack_out', 1],
+    ['kitchen_pack_out_testing', 2],
+    ['test_kitchen_pack_out', 2],
+    ['required_items', 2],
+  ]);
+  assert.deepEqual(catereasePackOutTemplateRows(rows, 'pack_out').map((row) => row.itemName), ['Chafing Dish']);
+  assert.equal(rows[0].fsType, 'Equipment');
+  assert.equal(rows[0].category, 'Hot');
+});
 
 test('Caterease operational Pack Out rows map to recognized bar items', () => {
   const [item] = catereaseOperationalPackOutToBarItems([{
@@ -319,6 +341,28 @@ test('Kitchen Pack Out uses the Caterease PO table layout', async () => {
   assert.match(xml, />Each · Kitchen</);
 });
 
+test('operational DOCX applies a selected Caterease Pack Out template', async () => {
+  const snapshot = buildCatereaseOperationalSnapshot({
+    eventId: 'E22672',
+    kitchenPackOutRows: [
+      { ItemName: 'Chafing Dish', Qty: 2, Unit: 'Each', FSType: 'Equipment', FSName: 'Buffet' },
+      { ItemName: 'Bread', Qty: 12, Unit: 'Each', FSType: 'Food', FSName: 'Bread Service' },
+    ],
+  });
+  const buffer = await renderCatereaseOperationalDocx({
+    event: { title: 'Dinner', date: '2026-09-11', externalId: 'E22672', meta: {} },
+    snapshot,
+    type: 'po',
+    templateKey: 'pack_out',
+  });
+  const zip = await JSZip.loadAsync(buffer);
+  const xml = await zip.file('word/document.xml').async('string');
+  assert.match(xml, />PACK OUT</);
+  assert.match(xml, />BUFFET</);
+  assert.match(xml, /Chafing Dish/);
+  assert.doesNotMatch(xml, />Bread</);
+});
+
 test('Staff Request DOCX is generated from Caterease shifts', async () => {
   const snapshot = buildCatereaseOperationalSnapshot({
     eventId: 'E22672',
@@ -426,7 +470,7 @@ test('operational snapshot checksum is stable when API row order changes', () =>
     packOutRows: [{ ItemName: 'B', Qty: 2 }, { ItemName: 'A', Qty: 1 }],
     syncedAt: new Date('2026-09-11T12:00:00Z'),
   });
-  assert.equal(first.schemaVersion, 4);
+  assert.equal(first.schemaVersion, 5);
   const second = buildCatereaseOperationalSnapshot({
     eventId: 'E22672',
     packOutRows: [{ ItemName: 'A', Qty: 1 }, { ItemName: 'B', Qty: 2 }],

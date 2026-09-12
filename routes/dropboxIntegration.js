@@ -275,7 +275,7 @@ const dashboardEventGuestCount = (event) => {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 };
 
-const syncDropboxBarItems = async (event) => {
+const syncDropboxBarItems = async (event, { force = false } = {}) => {
   const sourceDocuments = (Array.isArray(event?.documents) ? event.documents : [])
     .filter((document) => String(document?.sourceProvider || '') === 'dropbox');
   const rawItems = sourceDocuments.flatMap((document) => (
@@ -289,7 +289,7 @@ const syncDropboxBarItems = async (event) => {
   const normalizedItems = await normalizePackoutItems(rawItems, { allowFinancials: false, guestCount });
   let barEvent = await BarEvent.findOne({ linkedEventId: event._id });
   const sourceChecksum = buildDropboxBarSourceChecksum(sourceDocuments);
-  if (barEvent && hasAppliedDropboxBarSourceChecksum(barEvent, sourceChecksum)) return false;
+  if (!force && barEvent && hasAppliedDropboxBarSourceChecksum(barEvent, sourceChecksum)) return false;
   if (!rawItems.length && !barEvent) return false;
   if (!barEvent) {
     barEvent = new BarEvent({
@@ -833,6 +833,29 @@ router.post('/sync', ...requireDropboxAdmin, syncRateLimit, async (_req, res) =>
     return res.status(202).json({ ok: true, started: true, syncing: true });
   } catch (error) {
     return sendApiError(res, error, { context: 'Dropbox sync failed', defaultStatus: 502, fallbackMessage: 'Dropbox sync failed' });
+  }
+});
+
+router.post('/events/:eventId/rebuild-bar', ...requireDropboxAdmin, async (req, res) => {
+  try {
+    if (getCatereaseConfig().operationalSyncEnabled) {
+      return res.status(409).json({ error: 'Disable CATEREASE_OPERATIONAL_SYNC_ENABLED before rebuilding Bar Operations from Dropbox' });
+    }
+    const event = await Event.findById(req.params.eventId)
+      .select('externalId title date client managerId meta documents');
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    const sourceDocuments = (Array.isArray(event.documents) ? event.documents : [])
+      .filter((document) => String(document?.sourceProvider || '') === 'dropbox');
+    if (!sourceDocuments.length) return res.status(409).json({ error: 'This event has no current Dropbox documents' });
+    const sourceItems = sourceDocuments.reduce(
+      (total, document) => total + (Array.isArray(document?.barItems) ? document.barItems.length : 0),
+      0
+    );
+    await syncDropboxBarItems(event, { force: true });
+    clearApiCacheGroups('events', 'bar');
+    return res.json({ ok: true, documents: sourceDocuments.length, sourceItems });
+  } catch (error) {
+    return sendApiError(res, error, { context: 'Dropbox bar rebuild failed', fallbackMessage: 'Failed to rebuild Bar Operations from Dropbox' });
   }
 });
 

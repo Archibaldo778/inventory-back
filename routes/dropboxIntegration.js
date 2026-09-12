@@ -41,7 +41,7 @@ import {
   shouldReplaceDropboxEventDocument,
 } from '../utils/dropboxDocuments.js';
 
-const DROPBOX_CONTENT_PARSER_VERSION = 3;
+const DROPBOX_CONTENT_PARSER_VERSION = 4;
 
 const router = Router();
 const syncRateLimit = createMemoryRateLimiter({ windowMs: 10 * 60 * 1000, max: 8, message: 'Too many Dropbox sync requests' });

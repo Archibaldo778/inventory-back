@@ -557,9 +557,15 @@ export const runDropboxDiscoverySync = async () => {
       const preexistingAttachments = integration.namespaceId
         ? await attachDiscoveredDropboxDocuments(integration.namespaceId)
         : { attached: 0, unchanged: 0, review: 0, failed: 0 };
+      // Rebuild every current/future BarEvent from documents already stored on
+      // its dashboard event before making any remote Dropbox request. This
+      // repairs events last overwritten by another source even when Dropbox is
+      // temporarily unavailable.
+      const preexistingBarRebuild = await resyncCurrentDropboxBarItems();
       syncProgress = {
         ...syncProgress,
         attached: preexistingAttachments.attached,
+        barRebuild: preexistingBarRebuild,
         phase: 'connecting',
       };
       const accessToken = await refreshDropboxAccessToken(decryptDropboxSecret(integration.refreshToken));
@@ -713,7 +719,12 @@ export const runDropboxDiscoverySync = async () => {
       stats.attachmentUnchanged = preexistingAttachments.unchanged + directAttachments.unchanged + attachments.unchanged;
       stats.attachmentReview = preexistingAttachments.review + directAttachments.review + attachments.review;
       stats.attachmentFailed = preexistingAttachments.failed + directAttachments.failed + attachments.failed;
-      stats.barRebuild = barRebuild;
+      stats.barRebuild = {
+        events: Math.max(preexistingBarRebuild.events, barRebuild.events),
+        synced: preexistingBarRebuild.synced + barRebuild.synced,
+        unchanged: barRebuild.unchanged,
+        failed: preexistingBarRebuild.failed + barRebuild.failed,
+      };
       integration.cursor = latestCursor;
       integration.lastSyncCompletedAt = new Date();
       integration.lastSyncSummary = stats;

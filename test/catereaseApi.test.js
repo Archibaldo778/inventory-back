@@ -88,6 +88,7 @@ test('Caterease recipes remain configured while event files require an explicit 
   const previousLegacyFlag = process.env.CATEREASE_PRIMARY_FILES;
   const previousFilesEnabled = process.env.CATEREASE_FILES_ENABLED;
   const previousApiKey = process.env.CATEREASE_API_KEY;
+  const previousEventDocumentSource = process.env.EVENT_DOCUMENT_SOURCE;
   try {
     process.env.CATEREASE_API_KEY = 'cea_test';
     delete process.env.CATEREASE_PRIMARY_FILES;
@@ -101,6 +102,7 @@ test('Caterease recipes remain configured while event files require an explicit 
 
     // Event-file sync is opt-in. The API key remains usable for recipes/menu data.
     process.env.CATEREASE_FILES_ENABLED = 'true';
+    process.env.EVENT_DOCUMENT_SOURCE = 'caterease';
     assert.equal(getCatereaseConfig().primaryFiles, true);
     assert.equal(getCatereaseConfig().apiKey, 'cea_test');
 
@@ -114,18 +116,22 @@ test('Caterease recipes remain configured while event files require an explicit 
     else process.env.CATEREASE_FILES_ENABLED = previousFilesEnabled;
     if (previousApiKey === undefined) delete process.env.CATEREASE_API_KEY;
     else process.env.CATEREASE_API_KEY = previousApiKey;
+    if (previousEventDocumentSource === undefined) delete process.env.EVENT_DOCUMENT_SOURCE;
+    else process.env.EVENT_DOCUMENT_SOURCE = previousEventDocumentSource;
   }
 });
 
 test('Caterease operational sync requires its own explicit opt-in', () => {
   const previousApiKey = process.env.CATEREASE_API_KEY;
   const previousOperationalEnabled = process.env.CATEREASE_OPERATIONAL_SYNC_ENABLED;
+  const previousEventDocumentSource = process.env.EVENT_DOCUMENT_SOURCE;
   try {
     process.env.CATEREASE_API_KEY = 'cea_test';
     delete process.env.CATEREASE_OPERATIONAL_SYNC_ENABLED;
     assert.equal(getCatereaseConfig().operationalSyncEnabled, false);
 
     process.env.CATEREASE_OPERATIONAL_SYNC_ENABLED = 'true';
+    process.env.EVENT_DOCUMENT_SOURCE = 'caterease';
     assert.equal(getCatereaseConfig().operationalSyncEnabled, true);
 
     delete process.env.CATEREASE_API_KEY;
@@ -135,6 +141,34 @@ test('Caterease operational sync requires its own explicit opt-in', () => {
     else process.env.CATEREASE_API_KEY = previousApiKey;
     if (previousOperationalEnabled === undefined) delete process.env.CATEREASE_OPERATIONAL_SYNC_ENABLED;
     else process.env.CATEREASE_OPERATIONAL_SYNC_ENABLED = previousOperationalEnabled;
+    if (previousEventDocumentSource === undefined) delete process.env.EVENT_DOCUMENT_SOURCE;
+    else process.env.EVENT_DOCUMENT_SOURCE = previousEventDocumentSource;
+  }
+});
+
+test('Dropbox remains the event source unless Caterease source mode is explicitly selected', () => {
+  const previousApiKey = process.env.CATEREASE_API_KEY;
+  const previousFilesEnabled = process.env.CATEREASE_FILES_ENABLED;
+  const previousOperationalEnabled = process.env.CATEREASE_OPERATIONAL_SYNC_ENABLED;
+  const previousEventDocumentSource = process.env.EVENT_DOCUMENT_SOURCE;
+  try {
+    process.env.CATEREASE_API_KEY = 'cea_test';
+    process.env.CATEREASE_FILES_ENABLED = 'true';
+    process.env.CATEREASE_OPERATIONAL_SYNC_ENABLED = 'true';
+    delete process.env.EVENT_DOCUMENT_SOURCE;
+    const config = getCatereaseConfig();
+    assert.equal(config.eventDocumentSource, 'dropbox');
+    assert.equal(config.primaryFiles, false);
+    assert.equal(config.operationalSyncEnabled, false);
+  } finally {
+    if (previousApiKey === undefined) delete process.env.CATEREASE_API_KEY;
+    else process.env.CATEREASE_API_KEY = previousApiKey;
+    if (previousFilesEnabled === undefined) delete process.env.CATEREASE_FILES_ENABLED;
+    else process.env.CATEREASE_FILES_ENABLED = previousFilesEnabled;
+    if (previousOperationalEnabled === undefined) delete process.env.CATEREASE_OPERATIONAL_SYNC_ENABLED;
+    else process.env.CATEREASE_OPERATIONAL_SYNC_ENABLED = previousOperationalEnabled;
+    if (previousEventDocumentSource === undefined) delete process.env.EVENT_DOCUMENT_SOURCE;
+    else process.env.EVENT_DOCUMENT_SOURCE = previousEventDocumentSource;
   }
 });
 

@@ -12,6 +12,10 @@ import { readDropboxDocxMetadata } from '../utils/dropboxDocxMetadata.js';
 import {
   runImportedBarItemMergePipeline,
 } from '../utils/barManualItems.js';
+import {
+  buildDropboxBarSourceChecksum,
+  hasAppliedDropboxBarSourceChecksum,
+} from '../utils/dropboxBarSync.js';
 import { normalizePackoutItems } from './bar.js';
 import { getCatereaseConfig } from '../utils/catereaseApi.js';
 import {
@@ -284,6 +288,8 @@ const syncDropboxBarItems = async (event) => {
   const guestCount = dashboardEventGuestCount(event);
   const normalizedItems = await normalizePackoutItems(rawItems, { allowFinancials: false, guestCount });
   let barEvent = await BarEvent.findOne({ linkedEventId: event._id });
+  const sourceChecksum = buildDropboxBarSourceChecksum(sourceDocuments);
+  if (barEvent && hasAppliedDropboxBarSourceChecksum(barEvent, sourceChecksum)) return false;
   if (!rawItems.length && !barEvent) return false;
   if (!barEvent) {
     barEvent = new BarEvent({
@@ -320,10 +326,30 @@ const syncDropboxBarItems = async (event) => {
     action: 'dropbox_documents_synced',
     username: 'Dropbox automatic sync',
     at: new Date(),
-    details: { documents: sourceDocuments.length, items: merged.importedItems.length },
+    details: { documents: sourceDocuments.length, items: merged.importedItems.length, checksum: sourceChecksum },
   }].slice(-200);
   await barEvent.save();
   return true;
+};
+
+const resyncCurrentDropboxBarItems = async () => {
+  const events = await Event.find({
+    date: { $gte: nyToday() },
+    documents: { $elemMatch: { sourceProvider: 'dropbox' } },
+  }).select('externalId title date client managerId meta documents');
+  let synced = 0;
+  let unchanged = 0;
+  let failed = 0;
+  for (const event of events) {
+    try {
+      if (await syncDropboxBarItems(event)) synced += 1;
+      else unchanged += 1;
+    } catch (error) {
+      failed += 1;
+      console.error(`Dropbox bar rebuild failed for ${event._id}:`, error?.message || error);
+    }
+  }
+  return { events: events.length, synced, unchanged, failed };
 };
 
 const attachDiscoveredDropboxDocuments = async (namespaceId) => {
@@ -682,10 +708,12 @@ export const runDropboxDiscoverySync = async () => {
       stats.contentInspectionFailed = inspected.failed;
       await reconcileDropboxRevisions(root.namespaceId);
       const attachments = await attachDiscoveredDropboxDocuments(root.namespaceId);
+      const barRebuild = await resyncCurrentDropboxBarItems();
       stats.attached = preexistingAttachments.attached + directAttachments.attached + attachments.attached;
       stats.attachmentUnchanged = preexistingAttachments.unchanged + directAttachments.unchanged + attachments.unchanged;
       stats.attachmentReview = preexistingAttachments.review + directAttachments.review + attachments.review;
       stats.attachmentFailed = preexistingAttachments.failed + directAttachments.failed + attachments.failed;
+      stats.barRebuild = barRebuild;
       integration.cursor = latestCursor;
       integration.lastSyncCompletedAt = new Date();
       integration.lastSyncSummary = stats;

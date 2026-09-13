@@ -296,18 +296,15 @@ const loadCatereasePrintTemplates = async () => {
   try { return await printTemplatePromise; } finally { printTemplatePromise = null; }
 };
 
-const listAllOperationalRows = async (resource, eventId, eventDate = '') => {
+const listAllOperationalRows = async (resource, eventId) => {
   const rows = [];
   let cursor = '';
   let pages = 0;
   do {
-    const supportsDateWindow = ['eventrequireditem', 'foodservquery', 'foodservusage', 'subevent'].includes(resource);
     const page = await listCatereaseOperationalResource(resource, eventId, {
       cursor,
       limit: 200,
       fields: OPERATIONAL_FIELDS[resource],
-      dateFrom: supportsDateWindow ? eventDate : '',
-      dateTo: supportsDateWindow ? eventDate : '',
       includeExcluded: resource === 'subevent',
     });
     rows.push(...page.data);
@@ -376,7 +373,7 @@ export const fetchCatereaseOperationalSnapshot = async (eventId, eventDate = '',
   };
   const kitchenPackOutPromise = captureRows(
     'eventrequireditem',
-    listAllOperationalRows('eventrequireditem', resolvedEventId, eventDate)
+    listAllOperationalRows('eventrequireditem', resolvedEventId)
   );
   const staffRequestPromise = captureRows(
     'shift',
@@ -384,16 +381,16 @@ export const fetchCatereaseOperationalSnapshot = async (eventId, eventDate = '',
   );
   const subEventPromise = captureRows(
     'subevent',
-    listAllOperationalRows('subevent', resolvedEventId, eventDate)
+    listAllOperationalRows('subevent', resolvedEventId)
   );
   const eventPrintTemplatePromise = captureRows(
     'printtemplate',
     loadCatereasePrintTemplates()
   );
-  const packOutPromise = listAllOperationalRows('foodserv', resolvedEventId, eventDate)
+  const packOutPromise = listAllOperationalRows('foodserv', resolvedEventId)
     .catch((error) => {
       if (![400, 404].includes(Number(error?.statusCode))) throw error;
-      return listAllOperationalRows('foodservusage', resolvedEventId, eventDate);
+      return listAllOperationalRows('foodservusage', resolvedEventId);
     });
   const [packOutRows, kitchenPackOutRows, staffRequestRows, subEventRows, printTemplateRows] = await Promise.all([
     captureRows('foodserv', packOutPromise),

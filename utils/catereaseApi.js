@@ -21,6 +21,7 @@ export const getCatereaseConfig = () => {
   return {
     apiKey,
     baseUrl: clean(process.env.CATEREASE_BASE_URL || DEFAULT_BASE_URL).replace(/\/+$/, ''),
+    locationId: clean(process.env.CATEREASE_LOCATION_ID || '00001'),
     eventDocumentSource,
     primaryFiles: filesEnabled,
     operationalSyncEnabled,
@@ -95,6 +96,7 @@ const HUB_RESOURCES = new Set([
   'ingredient',
   'ingredientrecipe',
   'ingredientunit',
+  'printtemplate',
 ]);
 
 const OPERATIONAL_RESOURCES = new Set([

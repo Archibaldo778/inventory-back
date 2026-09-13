@@ -67,6 +67,8 @@ let recipeSyncPromise = null;
 let recipeSyncProgress = null;
 let operationalSyncPromise = null;
 let operationalSyncProgress = null;
+let printTemplatePromise = null;
+let printTemplateCache = { locationId: '', expiresAt: 0, rows: null };
 
 const loadAuthorizedOperationalEvent = async (req, res) => {
   const event = await Event.findById(req.params.id)
@@ -124,6 +126,7 @@ const OPERATIONAL_FIELDS = Object.freeze({
   foodservusage: 'PrepArea,SubEvtNum,ItemName,Qty,Category,MenuGroup',
   shift: 'ShiftNum,SubEvtNum,Position,Required,StartTime,EndTime,Category,Comments,Uniform',
   subevent: 'SubEvtNum,Description,Room,Category,Type,SEvtDate,StartTime,EndTime',
+  printtemplate: `UID,LocNum,PrintKind,Title,PrintType,Shared,SortOrder,Display,SEGroup,GroupBy1,GroupBy2,GroupBy3,Condition1,Condition2,Condition3,FSFormat,LHeader,CHeader,RHeader,TopNotes,BotNotes,${Array.from({ length: 35 }, (_, index) => `Field${index + 1}`).join(',')},${Array.from({ length: 10 }, (_, index) => `Text${index + 1}`).join(',')},Booked,Revised`,
 });
 
 const isDocx = (fileName, contentType = '') => /\.docx$/i.test(String(fileName || ''))
@@ -261,12 +264,12 @@ const listAllEventFiles = async () => {
   return files;
 };
 
-const listAllHubRows = async (resource) => {
+const listAllHubRows = async (resource, options = {}) => {
   const rows = [];
   let cursor = '';
   let pages = 0;
   do {
-    const page = await listCatereaseHubResource(resource, { cursor, limit: 200 });
+    const page = await listCatereaseHubResource(resource, { ...options, cursor, limit: 200 });
     rows.push(...page.data);
     if (page.pagination.hasMore && !page.pagination.nextCursor) throw new Error(`Caterease ${resource} pagination cursor is missing`);
     cursor = page.pagination.hasMore ? page.pagination.nextCursor : '';
@@ -275,6 +278,22 @@ const listAllHubRows = async (resource) => {
     if (pages > 5000) throw new Error(`Caterease ${resource} pagination did not finish`);
   } while (cursor);
   return rows;
+};
+
+const loadCatereasePrintTemplates = async () => {
+  const locationId = getCatereaseConfig().locationId;
+  if (printTemplateCache.locationId === locationId
+    && printTemplateCache.expiresAt > Date.now()
+    && Array.isArray(printTemplateCache.rows)) return printTemplateCache.rows;
+  if (printTemplatePromise) return printTemplatePromise;
+  printTemplatePromise = listAllHubRows('printtemplate', {
+    fields: OPERATIONAL_FIELDS.printtemplate,
+    locNum: locationId,
+  }).then((rows) => {
+    printTemplateCache = { locationId, expiresAt: Date.now() + (5 * 60 * 1000), rows };
+    return rows;
+  });
+  try { return await printTemplatePromise; } finally { printTemplatePromise = null; }
 };
 
 const listAllOperationalRows = async (resource, eventId, eventDate = '') => {
@@ -367,18 +386,24 @@ export const fetchCatereaseOperationalSnapshot = async (eventId, eventDate = '',
     'subevent',
     listAllOperationalRows('subevent', resolvedEventId, eventDate)
   );
+  const eventPrintTemplatePromise = captureRows(
+    'printtemplate',
+    loadCatereasePrintTemplates()
+  );
   const packOutPromise = listAllOperationalRows('foodserv', resolvedEventId, eventDate)
     .catch((error) => {
       if (![400, 404].includes(Number(error?.statusCode))) throw error;
       return listAllOperationalRows('foodservusage', resolvedEventId, eventDate);
     });
-  const [packOutRows, kitchenPackOutRows, staffRequestRows, subEventRows] = await Promise.all([
+  const [packOutRows, kitchenPackOutRows, staffRequestRows, subEventRows, printTemplateRows] = await Promise.all([
     captureRows('foodserv', packOutPromise),
     kitchenPackOutPromise,
     staffRequestPromise,
     subEventPromise,
+    eventPrintTemplatePromise,
   ]);
-  if (sourceErrors.length === 4) {
+  const coreSources = new Set(['foodserv', 'eventrequireditem', 'shift', 'subevent']);
+  if (sourceErrors.filter((entry) => coreSources.has(entry.source)).length === coreSources.size) {
     const error = new Error(`Caterease returned no operational sources: ${sourceErrors.map((entry) => entry.message).join('; ')}`);
     error.statusCode = sourceErrors.find((entry) => entry.status)?.status || 502;
     throw error;
@@ -390,6 +415,7 @@ export const fetchCatereaseOperationalSnapshot = async (eventId, eventDate = '',
     kitchenMenuRows: packOutRows,
     staffRequestRows,
     subEventRows,
+    printTemplateRows,
     sourceErrors,
   });
 };
@@ -965,7 +991,10 @@ router.get('/operations/events/:id/export/:type', requireAuth, async (req, res) 
     if (!event) return undefined;
     if (!event.catereaseOperations) return res.status(404).json({ error: 'Caterease operational data has not been synced for this event' });
     const templateKey = String(req.query.template || '').trim();
-    const template = templateKey ? catereasePackOutTemplate(templateKey) : null;
+    const templates = Array.isArray(event.catereaseOperations.packOutTemplates)
+      ? event.catereaseOperations.packOutTemplates
+      : undefined;
+    const template = templateKey ? catereasePackOutTemplate(templateKey, templates) : null;
     if (templateKey && (!template || template.documentType !== type)) return res.status(400).json({ error: 'Unknown Pack Out template' });
     const recipes = type === 'annotated_kitchen_menu'
       ? await KitchenRecipe.find({ sourceProvider: 'caterease', sourceDeletedAt: null })
@@ -974,7 +1003,7 @@ router.get('/operations/events/:id/export/:type', requireAuth, async (req, res) 
       : [];
     const brandLogoSvg = await loadBrandLogoSvg();
     const templateRows = template
-      ? catereasePackOutTemplateRows(event.catereaseOperations.requiredItems || event.catereaseOperations.kitchenPackOut || [], template.key)
+      ? catereasePackOutTemplateRows(event.catereaseOperations.requiredItems || event.catereaseOperations.kitchenPackOut || [], template.key, templates)
       : undefined;
     const decorImages = type === 'po' ? await loadMatchedDecorImages(event.catereaseOperations, templateRows) : [];
     const zoneName = String(req.query.zoneName || '');
@@ -993,7 +1022,7 @@ router.get('/operations/events/:id/export/:type', requireAuth, async (req, res) 
     const dateMatch = String(event.date || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
     const datePrefix = dateMatch ? `${dateMatch[2]}-${dateMatch[3]}-${dateMatch[1].slice(-2)}` : '';
     const documentCode = template
-      ? (template.key === 'pack_out' ? 'PO' : template.key === 'kitchen_pack_out' ? 'KPO' : template.label)
+      ? (template.documentType === 'po' ? 'PO' : 'KPO')
       : type === 'po' ? 'PO' : type === 'kitchen_packout' ? 'KPO' : type === 'staff_request' ? 'Staff Request' : type === 'annotated_kitchen_menu' ? 'AKM' : 'KM';
     const safeZone = String(req.query.fileZoneName || '').replace(/[<>:"/\\|?*\u0000-\u001F]/g, '').replace(/\s+/g, ' ').trim().slice(0, 80);
     const fileName = [datePrefix, safeTitle, safeZone.toLowerCase() === 'main' ? '' : safeZone, documentCode].filter(Boolean).join('_');

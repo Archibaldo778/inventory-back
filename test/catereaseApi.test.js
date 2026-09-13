@@ -188,6 +188,21 @@ test('Caterease Hub catalog client supports recipe resources and pagination', as
   } finally { global.fetch = originalFetch; }
 }));
 
+test('Caterease Hub client loads print templates for one location', async () => withApiKey(async () => {
+  const originalFetch = global.fetch;
+  let requestedUrl = '';
+  global.fetch = async (url) => {
+    requestedUrl = String(url);
+    return new Response(JSON.stringify({ data: [{ UID: 20, PrintKind: 'EvtReq' }], pagination: { hasMore: false } }), { status: 200 });
+  };
+  try {
+    const page = await listCatereaseHubResource('printtemplate', { locNum: '00001', fields: 'UID,PrintKind,Title' });
+    assert.equal(page.data[0].PrintKind, 'EvtReq');
+    assert.match(requestedUrl, /\/v1\/printtemplate\?/);
+    assert.match(requestedUrl, /locNum=00001/);
+  } finally { global.fetch = originalFetch; }
+}));
+
 test('Caterease event bundle client requests the composite event base id safely', async () => withApiKey(async () => {
   const originalFetch = global.fetch;
   let requestedUrl = '';

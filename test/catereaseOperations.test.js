@@ -22,6 +22,7 @@ import { runImportedBarItemMergePipeline } from '../utils/barManualItems.js';
 import {
   buildCatereasePackOutTemplateSummaries,
   catereasePackOutTemplateRows,
+  normalizeCatereasePrintTemplates,
 } from '../utils/catereasePackOutTemplates.js';
 
 test('Caterease exposes only the two real operational Pack Out document types', () => {
@@ -37,6 +38,24 @@ test('Caterease exposes only the two real operational Pack Out document types', 
   assert.deepEqual(catereasePackOutTemplateRows(rows, 'pack_out').map((row) => row.itemName), ['Chafing Dish']);
   assert.equal(rows[0].fsType, 'Equipment');
   assert.equal(rows[0].category, 'Hot');
+});
+
+test('Caterease print templates use PrintKind, all condition slots, and stored grouping rules', () => {
+  const templates = normalizeCatereasePrintTemplates([
+    { UID: 10, PrintKind: 'MenuPrep', Title: 'Not a Pack Out' },
+    { UID: 20, PrintKind: 'EvtReq', Title: 'Pack Out', GroupBy1: 'FSName', Condition1: "(FSType = 'Equipment')", SortOrder: 2 },
+    { UID: 30, PrintKind: 'EvtReq', Title: 'Kitchen Pack Out', GroupBy1: 'Category', GroupBy2: 'FSName', Condition2: "(Type = 'Food')", SortOrder: 1 },
+  ]);
+  assert.deepEqual(templates.map(({ key, label, documentType, groupBy }) => [key, label, documentType, groupBy]), [
+    ['print-30', 'Kitchen Pack Out', 'kitchen_packout', ['category', 'station']],
+    ['print-20', 'Pack Out', 'po', ['station']],
+  ]);
+  const rows = [
+    { itemName: 'Chafing Dish', fsType: 'Equipment' },
+    { itemName: 'Parsley', fsType: 'Food' },
+  ];
+  assert.deepEqual(catereasePackOutTemplateRows(rows, 'print-20', templates).map((row) => row.itemName), ['Chafing Dish']);
+  assert.deepEqual(catereasePackOutTemplateRows(rows, 'print-30', templates).map((row) => row.itemName), ['Parsley']);
 });
 
 test('required items retain Caterease sub-event identity for separate Pack Out exports', () => {
@@ -581,7 +600,7 @@ test('operational snapshot checksum is stable when API row order changes', () =>
     packOutRows: [{ ItemName: 'B', Qty: 2 }, { ItemName: 'A', Qty: 1 }],
     syncedAt: new Date('2026-09-11T12:00:00Z'),
   });
-  assert.equal(first.schemaVersion, 8);
+  assert.equal(first.schemaVersion, 9);
   const second = buildCatereaseOperationalSnapshot({
     eventId: 'E22672',
     packOutRows: [{ ItemName: 'A', Qty: 1 }, { ItemName: 'B', Qty: 2 }],

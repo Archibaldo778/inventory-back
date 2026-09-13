@@ -251,6 +251,7 @@ export const buildCatereaseOperationalSnapshot = ({
   kitchenMenuRows,
   staffRequestRows = [],
   subEventRows = [],
+  printTemplateRows,
   sourceErrors = [],
   syncedAt = new Date(),
 } = {}) => {
@@ -272,7 +273,7 @@ export const buildCatereaseOperationalSnapshot = ({
     normalizeCatereaseKitchenPackOutRows(kitchenPackOutRows),
     packOut
   );
-  const packOutTemplates = buildCatereasePackOutTemplateSummaries(kitchenPackOut);
+  const packOutTemplates = buildCatereasePackOutTemplateSummaries(kitchenPackOut, printTemplateRows);
   const directKitchenMenu = applySubEventNames(normalizeCatereaseKitchenMenuDishRows(kitchenMenuRows), zoneNameBySubEvent);
   const derivedKitchenMenu = buildKitchenMenuRows(kitchenPackOut);
   const kitchenMenu = derivedKitchenMenu.length
@@ -300,7 +301,7 @@ export const buildCatereaseOperationalSnapshot = ({
     packOutTemplates,
   })).digest('hex');
   return {
-    schemaVersion: 8,
+    schemaVersion: 9,
     eventId: clean(eventId, 120),
     syncedAt,
     checksum,
@@ -313,7 +314,7 @@ export const buildCatereaseOperationalSnapshot = ({
     packOutTemplates,
     kitchenMenu,
     staffRequest,
-    sourceErrors: (Array.isArray(sourceErrors) ? sourceErrors : []).slice(0, 4),
+    sourceErrors: (Array.isArray(sourceErrors) ? sourceErrors : []).slice(0, 8),
   };
 };
 
@@ -533,9 +534,10 @@ export const catereaseOperationalZoneKey = operationalZoneIdentity;
 const operationalRows = (snapshot, type, zoneKey = '', templateKey = '') => {
   const version = Number(snapshot?.schemaVersion) || 1;
   let rows;
-  const template = catereasePackOutTemplate(templateKey);
+  const templates = Array.isArray(snapshot?.packOutTemplates) ? snapshot.packOutTemplates : undefined;
+  const template = catereasePackOutTemplate(templateKey, templates);
   if (template && template.documentType === type) {
-    rows = catereasePackOutTemplateRows(snapshot?.requiredItems || snapshot?.kitchenPackOut || [], template.key);
+    rows = catereasePackOutTemplateRows(snapshot?.requiredItems || snapshot?.kitchenPackOut || [], template.key, templates);
   }
   if (!template && type === 'po') rows = (version >= 2 ? snapshot?.packOut : snapshot?.kitchenMenu) || [];
   if (!template && type === 'kitchen_packout') {
@@ -629,7 +631,7 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
   const isStaffRequest = type === 'staff_request';
   const isKitchenMenu = ['kitchen_menu', 'annotated_kitchen_menu'].includes(type);
   const isAnnotatedKitchenMenu = type === 'annotated_kitchen_menu';
-  const template = catereasePackOutTemplate(templateKey);
+  const template = catereasePackOutTemplate(templateKey, snapshot?.packOutTemplates);
   const rows = operationalRows(snapshot, type, zoneKey, templateKey);
   const title = template?.label?.toUpperCase() || (isAnnotatedKitchenMenu ? 'ANNOTATED KITCHEN MENU' : isKitchenMenu ? 'KITCHEN MENU' : isKitchenPackOut ? 'KITCHEN PACK OUT' : isStaffRequest ? 'STAFF REQUEST' : 'PACK OUT');
   const groups = groupedRows(rows, (row) => (
@@ -684,12 +686,16 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
   ], [5300, 5300])}` : isStaffRequest
     ? `${paragraph(title, { bold: true, size: 36, align: 'center', after: 120 })}${zoneHeading}${eventDetailsTable}`
     : `${paragraph('Revision', { bold: true, size: 28, align: 'right', after: 80 })}${paragraph(title, { bold: true, size: 36, align: 'center', after: 120 })}${zoneHeading}${eventDetailsTable}`;
+  const templateTopNotes = clean(catereaseRichTextToPlain(template?.topNotes), 12000);
+  const templateBottomNotes = clean(catereaseRichTextToPlain(template?.bottomNotes), 12000);
   const documentFooterSections = isKitchenMenu ? kitchenStaffingSection(event) : '';
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><w:body>
   ${includeBrandLogo ? brandLogoParagraph() : ''}
   ${documentHeader}
+  ${templateTopNotes ? paragraph(templateTopNotes, { size: 20, before: 100, after: 100 }) : ''}
   ${sections || paragraph('No rows returned by Caterease.', { size: 20, before: 240 })}
+  ${templateBottomNotes ? paragraph(templateBottomNotes, { size: 20, before: 100, after: 100 }) : ''}
   ${documentFooterSections}
   <w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="615" w:right="765" w:bottom="600" w:left="810" w:header="720" w:footer="720" w:gutter="0"/></w:sectPr>
 </w:body></w:document>`;

@@ -300,7 +300,7 @@ export const buildCatereaseOperationalSnapshot = ({
     packOutTemplates,
   })).digest('hex');
   return {
-    schemaVersion: 7,
+    schemaVersion: 8,
     eventId: clean(eventId, 120),
     syncedAt,
     checksum,

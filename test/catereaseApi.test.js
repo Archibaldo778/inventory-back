@@ -229,3 +229,17 @@ test('Caterease operational client rejects unsupported resources', async () => w
     /Unsupported Caterease operational resource/
   );
 }));
+
+test('Caterease sub-event client includes excluded service periods for document names', async () => withApiKey(async () => {
+  const originalFetch = global.fetch;
+  let requestedUrl = '';
+  global.fetch = async (url) => {
+    requestedUrl = String(url);
+    return new Response(JSON.stringify({ data: [], pagination: { hasMore: false } }), { status: 200 });
+  };
+  try {
+    await listCatereaseOperationalResource('subevent', 'E20244', { includeExcluded: true });
+    assert.match(requestedUrl, /\/v1\/subevent\?/);
+    assert.match(requestedUrl, /includeExcluded=true/);
+  } finally { global.fetch = originalFetch; }
+}));

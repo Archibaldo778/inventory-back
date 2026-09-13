@@ -145,6 +145,7 @@ export const listCatereaseOperationalResource = async (resource, eventId, option
   if (clean(options.fields)) params.set('fields', clean(options.fields));
   if (clean(options.dateFrom)) params.set('dateFrom', clean(options.dateFrom));
   if (clean(options.dateTo)) params.set('dateTo', clean(options.dateTo));
+  if (options.includeExcluded === true && name === 'subevent') params.set('includeExcluded', 'true');
   const response = await catereaseFetch(`/v1/${name}?${params.toString()}`);
   if (!response.ok) throw await responseError(response, `Caterease ${name} listing failed (${response.status})`);
   const body = await response.json();

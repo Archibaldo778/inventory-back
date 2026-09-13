@@ -289,6 +289,7 @@ const listAllOperationalRows = async (resource, eventId, eventDate = '') => {
       fields: OPERATIONAL_FIELDS[resource],
       dateFrom: supportsDateWindow ? eventDate : '',
       dateTo: supportsDateWindow ? eventDate : '',
+      includeExcluded: resource === 'subevent',
     });
     rows.push(...page.data);
     if (page.pagination.hasMore && !page.pagination.nextCursor) throw new Error(`Caterease ${resource} pagination cursor is missing`);

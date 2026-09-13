@@ -301,7 +301,7 @@ export const buildCatereaseOperationalSnapshot = ({
     packOutTemplates,
   })).digest('hex');
   return {
-    schemaVersion: 9,
+    schemaVersion: 10,
     eventId: clean(eventId, 120),
     syncedAt,
     checksum,
@@ -637,6 +637,7 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
   const groups = groupedRows(rows, (row) => (
     template?.groupBy?.length
       ? template.groupBy.map((field) => row?.[field]).filter(Boolean).join(' / ')
+        || row.station || row.prepArea || row.category
       : template
         ? 'Required Items'
         : isKitchenPackOut

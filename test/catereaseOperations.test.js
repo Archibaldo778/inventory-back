@@ -50,12 +50,27 @@ test('Caterease print templates use PrintKind, all condition slots, and stored g
     ['print-30', 'Kitchen Pack Out', 'kitchen_packout', ['category', 'station']],
     ['print-20', 'Pack Out', 'po', ['station']],
   ]);
+  assert.deepEqual(templates.map(({ label, operationalVisible }) => [label, operationalVisible]), [
+    ['Kitchen Pack Out', true],
+    ['Pack Out', true],
+  ]);
   const rows = [
     { itemName: 'Chafing Dish', fsType: 'Equipment' },
     { itemName: 'Parsley', fsType: 'Food' },
   ];
   assert.deepEqual(catereasePackOutTemplateRows(rows, 'print-20', templates).map((row) => row.itemName), ['Chafing Dish']);
   assert.deepEqual(catereasePackOutTemplateRows(rows, 'print-30', templates).map((row) => row.itemName), ['Parsley']);
+});
+
+test('test EvtReq templates stay diagnostic-only and Kitchen Pack Out keeps its document type without a condition', () => {
+  const templates = normalizeCatereasePrintTemplates([
+    { UID: 1, PrintKind: 'EvtReq', Title: 'Kitchen Pack Out', GroupBy1: 'FSName' },
+    { UID: 2, PrintKind: 'EvtReq', Title: 'Test - Required Items', GroupBy1: 'Category' },
+  ]);
+  assert.deepEqual(templates.map(({ label, documentType, operationalVisible }) => [label, documentType, operationalVisible]), [
+    ['Kitchen Pack Out', 'kitchen_packout', true],
+    ['Test - Required Items', 'po', false],
+  ]);
 });
 
 test('required items retain Caterease sub-event identity for separate Pack Out exports', () => {
@@ -600,7 +615,7 @@ test('operational snapshot checksum is stable when API row order changes', () =>
     packOutRows: [{ ItemName: 'B', Qty: 2 }, { ItemName: 'A', Qty: 1 }],
     syncedAt: new Date('2026-09-11T12:00:00Z'),
   });
-  assert.equal(first.schemaVersion, 9);
+  assert.equal(first.schemaVersion, 10);
   const second = buildCatereaseOperationalSnapshot({
     eventId: 'E22672',
     packOutRows: [{ ItemName: 'A', Qty: 1 }, { ItemName: 'B', Qty: 2 }],

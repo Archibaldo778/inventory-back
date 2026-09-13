@@ -34,13 +34,19 @@ const parseConditions = (row) => {
   return { conditions, unsupported };
 };
 
-const documentTypeFor = (conditions) => (
-  conditions.some((condition) => condition.field === 'fsType'
+const documentTypeFor = (conditions, title = '') => {
+  if (normalized(title) === 'kitchen pack out') return 'kitchen_packout';
+  return conditions.some((condition) => condition.field === 'fsType'
     && condition.operator === 'equals'
     && normalized(condition.value) === 'food')
     ? 'kitchen_packout'
-    : 'po'
-);
+    : 'po';
+};
+
+const isOperationalTemplate = (title = '') => [
+  'pack out',
+  'kitchen pack out',
+].includes(normalized(title));
 
 export const normalizeCatereasePrintTemplates = (rows = []) => (Array.isArray(rows) ? rows : [])
   .filter((row) => normalized(row?.PrintKind) === 'evtreq')
@@ -54,11 +60,13 @@ export const normalizeCatereasePrintTemplates = (rows = []) => (Array.isArray(ro
       if (!field) break;
       headerFields.push(field);
     }
+    const title = clean(row?.Title, 200) || 'Pack Out';
     return {
       key: uid ? `print-${uid}` : '',
       sourceId: uid,
-      label: clean(row?.Title, 200) || 'Pack Out',
-      documentType: documentTypeFor(conditions),
+      label: title,
+      documentType: documentTypeFor(conditions, title),
+      operationalVisible: isOperationalTemplate(title),
       printKind: clean(row?.PrintKind, 80),
       printType: clean(row?.PrintType, 80),
       sortOrder: Number.isFinite(Number(row?.SortOrder)) ? Number(row.SortOrder) : 9999,

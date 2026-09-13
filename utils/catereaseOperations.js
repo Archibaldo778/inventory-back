@@ -26,6 +26,10 @@ const first = (row, keys) => {
   return '';
 };
 const fallbackSourceId = (row) => `row-${crypto.createHash('sha1').update(JSON.stringify(row || {})).digest('hex').slice(0, 16)}`;
+const operationalZoneIdentity = (row) => [
+  clean(row?.subEvent, 120).toLowerCase(),
+  clean(row?.zoneName, 200).toLowerCase(),
+].filter(Boolean).join('|');
 
 export const normalizeCatereasePackOutRows = (rows = []) => (Array.isArray(rows) ? rows : [])
   .slice(0, 10000)
@@ -94,7 +98,7 @@ export const buildKitchenMenuRows = (kitchenPackOutRows = []) => {
     if (isKitchenMenuNoise(name)) return;
     const zoneName = clean(row?.zoneName, 200);
     const subEvent = clean(row?.subEvent, 120);
-    const zoneKey = (zoneName || subEvent).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    const zoneKey = operationalZoneIdentity({ subEvent, zoneName });
     const key = `${zoneKey}|${name.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()}`;
     if (!key) return;
     const existing = dishes.get(key);
@@ -132,7 +136,7 @@ export const normalizeCatereaseKitchenMenuDishRows = (rows = []) => {
     if (isKitchenMenuNoise(itemName)) return;
     const subEvent = clean(first(row, ['SubEvtNum', 'SubEvent']), 120);
     const zoneName = clean(first(row, ['SEDescription', 'Room', 'SubEventName']), 200);
-    const key = `${(zoneName || subEvent).toLowerCase()}|${itemName.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()}`;
+    const key = `${operationalZoneIdentity({ subEvent, zoneName })}|${itemName.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()}`;
     if (!itemName || dishes.has(key)) return;
     dishes.set(key, {
       sourceId: clean(first(row, ['UID', 'FdSvNum', 'FSNum', 'ItemNum', 'ItemID', 'ID']), 120) || fallbackSourceId(row),
@@ -154,11 +158,11 @@ export const normalizeCatereaseKitchenMenuDishRows = (rows = []) => {
 const mergeKitchenMenuRows = (derivedRows = [], directRows = []) => {
   const directByName = new Map();
   directRows.forEach((row) => {
-    const key = `${clean(row?.zoneName || row?.subEvent, 200).toLowerCase()}|${clean(row?.itemName, 300).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()}`;
+    const key = `${operationalZoneIdentity(row)}|${clean(row?.itemName, 300).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()}`;
     if (key && !directByName.has(key)) directByName.set(key, row);
   });
   return derivedRows.map((row) => {
-    const key = `${clean(row?.zoneName || row?.subEvent, 200).toLowerCase()}|${clean(row?.itemName, 300).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()}`;
+    const key = `${operationalZoneIdentity(row)}|${clean(row?.itemName, 300).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()}`;
     const direct = directByName.get(key);
     if (!direct) return row;
     return {
@@ -466,7 +470,7 @@ const groupedRows = (rows, groupSelector) => {
   return groups;
 };
 
-export const catereaseOperationalZoneKey = (row) => clean(row?.zoneName || row?.subEvent, 200).toLowerCase();
+export const catereaseOperationalZoneKey = operationalZoneIdentity;
 
 const operationalRows = (snapshot, type, zoneKey = '', templateKey = '') => {
   const version = Number(snapshot?.schemaVersion) || 1;

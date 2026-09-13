@@ -42,6 +42,17 @@ test('Caterease Pack Out templates reproduce the five location grouping rules', 
   assert.equal(rows[0].category, 'Hot');
 });
 
+test('required items retain Caterease sub-event identity for separate Pack Out exports', () => {
+  const rows = normalizeCatereaseKitchenPackOutRows([
+    { UID: '1', ItemName: 'Wine Glass', SubEvtNum: 'S-DINNER', SEDescription: 'Dinner' },
+    { UID: '2', ItemName: 'Coupe Glass', SubEvtNum: 'S-COCKTAIL', SEDescription: 'Cocktail Hour' },
+  ]);
+  assert.deepEqual(rows.map(({ subEvent, zoneName }) => [subEvent, zoneName]), [
+    ['S-DINNER', 'Dinner'],
+    ['S-COCKTAIL', 'Cocktail Hour'],
+  ]);
+});
+
 test('Caterease operational Pack Out rows map to recognized bar items', () => {
   const [item] = catereaseOperationalPackOutToBarItems([{
     sourceId: '42',
@@ -276,7 +287,7 @@ test('operational DOCX exports only the requested sub-event', async () => {
     event: { title: 'Dinner', date: '2026-09-11', externalId: 'E22672', meta: {} },
     snapshot,
     type: 'po',
-    zoneKey: 'green room',
+    zoneKey: 's1|green room',
     zoneName: 'Green Room',
     includePackOutTemplate: false,
   });
@@ -307,7 +318,7 @@ test('operational DOCX filters shared sub-event rows by their human zone descrip
     event: { title: 'Dinner', date: '2026-09-11', externalId: 'E22672', meta: {} },
     snapshot,
     type: 'po',
-    zoneKey: 'staff holding',
+    zoneKey: 's1|staff holding',
     zoneName: 'Staff Holding',
     includePackOutTemplate: false,
   });
@@ -315,6 +326,28 @@ test('operational DOCX filters shared sub-event rows by their human zone descrip
   const xml = await zip.file('word/document.xml').async('string');
   assert.match(xml, /Staff Holding Water/);
   assert.doesNotMatch(xml, /Green Room Ice/);
+});
+
+test('operational DOCX separates different sub-events with the same human description', async () => {
+  const snapshot = buildCatereaseOperationalSnapshot({
+    eventId: 'E20244',
+    packOutRows: [
+      { ItemName: 'Dinner Wine', Qty: 2, SubEvtNum: 'S-DINNER', SEDescription: 'Menu' },
+      { ItemName: 'Cocktail Ice', Qty: 4, SubEvtNum: 'S-COCKTAIL', SEDescription: 'Menu' },
+    ],
+  });
+  const buffer = await renderCatereaseOperationalDocx({
+    event: { title: 'Wedding', date: '2026-09-12', externalId: 'E20244', meta: {} },
+    snapshot,
+    type: 'po',
+    zoneKey: 's-dinner|menu',
+    zoneName: 'Menu 1',
+    includePackOutTemplate: false,
+  });
+  const zip = await JSZip.loadAsync(buffer);
+  const xml = await zip.file('word/document.xml').async('string');
+  assert.match(xml, /Dinner Wine/);
+  assert.doesNotMatch(xml, /Cocktail Ice/);
 });
 
 test('Kitchen Pack Out uses the Caterease PO table layout', async () => {
@@ -388,6 +421,17 @@ test('Kitchen Menu contains one dish per Kitchen Pack Out station', () => {
   ]);
   assert.deepEqual(rows.map(({ itemName, prepArea, componentCount }) => ({ itemName, prepArea, componentCount })), [
     { itemName: 'Caramel Apple', prepArea: 'Pastry', componentCount: 2 },
+  ]);
+});
+
+test('Kitchen Menu keeps the same dish in separate Caterease sub-events', () => {
+  const rows = buildKitchenMenuRows([
+    { itemName: 'Dinner plate', station: 'Passed HDs', subEvent: 'S-DINNER', zoneName: 'Menu' },
+    { itemName: 'Cocktail plate', station: 'Passed HDs', subEvent: 'S-COCKTAIL', zoneName: 'Menu' },
+  ]);
+  assert.deepEqual(rows.map(({ itemName, subEvent }) => [itemName, subEvent]), [
+    ['Passed HDs', 'S-DINNER'],
+    ['Passed HDs', 'S-COCKTAIL'],
   ]);
 });
 

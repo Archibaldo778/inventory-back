@@ -162,6 +162,33 @@ test('required items inherit a missing food type through FdSvNum before template
   ).map((row) => row.itemName), ['Caviar']);
 });
 
+test('Kitchen Pack Out includes a food-service dish that has no required-item breakdown', () => {
+  const templates = normalizeCatereasePrintTemplates([
+    { UID: 1, PrintKind: 'EvtReq', Title: 'Kitchen Pack Out', Condition2: "(Type = 'Food')" },
+  ]);
+  const requiredItems = Array.from({ length: 15 }, (_, index) => ({
+    sourceId: `required-${index}`,
+    foodServiceId: `FS-${Math.floor(index / 5) + 1}`,
+    itemName: `Ingredient ${index + 1}`,
+    station: `Dish ${Math.floor(index / 5) + 1}`,
+    subEvent: 'S-MENU',
+    fsType: 'Food',
+  }));
+  const rows = catereaseOperationalTemplateRows({
+    requiredItems,
+    foodService: [
+      { foodServiceId: 'FS-1', itemName: 'Dish 1', subEvent: 'S-MENU', fsType: 'Food' },
+      { foodServiceId: 'FS-BLINI', itemName: 'Blini with caviar & creme fraiche', subEvent: 'S-MENU', fsType: 'Food' },
+    ],
+  }, 'print-1', templates);
+  assert.equal(rows.length, 16);
+  assert.deepEqual(rows.slice(-1).map(({ itemName, station, topLevelFoodService }) => ({ itemName, station, topLevelFoodService })), [{
+    itemName: 'Blini with caviar & creme fraiche',
+    station: 'Blini with caviar & creme fraiche',
+    topLevelFoodService: true,
+  }]);
+});
+
 test('sub-event descriptions become human document names across operational data', () => {
   const snapshot = buildCatereaseOperationalSnapshot({
     eventId: 'E20244',
@@ -337,8 +364,9 @@ test('Caterease Pack Out suppresses a description that only repeats the item nam
   const rows = normalizeCatereasePackOutRows([
     { ItemName: 'Chef apron', Description: 'Chef apron' },
     { ItemName: 'Gloves- S, M, L', Comment: 'of each' },
+    { ItemName: 'Square black inserts', Description: 'NEW INSERTS OR BEST CONDITION' },
   ]);
-  assert.deepEqual(rows.map((row) => row.notes), ['', 'of each']);
+  assert.deepEqual(rows.map((row) => row.notes), ['', 'of each', 'NEW INSERTS OR BEST CONDITION']);
 });
 
 test('Caterease Pack Out excludes non-inventory Standard service rows', () => {

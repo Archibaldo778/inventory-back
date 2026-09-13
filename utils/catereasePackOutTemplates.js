@@ -20,6 +20,11 @@ const isPackOutSectionHeading = (row) => (
 const foodServiceGroupKey = (row) => clean(row?.subEvent, 120).toLowerCase()
   || clean(row?.zoneName, 200).toLowerCase();
 
+const foodServiceDishKey = (row, name = row?.itemName) => [
+  clean(row?.subEvent, 120).toLowerCase(),
+  normalized(name),
+].join('|');
+
 const FIELD_MAP = Object.freeze({
   type: 'fsType',
   fstype: 'fsType',
@@ -145,10 +150,31 @@ export const catereaseOperationalTemplateRows = (snapshot = {}, templateKey, tem
   if (!template) return [];
   const requiredRows = snapshot?.requiredItems || snapshot?.kitchenPackOut || [];
   const requiredMatches = catereasePackOutTemplateRows(requiredRows, templateKey, templates);
-  if (template.documentType !== 'po') return requiredMatches;
-
   const foodServiceRows = (snapshot?.foodService || snapshot?.packOut || [])
     .filter((row) => !/\binvoice\b/i.test(clean(row?.zoneName, 200)));
+  if (template.documentType === 'kitchen_packout') {
+    const representedFoodServiceIds = new Set(requiredRows
+      .map((row) => clean(row?.foodServiceId, 120).toLowerCase())
+      .filter(Boolean));
+    const representedDishes = new Set(requiredRows
+      .map((row) => foodServiceDishKey(row, row?.station))
+      .filter((key) => key !== '|'));
+    const missingDishRows = catereasePackOutTemplateRows(foodServiceRows, templateKey, templates)
+      .filter((row) => !/\bpack\s*out\b/i.test(clean(row?.zoneName, 200)))
+      .filter((row) => {
+        const foodServiceId = clean(row?.foodServiceId, 120).toLowerCase();
+        if (foodServiceId && representedFoodServiceIds.has(foodServiceId)) return false;
+        return !representedDishes.has(foodServiceDishKey(row));
+      })
+      .map((row) => ({
+        ...row,
+        station: row.station || row.itemName,
+        topLevelFoodService: true,
+      }));
+    return [...requiredMatches, ...missingDishRows];
+  }
+  if (template.documentType !== 'po') return requiredMatches;
+
   const manualPackOutGroups = new Set(foodServiceRows
     .filter((row) => isPackOutSectionHeading(row) || /\bpack\s*out\b/i.test(clean(row?.zoneName, 200)))
     .map(foodServiceGroupKey)

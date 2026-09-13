@@ -532,7 +532,7 @@ const catereaseKitchenPackOutTable = (groups) => {
     align: 'center',
   })).join('')}</w:tr>`;
   const sectionRow = (name) => `<w:tr><w:tc><w:tcPr><w:gridSpan w:val="${widths.length}"/><w:tcW w:w="${widths.reduce((total, width) => total + width, 0)}" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr>${paragraph(name, { bold: true, size: 20, after: 0 })}</w:tc></w:tr>`;
-  const body = [...groups.entries()].map(([group, values]) => `${sectionRow(group)}${values.map((row) => `<w:tr>${[
+  const body = [...groups.entries()].map(([group, values]) => `${sectionRow(group)}${values.filter((row) => !row.topLevelFoodService).map((row) => `<w:tr>${[
     row.itemName, '', '', '', '',
   ].map((value, index) => cell(value, { width: widths[index], align: index ? 'center' : '' })).join('')}</w:tr>`).join('')}`).join('');
   return `<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/><w:tblLayout w:type="fixed"/>${tableBorders}</w:tblPr><w:tblGrid>${widths.map((width) => `<w:gridCol w:w="${width}"/>`).join('')}</w:tblGrid>${header}${body}</w:tbl>`;

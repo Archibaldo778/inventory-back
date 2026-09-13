@@ -118,11 +118,12 @@ const loadMatchedDecorImages = async (snapshot, rows = snapshot?.packOut) => {
 };
 
 const OPERATIONAL_FIELDS = Object.freeze({
-  eventrequireditem: 'UID,ItemName,OTFItemName,Qty,Unit,PUnit,QtyPerPUnit,FSPrepArea,FSName,FSType,Category,SubEvtNum,RentalItem,Vendor,SEDescription,SEvtDate,StartTime',
+  eventrequireditem: 'UID,FdSvNum,ItemName,OTFItemName,Qty,Unit,PUnit,QtyPerPUnit,FSPrepArea,FSName,FSType,Category,RentalItem,Vendor,SEDescription,SEvtDate,StartTime',
   foodserv: 'ItemName,Qty,Unit,PrepArea,SubEvtNum,Category,Comment,Description,FdSvNum,ItemNum',
   foodservquery: 'FdSvNum,ItemNum,PrepArea,SubEvtNum,SEDescription,ItemName,Qty,Unit,Category,FSCategory,MenuGroup,ActGuests,GtdGuests,PlnGuests',
   foodservusage: 'PrepArea,SubEvtNum,ItemName,Qty,Category,MenuGroup',
   shift: 'ShiftNum,SubEvtNum,Position,Required,StartTime,EndTime,Category,Comments,Uniform',
+  subevent: 'SubEvtNum,Description,Room,Category,Type,SEvtDate,StartTime,EndTime',
 });
 
 const isDocx = (fileName, contentType = '') => /\.docx$/i.test(String(fileName || ''))
@@ -281,7 +282,7 @@ const listAllOperationalRows = async (resource, eventId, eventDate = '') => {
   let cursor = '';
   let pages = 0;
   do {
-    const supportsDateWindow = ['eventrequireditem', 'foodservquery', 'foodservusage'].includes(resource);
+    const supportsDateWindow = ['eventrequireditem', 'foodservquery', 'foodservusage', 'subevent'].includes(resource);
     const page = await listCatereaseOperationalResource(resource, eventId, {
       cursor,
       limit: 200,
@@ -361,17 +362,22 @@ export const fetchCatereaseOperationalSnapshot = async (eventId, eventDate = '',
     'shift',
     listAllOperationalRows('shift', resolvedEventId)
   );
+  const subEventPromise = captureRows(
+    'subevent',
+    listAllOperationalRows('subevent', resolvedEventId, eventDate)
+  );
   const packOutPromise = listAllOperationalRows('foodserv', resolvedEventId, eventDate)
     .catch((error) => {
       if (![400, 404].includes(Number(error?.statusCode))) throw error;
       return listAllOperationalRows('foodservusage', resolvedEventId, eventDate);
     });
-  const [packOutRows, kitchenPackOutRows, staffRequestRows] = await Promise.all([
+  const [packOutRows, kitchenPackOutRows, staffRequestRows, subEventRows] = await Promise.all([
     captureRows('foodserv', packOutPromise),
     kitchenPackOutPromise,
     staffRequestPromise,
+    subEventPromise,
   ]);
-  if (sourceErrors.length === 3) {
+  if (sourceErrors.length === 4) {
     const error = new Error(`Caterease returned no operational sources: ${sourceErrors.map((entry) => entry.message).join('; ')}`);
     error.statusCode = sourceErrors.find((entry) => entry.status)?.status || 502;
     throw error;
@@ -382,6 +388,7 @@ export const fetchCatereaseOperationalSnapshot = async (eventId, eventDate = '',
     kitchenPackOutRows,
     kitchenMenuRows: packOutRows,
     staffRequestRows,
+    subEventRows,
     sourceErrors,
   });
 };

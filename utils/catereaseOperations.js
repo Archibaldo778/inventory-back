@@ -35,6 +35,7 @@ export const normalizeCatereasePackOutRows = (rows = []) => (Array.isArray(rows)
   .slice(0, 10000)
   .map((row) => ({
     sourceId: clean(first(row, ['UID', 'FdSvNum', 'FSNum', 'ItemNum', 'ItemID', 'ID']), 120) || fallbackSourceId(row),
+    foodServiceId: clean(first(row, ['FdSvNum', 'FSNum']), 120),
     itemId: clean(first(row, ['ItemNum', 'ItemID']), 120),
     itemName: clean(first(row, ['ItemName', 'Name', 'Title']), 300),
     quantity: numberOrNull(first(row, ['Qty', 'Quantity'])),
@@ -52,6 +53,7 @@ export const normalizeCatereaseKitchenPackOutRows = (rows = []) => (Array.isArra
   .slice(0, 10000)
   .map((row) => ({
     sourceId: clean(first(row, ['UID', 'ReqItemNum', 'RINum', 'ItemNum', 'ID']), 120) || fallbackSourceId(row),
+    foodServiceId: clean(first(row, ['FdSvNum', 'FSNum']), 120),
     itemName: clean(first(row, ['OTFItemName', 'ItemName', 'Name', 'Title']), 300),
     quantity: numberOrNull(first(row, ['Qty', 'Quantity'])),
     unit: clean(first(row, ['Unit', 'DUnit']), 80),
@@ -181,7 +183,22 @@ const mergeKitchenMenuRows = (derivedRows = [], directRows = []) => {
 
 const stableRows = (rows) => [...rows].sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
 
+const normalizeCatereaseSubEventRows = (rows = []) => (Array.isArray(rows) ? rows : [])
+  .slice(0, 10000)
+  .map((row) => ({
+    subEvent: clean(first(row, ['SubEvtNum', 'SubEvent']), 120),
+    description: clean(first(row, ['Description', 'SEDescription', 'SubEventName']), 200),
+    room: clean(first(row, ['Room']), 200),
+  }))
+  .filter((row) => row.subEvent);
+
+const applySubEventNames = (rows = [], zoneNameBySubEvent = new Map()) => rows.map((row) => ({
+  ...row,
+  zoneName: zoneNameBySubEvent.get(clean(row?.subEvent, 120).toLowerCase()) || row?.zoneName || '',
+}));
+
 const attachRequiredItemSubEvents = (requiredItems = [], foodService = []) => {
+  const zoneByFoodServiceId = new Map();
   const zonesByFoodServiceName = new Map();
   foodService.forEach((row) => {
     const nameKey = clean(row?.itemName, 300).toLowerCase();
@@ -190,16 +207,21 @@ const attachRequiredItemSubEvents = (requiredItems = [], foodService = []) => {
     const matches = zonesByFoodServiceName.get(nameKey) || new Map();
     matches.set(identity, { subEvent: row.subEvent, zoneName: row.zoneName || '' });
     zonesByFoodServiceName.set(nameKey, matches);
+    if (row.foodServiceId) zoneByFoodServiceId.set(clean(row.foodServiceId, 120).toLowerCase(), {
+      subEvent: row.subEvent,
+      zoneName: row.zoneName || '',
+    });
   });
   return requiredItems.map((row) => {
     if (row?.subEvent) return row;
-    const matches = zonesByFoodServiceName.get(clean(row?.station, 300).toLowerCase());
-    if (!matches || matches.size !== 1) return row;
-    const [zone] = matches.values();
+    const exactZone = zoneByFoodServiceId.get(clean(row?.foodServiceId, 120).toLowerCase());
+    const matches = exactZone ? null : zonesByFoodServiceName.get(clean(row?.station, 300).toLowerCase());
+    if (!exactZone && (!matches || matches.size !== 1)) return row;
+    const zone = exactZone || [...matches.values()][0];
     return {
       ...row,
       subEvent: zone.subEvent,
-      zoneName: row.zoneName || zone.zoneName,
+      zoneName: zone.zoneName || row.zoneName,
     };
   });
 };
@@ -228,6 +250,7 @@ export const buildCatereaseOperationalSnapshot = ({
   kitchenPackOutRows = [],
   kitchenMenuRows,
   staffRequestRows = [],
+  subEventRows = [],
   sourceErrors = [],
   syncedAt = new Date(),
 } = {}) => {
@@ -239,25 +262,33 @@ export const buildCatereaseOperationalSnapshot = ({
     packOutRows,
     first(guestRow, ['Qty', 'Quantity'])
   );
-  const packOut = normalizeCatereasePackOutRows(packOutRows);
+  const subEvents = normalizeCatereaseSubEventRows(subEventRows);
+  const zoneNameBySubEvent = new Map(subEvents.map((row) => [
+    clean(row.subEvent, 120).toLowerCase(),
+    row.description || row.room,
+  ]).filter(([, name]) => name));
+  const packOut = applySubEventNames(normalizeCatereasePackOutRows(packOutRows), zoneNameBySubEvent);
   const kitchenPackOut = attachRequiredItemSubEvents(
     normalizeCatereaseKitchenPackOutRows(kitchenPackOutRows),
     packOut
   );
   const packOutTemplates = buildCatereasePackOutTemplateSummaries(kitchenPackOut);
-  const directKitchenMenu = normalizeCatereaseKitchenMenuDishRows(kitchenMenuRows);
+  const directKitchenMenu = applySubEventNames(normalizeCatereaseKitchenMenuDishRows(kitchenMenuRows), zoneNameBySubEvent);
   const derivedKitchenMenu = buildKitchenMenuRows(kitchenPackOut);
   const kitchenMenu = derivedKitchenMenu.length
     ? mergeKitchenMenuRows(derivedKitchenMenu, directKitchenMenu)
     : directKitchenMenu;
-  const zoneNameBySubEvent = new Map(
+  const fallbackZoneNameBySubEvent = new Map(
     [...packOut, ...kitchenPackOut, ...directKitchenMenu]
       .filter((row) => row?.subEvent && row?.zoneName)
       .map((row) => [clean(row.subEvent, 120).toLowerCase(), clean(row.zoneName, 200)])
   );
   const staffRequest = normalizeCatereaseStaffRequestRows(staffRequestRows).map((row) => ({
     ...row,
-    zoneName: row.zoneName || zoneNameBySubEvent.get(clean(row.subEvent, 120).toLowerCase()) || '',
+    zoneName: row.zoneName
+      || zoneNameBySubEvent.get(clean(row.subEvent, 120).toLowerCase())
+      || fallbackZoneNameBySubEvent.get(clean(row.subEvent, 120).toLowerCase())
+      || '',
   }));
   const checksum = crypto.createHash('sha256').update(JSON.stringify({
     eventId: clean(eventId, 120),
@@ -269,7 +300,7 @@ export const buildCatereaseOperationalSnapshot = ({
     packOutTemplates,
   })).digest('hex');
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
     eventId: clean(eventId, 120),
     syncedAt,
     checksum,
@@ -278,10 +309,11 @@ export const buildCatereaseOperationalSnapshot = ({
     kitchenPackOut,
     requiredItems: kitchenPackOut,
     foodService: packOut,
+    subEvents,
     packOutTemplates,
     kitchenMenu,
     staffRequest,
-    sourceErrors: (Array.isArray(sourceErrors) ? sourceErrors : []).slice(0, 3),
+    sourceErrors: (Array.isArray(sourceErrors) ? sourceErrors : []).slice(0, 4),
   };
 };
 

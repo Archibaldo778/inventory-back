@@ -71,6 +71,43 @@ test('required items inherit a sub-event through their Caterease food service na
   ]);
 });
 
+test('required items use FdSvNum when the same food service name appears in multiple sub-events', () => {
+  const snapshot = buildCatereaseOperationalSnapshot({
+    eventId: 'E20244',
+    packOutRows: [
+      { FdSvNum: 'FS1', ItemName: 'Passed HDs', SubEvtNum: 'S-DINNER' },
+      { FdSvNum: 'FS2', ItemName: 'Passed HDs', SubEvtNum: 'S-COCKTAIL' },
+    ],
+    kitchenPackOutRows: [
+      { UID: 'R1', FdSvNum: 'FS2', ItemName: 'Cocktail Tray', FSName: 'Passed HDs' },
+    ],
+  });
+  assert.equal(snapshot.requiredItems[0].subEvent, 'S-COCKTAIL');
+});
+
+test('sub-event descriptions become human document names across operational data', () => {
+  const snapshot = buildCatereaseOperationalSnapshot({
+    eventId: 'E20244',
+    subEventRows: [
+      { SubEvtNum: 'S-DINNER', Description: 'Wedding Dinner' },
+      { SubEvtNum: 'S-STAFF', Description: 'Staff Holding' },
+    ],
+    packOutRows: [
+      { FdSvNum: 'FS1', ItemName: 'Dinner', SubEvtNum: 'S-DINNER' },
+      { FdSvNum: 'FS2', ItemName: 'Staff Meal', SubEvtNum: 'S-STAFF' },
+    ],
+    kitchenPackOutRows: [
+      { UID: 'R1', FdSvNum: 'FS2', ItemName: 'Paper Plate', FSName: 'Staff Meal', SEDescription: 'Menu' },
+    ],
+    staffRequestRows: [
+      { ShiftNum: 'SH1', SubEvtNum: 'S-STAFF', Position: 'Captain' },
+    ],
+  });
+  assert.deepEqual(snapshot.foodService.map(({ zoneName }) => zoneName), ['Wedding Dinner', 'Staff Holding']);
+  assert.equal(snapshot.requiredItems[0].zoneName, 'Staff Holding');
+  assert.equal(snapshot.staffRequest[0].zoneName, 'Staff Holding');
+});
+
 test('required items are not guessed when a food service name belongs to multiple sub-events', () => {
   const snapshot = buildCatereaseOperationalSnapshot({
     eventId: 'E20244',
@@ -204,6 +241,7 @@ test('Caterease Pack Out rows preserve operational grouping', () => {
 
   assert.deepEqual(rows[0], {
     sourceId: '42',
+    foodServiceId: '',
     itemId: 'MI-1',
     itemName: 'C-folds',
     quantity: 4,
@@ -546,7 +584,7 @@ test('operational snapshot checksum is stable when API row order changes', () =>
     packOutRows: [{ ItemName: 'B', Qty: 2 }, { ItemName: 'A', Qty: 1 }],
     syncedAt: new Date('2026-09-11T12:00:00Z'),
   });
-  assert.equal(first.schemaVersion, 6);
+  assert.equal(first.schemaVersion, 7);
   const second = buildCatereaseOperationalSnapshot({
     eventId: 'E22672',
     packOutRows: [{ ItemName: 'A', Qty: 1 }, { ItemName: 'B', Qty: 2 }],

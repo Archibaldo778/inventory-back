@@ -24,7 +24,7 @@ import {
   catereasePackOutTemplateRows,
 } from '../utils/catereasePackOutTemplates.js';
 
-test('Caterease Pack Out templates reproduce the five location grouping rules', () => {
+test('Caterease exposes only the two real operational Pack Out document types', () => {
   const rows = normalizeCatereaseKitchenPackOutRows([
     { UID: '1', ItemName: 'Chafing Dish', Qty: 2, FSType: 'Equipment', Category: 'Hot', FSName: 'Buffet', FSPrepArea: 'Hot Line' },
     { UID: '2', ItemName: 'Bread', Qty: 12, FSType: 'Food', Category: 'Bakery', FSName: 'Bread Service', FSPrepArea: 'Pantry' },
@@ -33,9 +33,6 @@ test('Caterease Pack Out templates reproduce the five location grouping rules', 
   assert.deepEqual(summaries.map(({ key, rowCount }) => [key, rowCount]), [
     ['kitchen_pack_out', 2],
     ['pack_out', 1],
-    ['kitchen_pack_out_testing', 2],
-    ['test_kitchen_pack_out', 2],
-    ['required_items', 2],
   ]);
   assert.deepEqual(catereasePackOutTemplateRows(rows, 'pack_out').map((row) => row.itemName), ['Chafing Dish']);
   assert.equal(rows[0].fsType, 'Equipment');

@@ -14,24 +14,6 @@ export const CATEREASE_PACK_OUT_TEMPLATES = Object.freeze([
     groupBy: Object.freeze(['station']),
     filter: Object.freeze({ field: 'fsType', equals: 'Equipment' }),
   }),
-  Object.freeze({
-    key: 'kitchen_pack_out_testing',
-    label: 'Kitchen Pack Out - Testing',
-    documentType: 'kitchen_packout',
-    groupBy: Object.freeze(['prepArea']),
-  }),
-  Object.freeze({
-    key: 'test_kitchen_pack_out',
-    label: 'Test - Kitchen Pack Out',
-    documentType: 'kitchen_packout',
-    groupBy: Object.freeze(['category', 'station']),
-  }),
-  Object.freeze({
-    key: 'required_items',
-    label: 'Required Items',
-    documentType: 'po',
-    groupBy: Object.freeze([]),
-  }),
 ]);
 
 export const catereasePackOutTemplate = (templateKey) => (

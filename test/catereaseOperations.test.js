@@ -53,6 +53,38 @@ test('required items retain Caterease sub-event identity for separate Pack Out e
   ]);
 });
 
+test('required items inherit a sub-event through their Caterease food service name', () => {
+  const snapshot = buildCatereaseOperationalSnapshot({
+    eventId: 'E20244',
+    packOutRows: [
+      { FdSvNum: 'FS1', ItemName: 'Dinner Station', SubEvtNum: 'S-DINNER' },
+      { FdSvNum: 'FS2', ItemName: 'Cocktail Station', SubEvtNum: 'S-COCKTAIL' },
+    ],
+    kitchenPackOutRows: [
+      { UID: 'R1', ItemName: 'Dinner Plate', FSName: 'Dinner Station', SEDescription: 'Menu' },
+      { UID: 'R2', ItemName: 'Cocktail Napkin', FSName: 'Cocktail Station', SEDescription: 'Menu' },
+    ],
+  });
+  assert.deepEqual(snapshot.requiredItems.map(({ itemName, subEvent, zoneName }) => [itemName, subEvent, zoneName]), [
+    ['Dinner Plate', 'S-DINNER', 'Menu'],
+    ['Cocktail Napkin', 'S-COCKTAIL', 'Menu'],
+  ]);
+});
+
+test('required items are not guessed when a food service name belongs to multiple sub-events', () => {
+  const snapshot = buildCatereaseOperationalSnapshot({
+    eventId: 'E20244',
+    packOutRows: [
+      { FdSvNum: 'FS1', ItemName: 'Passed HDs', SubEvtNum: 'S-DINNER' },
+      { FdSvNum: 'FS2', ItemName: 'Passed HDs', SubEvtNum: 'S-COCKTAIL' },
+    ],
+    kitchenPackOutRows: [
+      { UID: 'R1', ItemName: 'Tray', FSName: 'Passed HDs', SEDescription: 'Menu' },
+    ],
+  });
+  assert.equal(snapshot.requiredItems[0].subEvent, '');
+});
+
 test('Caterease operational Pack Out rows map to recognized bar items', () => {
   const [item] = catereaseOperationalPackOutToBarItems([{
     sourceId: '42',
@@ -514,7 +546,7 @@ test('operational snapshot checksum is stable when API row order changes', () =>
     packOutRows: [{ ItemName: 'B', Qty: 2 }, { ItemName: 'A', Qty: 1 }],
     syncedAt: new Date('2026-09-11T12:00:00Z'),
   });
-  assert.equal(first.schemaVersion, 5);
+  assert.equal(first.schemaVersion, 6);
   const second = buildCatereaseOperationalSnapshot({
     eventId: 'E22672',
     packOutRows: [{ ItemName: 'A', Qty: 1 }, { ItemName: 'B', Qty: 2 }],

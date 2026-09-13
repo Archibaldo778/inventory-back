@@ -181,6 +181,29 @@ const mergeKitchenMenuRows = (derivedRows = [], directRows = []) => {
 
 const stableRows = (rows) => [...rows].sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
 
+const attachRequiredItemSubEvents = (requiredItems = [], foodService = []) => {
+  const zonesByFoodServiceName = new Map();
+  foodService.forEach((row) => {
+    const nameKey = clean(row?.itemName, 300).toLowerCase();
+    const identity = operationalZoneIdentity(row);
+    if (!nameKey || !identity || !row?.subEvent) return;
+    const matches = zonesByFoodServiceName.get(nameKey) || new Map();
+    matches.set(identity, { subEvent: row.subEvent, zoneName: row.zoneName || '' });
+    zonesByFoodServiceName.set(nameKey, matches);
+  });
+  return requiredItems.map((row) => {
+    if (row?.subEvent) return row;
+    const matches = zonesByFoodServiceName.get(clean(row?.station, 300).toLowerCase());
+    if (!matches || matches.size !== 1) return row;
+    const [zone] = matches.values();
+    return {
+      ...row,
+      subEvent: zone.subEvent,
+      zoneName: row.zoneName || zone.zoneName,
+    };
+  });
+};
+
 const maximumPositiveValue = (rows, keys) => {
   const values = (Array.isArray(rows) ? rows : []).flatMap((row) => {
     const value = numberOrNull(first(row, keys));
@@ -217,7 +240,10 @@ export const buildCatereaseOperationalSnapshot = ({
     first(guestRow, ['Qty', 'Quantity'])
   );
   const packOut = normalizeCatereasePackOutRows(packOutRows);
-  const kitchenPackOut = normalizeCatereaseKitchenPackOutRows(kitchenPackOutRows);
+  const kitchenPackOut = attachRequiredItemSubEvents(
+    normalizeCatereaseKitchenPackOutRows(kitchenPackOutRows),
+    packOut
+  );
   const packOutTemplates = buildCatereasePackOutTemplateSummaries(kitchenPackOut);
   const directKitchenMenu = normalizeCatereaseKitchenMenuDishRows(kitchenMenuRows);
   const derivedKitchenMenu = buildKitchenMenuRows(kitchenPackOut);
@@ -243,7 +269,7 @@ export const buildCatereaseOperationalSnapshot = ({
     packOutTemplates,
   })).digest('hex');
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     eventId: clean(eventId, 120),
     syncedAt,
     checksum,

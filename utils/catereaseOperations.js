@@ -4,6 +4,7 @@ import { catereaseRichTextToPlain } from './catereaseKitchen.js';
 import { buildExactRecipeMatchIndex, resolveExactRecipeMatch } from './kitchenRecipeMatching.js';
 import {
   buildCatereasePackOutTemplateSummaries,
+  catereaseOperationalTemplateRows,
   catereasePackOutTemplate,
   catereasePackOutTemplateRows,
 } from './catereasePackOutTemplates.js';
@@ -44,6 +45,7 @@ export const normalizeCatereasePackOutRows = (rows = []) => (Array.isArray(rows)
     subEvent: clean(first(row, ['SubEvtNum', 'SubEvent']), 120),
     zoneName: clean(first(row, ['SEDescription', 'Room', 'SubEventName']), 200),
     category: clean(first(row, ['Category']), 160),
+    fsType: clean(first(row, ['FSType', 'Type', 'ItemType']), 160),
     menuGroup: clean(first(row, ['MenuGroup', 'FSCategory', 'GroupName']), 160),
     notes: clean(first(row, ['Notes', 'Comment', 'Instructions']), 1000),
   }))
@@ -273,8 +275,9 @@ export const buildCatereaseOperationalSnapshot = ({
     normalizeCatereaseKitchenPackOutRows(kitchenPackOutRows),
     packOut
   );
-  const packOutTemplates = buildCatereasePackOutTemplateSummaries(kitchenPackOut, printTemplateRows);
-  const directKitchenMenu = applySubEventNames(normalizeCatereaseKitchenMenuDishRows(kitchenMenuRows), zoneNameBySubEvent);
+  const packOutTemplates = buildCatereasePackOutTemplateSummaries(kitchenPackOut, printTemplateRows, packOut);
+  const directKitchenMenu = applySubEventNames(normalizeCatereaseKitchenMenuDishRows(kitchenMenuRows), zoneNameBySubEvent)
+    .filter((row) => !/\bpack\s*out\b/i.test(row.zoneName));
   const derivedKitchenMenu = buildKitchenMenuRows(kitchenPackOut);
   const kitchenMenu = derivedKitchenMenu.length
     ? mergeKitchenMenuRows(derivedKitchenMenu, directKitchenMenu)
@@ -301,7 +304,7 @@ export const buildCatereaseOperationalSnapshot = ({
     packOutTemplates,
   })).digest('hex');
   return {
-    schemaVersion: 10,
+    schemaVersion: 11,
     eventId: clean(eventId, 120),
     syncedAt,
     checksum,
@@ -537,7 +540,7 @@ const operationalRows = (snapshot, type, zoneKey = '', templateKey = '') => {
   const templates = Array.isArray(snapshot?.packOutTemplates) ? snapshot.packOutTemplates : undefined;
   const template = catereasePackOutTemplate(templateKey, templates);
   if (template && template.documentType === type) {
-    rows = catereasePackOutTemplateRows(snapshot?.requiredItems || snapshot?.kitchenPackOut || [], template.key, templates);
+    rows = catereaseOperationalTemplateRows(snapshot, template.key, templates);
   }
   if (!template && type === 'po') rows = (version >= 2 ? snapshot?.packOut : snapshot?.kitchenMenu) || [];
   if (!template && type === 'kitchen_packout') {

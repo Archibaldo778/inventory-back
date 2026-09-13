@@ -121,7 +121,24 @@ export const catereasePackOutTemplateRows = (rows = [], templateKey, templates) 
   return conditions.length ? values.filter((row) => conditions.every((condition) => matchesCondition(row, condition))) : values;
 };
 
-export const buildCatereasePackOutTemplateSummaries = (rows = [], printTemplateRows) => {
+export const catereaseOperationalTemplateRows = (snapshot = {}, templateKey, templates) => {
+  const template = catereasePackOutTemplate(templateKey, templates);
+  if (!template) return [];
+  const requiredRows = snapshot?.requiredItems || snapshot?.kitchenPackOut || [];
+  const requiredMatches = catereasePackOutTemplateRows(requiredRows, templateKey, templates);
+  if (template.documentType !== 'po') return requiredMatches;
+
+  const foodServiceRows = snapshot?.foodService || snapshot?.packOut || [];
+  const foodServiceMatches = catereasePackOutTemplateRows(foodServiceRows, templateKey, templates);
+  if (foodServiceMatches.length) return foodServiceMatches;
+
+  // Manually entered event Pack Out lines can have no Type/FSType. Their
+  // sub-event description is still preserved by /v1/foodserv.
+  const explicitPackOutRows = foodServiceRows.filter((row) => /\bpack\s*out\b/i.test(clean(row?.zoneName, 200)));
+  return explicitPackOutRows.length ? explicitPackOutRows : requiredMatches;
+};
+
+export const buildCatereasePackOutTemplateSummaries = (rows = [], printTemplateRows, foodServiceRows = []) => {
   const templates = Array.isArray(printTemplateRows)
     ? normalizeCatereasePrintTemplates(printTemplateRows)
     : CATEREASE_PACK_OUT_TEMPLATES;
@@ -129,6 +146,6 @@ export const buildCatereasePackOutTemplateSummaries = (rows = [], printTemplateR
     ...template,
     groupBy: [...template.groupBy],
     conditions: (template.conditions || []).map((condition) => ({ ...condition })),
-    rowCount: catereasePackOutTemplateRows(rows, template.key, templates).length,
+    rowCount: catereaseOperationalTemplateRows({ requiredItems: rows, foodService: foodServiceRows }, template.key, templates).length,
   }));
 };

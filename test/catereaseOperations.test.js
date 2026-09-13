@@ -21,6 +21,7 @@ import {
 import { runImportedBarItemMergePipeline } from '../utils/barManualItems.js';
 import {
   buildCatereasePackOutTemplateSummaries,
+  catereaseOperationalTemplateRows,
   catereasePackOutTemplateRows,
   normalizeCatereasePrintTemplates,
 } from '../utils/catereasePackOutTemplates.js';
@@ -38,6 +39,20 @@ test('Caterease exposes only the two real operational Pack Out document types', 
   assert.deepEqual(catereasePackOutTemplateRows(rows, 'pack_out').map((row) => row.itemName), ['Chafing Dish']);
   assert.equal(rows[0].fsType, 'Equipment');
   assert.equal(rows[0].category, 'Hot');
+});
+
+test('manual food-service rows in a Pack Out sub-event are used when event required items are empty', () => {
+  const templates = normalizeCatereasePrintTemplates([
+    { UID: 36, PrintKind: 'EvtReq', Title: 'Pack Out', Condition1: "(FSType = 'Equipment')" },
+  ]);
+  const rows = catereaseOperationalTemplateRows({
+    requiredItems: [],
+    foodService: [
+      { itemName: 'Lime Wheels', zoneName: 'Pack Out' },
+      { itemName: 'Paper plates', zoneName: 'Pack Out' },
+    ],
+  }, 'print-36', templates);
+  assert.deepEqual(rows.map((row) => row.itemName), ['Lime Wheels', 'Paper plates']);
 });
 
 test('Caterease print templates use PrintKind, all condition slots, and stored grouping rules', () => {
@@ -281,6 +296,7 @@ test('Caterease Pack Out rows preserve operational grouping', () => {
     subEvent: '00001-S1',
     zoneName: '',
     category: 'Paper goods',
+    fsType: '',
     menuGroup: 'Kitchen Equipment',
     notes: '',
   });
@@ -615,7 +631,7 @@ test('operational snapshot checksum is stable when API row order changes', () =>
     packOutRows: [{ ItemName: 'B', Qty: 2 }, { ItemName: 'A', Qty: 1 }],
     syncedAt: new Date('2026-09-11T12:00:00Z'),
   });
-  assert.equal(first.schemaVersion, 10);
+  assert.equal(first.schemaVersion, 11);
   const second = buildCatereaseOperationalSnapshot({
     eventId: 'E22672',
     packOutRows: [{ ItemName: 'A', Qty: 1 }, { ItemName: 'B', Qty: 2 }],

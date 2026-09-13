@@ -48,7 +48,7 @@ import {
   packOutRenderedItemNames,
   renderCatereaseOperationalDocx,
 } from '../utils/catereaseOperations.js';
-import { catereasePackOutTemplate, catereasePackOutTemplateRows } from '../utils/catereasePackOutTemplates.js';
+import { catereaseOperationalTemplateRows, catereasePackOutTemplate } from '../utils/catereasePackOutTemplates.js';
 import { normalizeKitchenRecipeName, syncKitchenRecipeMatches } from '../utils/kitchenRecipeMatching.js';
 import {
   cloudinaryWordThumbnailUrl,
@@ -121,7 +121,7 @@ const loadMatchedDecorImages = async (snapshot, rows = snapshot?.packOut) => {
 
 const OPERATIONAL_FIELDS = Object.freeze({
   eventrequireditem: 'UID,FdSvNum,ItemName,OTFItemName,Qty,Unit,PUnit,QtyPerPUnit,FSPrepArea,FSName,FSType,Category,RentalItem,Vendor,SEDescription,SEvtDate,StartTime',
-  foodserv: 'ItemName,Qty,Unit,PrepArea,SubEvtNum,Category,Comment,Description,FdSvNum,ItemNum',
+  foodserv: 'ItemName,Qty,Unit,PUnit,PrepArea,SubEvtNum,Category,Comment,Description,FdSvNum,ItemNum,ItemType,Type,ReqItem,Vendor',
   foodservquery: 'FdSvNum,ItemNum,PrepArea,SubEvtNum,SEDescription,ItemName,Qty,Unit,Category,FSCategory,MenuGroup,ActGuests,GtdGuests,PlnGuests',
   foodservusage: 'PrepArea,SubEvtNum,ItemName,Qty,Category,MenuGroup',
   shift: 'ShiftNum,SubEvtNum,Position,Required,StartTime,EndTime,Category,Comments,Uniform',
@@ -192,7 +192,10 @@ const syncCatereaseOperationalBarItems = async (event, snapshot) => {
   if (hasAppliedCatereaseOperationalChecksum(barEvent, snapshot?.checksum)) {
     return { synced: false, items: 0, reason: 'unchanged' };
   }
-  const rawItems = catereaseOperationalPackOutToBarItems(snapshot?.requiredItems || snapshot?.packOut);
+  const operationalPackOutRows = Array.isArray(snapshot?.packOut) && snapshot.packOut.length
+    ? snapshot.packOut
+    : snapshot?.requiredItems;
+  const rawItems = catereaseOperationalPackOutToBarItems(operationalPackOutRows);
   const dashboardGuestCount = dashboardEventGuestCount(event);
   const snapshotGuestCount = Number(snapshot?.guestCount);
   const hasSnapshotGuestCount = Number.isFinite(snapshotGuestCount) && snapshotGuestCount > 0;
@@ -1000,7 +1003,7 @@ router.get('/operations/events/:id/export/:type', requireAuth, async (req, res) 
       : [];
     const brandLogoSvg = await loadBrandLogoSvg();
     const templateRows = template
-      ? catereasePackOutTemplateRows(event.catereaseOperations.requiredItems || event.catereaseOperations.kitchenPackOut || [], template.key, templates)
+      ? catereaseOperationalTemplateRows(event.catereaseOperations, template.key, templates)
       : undefined;
     const decorImages = type === 'po' ? await loadMatchedDecorImages(event.catereaseOperations, templateRows) : [];
     const zoneName = String(req.query.zoneName || '');

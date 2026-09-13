@@ -1,5 +1,24 @@
 const clean = (value, maxLength = 1000) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, maxLength);
 const normalized = (value) => clean(value).toLowerCase();
+const PACK_OUT_SECTION_HEADINGS = new Set([
+  'kitchen equipment',
+  'specialty kitchen equipment',
+  'sanitation kit',
+  'disposable items',
+  'trays',
+  'ice',
+  'water',
+  'garnish',
+  'staff items',
+]);
+
+const isPackOutSectionHeading = (row) => (
+  PACK_OUT_SECTION_HEADINGS.has(normalized(row?.itemName))
+  && (!Number.isFinite(Number(row?.quantity)) || Number(row.quantity) === 0)
+);
+
+const foodServiceGroupKey = (row) => clean(row?.subEvent, 120).toLowerCase()
+  || clean(row?.zoneName, 200).toLowerCase();
 
 const FIELD_MAP = Object.freeze({
   type: 'fsType',
@@ -128,13 +147,26 @@ export const catereaseOperationalTemplateRows = (snapshot = {}, templateKey, tem
   const requiredMatches = catereasePackOutTemplateRows(requiredRows, templateKey, templates);
   if (template.documentType !== 'po') return requiredMatches;
 
-  const foodServiceRows = snapshot?.foodService || snapshot?.packOut || [];
-  const foodServiceMatches = catereasePackOutTemplateRows(foodServiceRows, templateKey, templates);
+  const foodServiceRows = (snapshot?.foodService || snapshot?.packOut || [])
+    .filter((row) => !/\binvoice\b/i.test(clean(row?.zoneName, 200)));
+  const manualPackOutGroups = new Set(foodServiceRows
+    .filter((row) => isPackOutSectionHeading(row) || /\bpack\s*out\b/i.test(clean(row?.zoneName, 200)))
+    .map(foodServiceGroupKey)
+    .filter(Boolean));
+  const manualPackOutRows = foodServiceRows.filter((row) => (
+    manualPackOutGroups.has(foodServiceGroupKey(row)) && !isPackOutSectionHeading(row)
+  ));
+  if (manualPackOutRows.length) return manualPackOutRows;
+
+  const foodServiceMatches = catereasePackOutTemplateRows(foodServiceRows, templateKey, templates)
+    .filter((row) => !isPackOutSectionHeading(row));
   if (foodServiceMatches.length) return foodServiceMatches;
 
   // Manually entered event Pack Out lines can have no Type/FSType. Their
   // sub-event description is still preserved by /v1/foodserv.
-  const explicitPackOutRows = foodServiceRows.filter((row) => /\bpack\s*out\b/i.test(clean(row?.zoneName, 200)));
+  const explicitPackOutRows = foodServiceRows.filter((row) => (
+    /\bpack\s*out\b/i.test(clean(row?.zoneName, 200)) && !isPackOutSectionHeading(row)
+  ));
   return explicitPackOutRows.length ? explicitPackOutRows : requiredMatches;
 };
 

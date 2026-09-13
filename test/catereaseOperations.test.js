@@ -55,6 +55,22 @@ test('manual food-service rows in a Pack Out sub-event are used when event requi
   assert.deepEqual(rows.map((row) => row.itemName), ['Lime Wheels', 'Paper plates']);
 });
 
+test('a manual Pack Out keeps its whole sub-event and excludes headings and invoice rows', () => {
+  const templates = normalizeCatereasePrintTemplates([
+    { UID: 36, PrintKind: 'EvtReq', Title: 'Pack Out', Condition1: "(FSType = 'Equipment')" },
+  ]);
+  const rows = catereaseOperationalTemplateRows({
+    requiredItems: [],
+    foodService: [
+      { itemName: 'KITCHEN EQUIPMENT', quantity: 0, subEvent: 'S-PO' },
+      { itemName: 'Chef apron', quantity: 3, fsType: 'Equipment', subEvent: 'S-PO' },
+      { itemName: 'Panna', quantity: 14, fsType: 'Beverage', subEvent: 'S-PO' },
+      { itemName: 'Rentals - Additional', quantity: 1, fsType: 'Equipment', subEvent: 'S-INVOICE', zoneName: 'Invoice' },
+    ],
+  }, 'print-36', templates);
+  assert.deepEqual(rows.map((row) => row.itemName), ['Chef apron', 'Panna']);
+});
+
 test('Caterease print templates use PrintKind, all condition slots, and stored grouping rules', () => {
   const templates = normalizeCatereasePrintTemplates([
     { UID: 10, PrintKind: 'MenuPrep', Title: 'Not a Pack Out' },
@@ -129,6 +145,21 @@ test('required items use FdSvNum when the same food service name appears in mult
     ],
   });
   assert.equal(snapshot.requiredItems[0].subEvent, 'S-COCKTAIL');
+});
+
+test('required items inherit a missing food type through FdSvNum before template filtering', () => {
+  const snapshot = buildCatereaseOperationalSnapshot({
+    eventId: 'E22856',
+    packOutRows: [{ FdSvNum: 'FS-BLINI', ItemName: 'Blini with caviar', Type: 'Food' }],
+    kitchenPackOutRows: [{ UID: 'R1', FdSvNum: 'FS-BLINI', ItemName: 'Caviar', FSName: 'Blini with caviar' }],
+    printTemplateRows: [{ UID: 1, PrintKind: 'EvtReq', Title: 'Kitchen Pack Out', Condition2: "(Type = 'Food')" }],
+  });
+  assert.equal(snapshot.requiredItems[0].fsType, 'Food');
+  assert.deepEqual(catereaseOperationalTemplateRows(
+    snapshot,
+    'print-1',
+    snapshot.packOutTemplates
+  ).map((row) => row.itemName), ['Caviar']);
 });
 
 test('sub-event descriptions become human document names across operational data', () => {
@@ -300,6 +331,14 @@ test('Caterease Pack Out rows preserve operational grouping', () => {
     menuGroup: 'Kitchen Equipment',
     notes: '',
   });
+});
+
+test('Caterease Pack Out suppresses a description that only repeats the item name', () => {
+  const rows = normalizeCatereasePackOutRows([
+    { ItemName: 'Chef apron', Description: 'Chef apron' },
+    { ItemName: 'Gloves- S, M, L', Comment: 'of each' },
+  ]);
+  assert.deepEqual(rows.map((row) => row.notes), ['', 'of each']);
 });
 
 test('Caterease Pack Out excludes non-inventory Standard service rows', () => {
@@ -655,7 +694,7 @@ test('operational snapshot checksum is stable when API row order changes', () =>
     packOutRows: [{ ItemName: 'B', Qty: 2 }, { ItemName: 'A', Qty: 1 }],
     syncedAt: new Date('2026-09-11T12:00:00Z'),
   });
-  assert.equal(first.schemaVersion, 12);
+  assert.equal(first.schemaVersion, 13);
   const second = buildCatereaseOperationalSnapshot({
     eventId: 'E22672',
     packOutRows: [{ ItemName: 'A', Qty: 1 }, { ItemName: 'B', Qty: 2 }],

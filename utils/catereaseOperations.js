@@ -49,6 +49,13 @@ export const normalizeCatereasePackOutRows = (rows = []) => (Array.isArray(rows)
     menuGroup: clean(first(row, ['MenuGroup', 'FSCategory', 'GroupName']), 160),
     notes: clean(catereaseRichTextToPlain(first(row, ['Notes', 'Comment', 'Description', 'Instructions'])), 1000),
   }))
+  .map((row) => ({
+    ...row,
+    notes: row.notes.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+      === row.itemName.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+      ? ''
+      : row.notes,
+  }))
   .filter((row) => row.itemName && row.menuGroup.toLowerCase() !== 'standard');
 
 export const normalizeCatereaseKitchenPackOutRows = (rows = []) => (Array.isArray(rows) ? rows : [])
@@ -205,14 +212,19 @@ const attachRequiredItemSubEvents = (requiredItems = [], foodService = []) => {
   foodService.forEach((row) => {
     const nameKey = clean(row?.itemName, 300).toLowerCase();
     const identity = operationalZoneIdentity(row);
+    const foodServiceDetails = {
+      subEvent: row.subEvent || '',
+      zoneName: row.zoneName || '',
+      fsType: row.fsType || '',
+      category: row.category || '',
+    };
+    if (row.foodServiceId) {
+      zoneByFoodServiceId.set(clean(row.foodServiceId, 120).toLowerCase(), foodServiceDetails);
+    }
     if (!nameKey || !identity || !row?.subEvent) return;
     const matches = zonesByFoodServiceName.get(nameKey) || new Map();
-    matches.set(identity, { subEvent: row.subEvent, zoneName: row.zoneName || '' });
+    matches.set(identity, foodServiceDetails);
     zonesByFoodServiceName.set(nameKey, matches);
-    if (row.foodServiceId) zoneByFoodServiceId.set(clean(row.foodServiceId, 120).toLowerCase(), {
-      subEvent: row.subEvent,
-      zoneName: row.zoneName || '',
-    });
   });
   return requiredItems.map((row) => {
     if (row?.subEvent) return row;
@@ -224,6 +236,8 @@ const attachRequiredItemSubEvents = (requiredItems = [], foodService = []) => {
       ...row,
       subEvent: zone.subEvent,
       zoneName: zone.zoneName || row.zoneName,
+      fsType: row.fsType || zone.fsType,
+      category: row.category || zone.category,
     };
   });
 };
@@ -304,7 +318,7 @@ export const buildCatereaseOperationalSnapshot = ({
     packOutTemplates,
   })).digest('hex');
   return {
-    schemaVersion: 12,
+    schemaVersion: 13,
     eventId: clean(eventId, 120),
     syncedAt,
     checksum,

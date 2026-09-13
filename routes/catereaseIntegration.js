@@ -121,7 +121,7 @@ const loadMatchedDecorImages = async (snapshot, rows = snapshot?.packOut) => {
 
 export const OPERATIONAL_FIELDS = Object.freeze({
   eventrequireditem: 'UID,FdSvNum,ItemName,OTFItemName,Qty,Unit,PUnit,QtyPerPUnit,FSPrepArea,FSName,FSType,Category,RentalItem,Vendor,SEDescription,SEvtDate,StartTime',
-  foodserv: 'ItemName,Qty,Unit,PUnit,PrepArea,SubEvtNum,Category,Comment,Description,FdSvNum,ItemNum,ItemType,Type,ReqItem,Vendor',
+  foodserv: 'ItemName,Qty,Unit,PUnit,PrepArea,SubEvtNum,Category,Comment,Description,FdSvNum,ItemNum,ItemType,Type,ReqItem',
   foodservquery: 'FdSvNum,ItemNum,PrepArea,SubEvtNum,SEDescription,ItemName,Qty,Unit,Category,FSCategory,MenuGroup,ActGuests,GtdGuests,PlnGuests',
   foodservusage: 'PrepArea,SubEvtNum,ItemName,Qty,Category,MenuGroup',
   shift: 'ShiftNum,SubEvtNum,Position,Required,StartTime,EndTime,Category,Comments,Uniform',

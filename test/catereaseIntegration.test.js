@@ -9,3 +9,11 @@ test('event required item fields exclude unsupported SubEvtNum', () => {
   assert.equal(fields.includes('SubEvtNum'), false);
   assert.equal(fields.includes('FdSvNum'), true);
 });
+
+test('food service fields exclude unsupported Vendor', () => {
+  const fields = OPERATIONAL_FIELDS.foodserv.split(',');
+
+  assert.equal(fields.includes('Vendor'), false);
+  assert.equal(fields.includes('Comment'), true);
+  assert.equal(fields.includes('Description'), true);
+});

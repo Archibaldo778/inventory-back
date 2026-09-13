@@ -467,7 +467,7 @@ test('operational DOCX separates different sub-events with the same human descri
   assert.doesNotMatch(xml, /Cocktail Ice/);
 });
 
-test('Kitchen Pack Out uses the Caterease PO table layout', async () => {
+test('Kitchen Pack Out uses the Caterease feedback table layout', async () => {
   const snapshot = buildCatereaseOperationalSnapshot({
     eventId: 'E22672',
     kitchenPackOutRows: [
@@ -482,13 +482,37 @@ test('Kitchen Pack Out uses the Caterease PO table layout', async () => {
   const zip = await JSZip.loadAsync(buffer);
   const xml = await zip.file('word/document.xml').async('string');
   assert.match(xml, />KITCHEN PACK OUT</);
-  assert.match(xml, />Name</);
-  assert.match(xml, />Qty</);
-  assert.match(xml, />Notes\/Comments</);
-  assert.match(xml, />Delivered</);
-  assert.match(xml, />Returned</);
-  assert.match(xml, />HOT LINE</);
-  assert.match(xml, />Each · Kitchen</);
+  assert.match(xml, />Event Name: </);
+  assert.match(xml, />Guest Count: </);
+  assert.match(xml, />Staff Meal: </);
+  assert.doesNotMatch(xml, />Revision</);
+  assert.match(xml, />Quantity</);
+  assert.match(xml, />Not Enough</);
+  assert.match(xml, />Just Enough</);
+  assert.match(xml, />Too Much</);
+  assert.doesNotMatch(xml, />Delivered</);
+  assert.doesNotMatch(xml, />Returned</);
+  assert.match(xml, />Hot Line</);
+  assert.match(xml, />Sheet Pan</);
+  assert.doesNotMatch(xml, />3</);
+});
+
+test('manual Pack Out comments are preserved in the Word notes column', async () => {
+  const snapshot = buildCatereaseOperationalSnapshot({
+    eventId: 'E22856',
+    packOutRows: [{ ItemName: 'Gloves- S, M, L', Qty: 1, Comment: 'of each', SEDescription: 'Pack Out' }],
+    printTemplateRows: [{ UID: 36, PrintKind: 'EvtReq', Title: 'Pack Out', Condition1: "(FSType = 'Equipment')" }],
+  });
+  const buffer = await renderCatereaseOperationalDocx({
+    event: { title: 'Cocktail', date: '2026-09-14', externalId: 'E22856', meta: {} },
+    snapshot,
+    type: 'po',
+    templateKey: 'print-36',
+  });
+  const zip = await JSZip.loadAsync(buffer);
+  const xml = await zip.file('word/document.xml').async('string');
+  assert.match(xml, />Gloves- S, M, L</);
+  assert.match(xml, />of each</);
 });
 
 test('operational DOCX applies a selected Caterease Pack Out template', async () => {
@@ -631,7 +655,7 @@ test('operational snapshot checksum is stable when API row order changes', () =>
     packOutRows: [{ ItemName: 'B', Qty: 2 }, { ItemName: 'A', Qty: 1 }],
     syncedAt: new Date('2026-09-11T12:00:00Z'),
   });
-  assert.equal(first.schemaVersion, 11);
+  assert.equal(first.schemaVersion, 12);
   const second = buildCatereaseOperationalSnapshot({
     eventId: 'E22672',
     packOutRows: [{ ItemName: 'A', Qty: 1 }, { ItemName: 'B', Qty: 2 }],

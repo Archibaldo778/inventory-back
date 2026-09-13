@@ -47,7 +47,7 @@ export const normalizeCatereasePackOutRows = (rows = []) => (Array.isArray(rows)
     category: clean(first(row, ['Category']), 160),
     fsType: clean(first(row, ['FSType', 'Type', 'ItemType']), 160),
     menuGroup: clean(first(row, ['MenuGroup', 'FSCategory', 'GroupName']), 160),
-    notes: clean(first(row, ['Notes', 'Comment', 'Instructions']), 1000),
+    notes: clean(catereaseRichTextToPlain(first(row, ['Notes', 'Comment', 'Description', 'Instructions'])), 1000),
   }))
   .filter((row) => row.itemName && row.menuGroup.toLowerCase() !== 'standard');
 
@@ -304,7 +304,7 @@ export const buildCatereaseOperationalSnapshot = ({
     packOutTemplates,
   })).digest('hex');
   return {
-    schemaVersion: 11,
+    schemaVersion: 12,
     eventId: clean(eventId, 120),
     syncedAt,
     checksum,
@@ -416,16 +416,23 @@ const packOutSection = (row) => {
   if (matchesAny(name, [/\bstraws?\b/])) return 'ADDITIONAL';
   if (matchesAny(name, [/tray spray/, /roll of paper ?towels?/])) return 'CLEANING';
   if (matchesAny(name, [/wooden tray/, /taco insert/, /corner insert/, /white stones?/])) return 'TRAYS';
+  if (matchesAny(name, [/square lucite/, /square black inserts?/])) return 'TRAYS';
   if (matchesAny(name, [/cake stand/, /champagne bucket/])) return 'CAKE STAND';
   if (matchesAny(name, [/c folds?/, /dish soap/, /dish sponge/, /tray cleaning spray/, /microfiber cloths?/, /first aid kit$/])) return 'SANITATION KIT';
+  if (matchesAny(name, [/electric crepe maker/, /pam spray/, /microplane/])) return 'SPECIALTY KITCHEN EQUIPMENT';
+  if (matchesAny(name, [/chef apron/, /cutting board/, /knife serrated/, /sheet pans?/, /mixing bowl/, /^spoons? /, /salt and pepper/, /olive oil/, /fish spatula/, /squeeze bottle/, /whisk/, /tongs?$/, /rubber spatula/, /plastic teaspoons?/, /plastic tasting spoons?/])) return 'KITCHEN EQUIPMENT';
+  if (matchesAny(name, [/standard from united/])) return 'ICE';
   if (category.toLowerCase() === 'disposable') return 'DISPOSABLE ITEMS';
   if (menuGroup.toLowerCase() === 'kitchen equipment') return 'KITCHEN EQUIPMENT';
+  if (category.toLowerCase() === 'beverage disregard') return 'BEVERAGE';
+  if (category.toLowerCase() === 'beverage item name') return 'BEVERAGE';
   return category || menuGroup || 'UNASSIGNED';
 };
 
 const PACK_OUT_SECTION_ORDER = [
-  'STAFF ITEMS', 'COFFEE EQUIPMENT', 'WATER', 'SODA', 'JUICE', 'GARNISH', 'ADDITIONAL',
-  'CLEANING', 'TRAYS', 'CAKE STAND', 'KITCHEN EQUIPMENT', 'SANITATION KIT', 'DISPOSABLE ITEMS', 'UNASSIGNED',
+  'KITCHEN EQUIPMENT', 'SPECIALTY KITCHEN EQUIPMENT', 'SANITATION KIT', 'DISPOSABLE ITEMS',
+  'TRAYS', 'ICE', 'WATER', 'SODA', 'JUICE', 'GARNISH', 'BEVERAGE', 'ADDITIONAL',
+  'CLEANING', 'CAKE STAND', 'STAFF ITEMS', 'COFFEE EQUIPMENT', 'UNASSIGNED',
 ];
 
 const PACK_OUT_TEMPLATE = Object.freeze({
@@ -498,6 +505,22 @@ const catereasePackOutTable = (groups, decorImages = []) => {
     { value: '', align: '' },
     { value: '', align: '' },
   ].map(({ value, align }, index) => cell(value, { width: widths[index], align })).join('')}${includePhotos ? imageCell(imageByName.get(itemKey(row.itemName)), widths[5]) : ''}</w:tr>`).join('')}`).join('');
+  return `<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/><w:tblLayout w:type="fixed"/>${tableBorders}</w:tblPr><w:tblGrid>${widths.map((width) => `<w:gridCol w:w="${width}"/>`).join('')}</w:tblGrid>${header}${body}</w:tbl>`;
+};
+
+const catereaseKitchenPackOutTable = (groups) => {
+  const widths = [5300, 1400, 1600, 1600, 1500];
+  const headers = ['', 'Quantity', 'Not Enough', 'Just Enough', 'Too Much'];
+  const header = `<w:tr>${headers.map((value, index) => cell(value, {
+    bold: true,
+    width: widths[index],
+    shading: 'E7E6E6',
+    align: 'center',
+  })).join('')}</w:tr>`;
+  const sectionRow = (name) => `<w:tr><w:tc><w:tcPr><w:gridSpan w:val="${widths.length}"/><w:tcW w:w="${widths.reduce((total, width) => total + width, 0)}" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr>${paragraph(name, { bold: true, size: 20, after: 0 })}</w:tc></w:tr>`;
+  const body = [...groups.entries()].map(([group, values]) => `${sectionRow(group)}${values.map((row) => `<w:tr>${[
+    row.itemName, '', '', '', '',
+  ].map((value, index) => cell(value, { width: widths[index], align: index ? 'center' : '' })).join('')}</w:tr>`).join('')}`).join('');
   return `<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/><w:tblLayout w:type="fixed"/>${tableBorders}</w:tblPr><w:tblGrid>${widths.map((width) => `<w:gridCol w:w="${width}"/>`).join('')}</w:tblGrid>${header}${body}</w:tbl>`;
 };
 
@@ -647,16 +670,20 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
           ? row.station || row.prepArea
       : row.menuGroup || row.category || row.prepArea
   ));
+  const usesFoodServicePackOut = type === 'po'
+    && rows.some((row) => (snapshot?.foodService || snapshot?.packOut || []).includes(row));
   const sections = isKitchenMenu ? kitchenMenuSections(rows, recipes, isAnnotatedKitchenMenu) : isStaffRequest
     ? table(['#', 'Position', 'Start', 'End', 'Uniform', 'Comments'], rows.map((row) => [
       formatQuantity(row.required), row.position, row.startTime, row.endTime, row.uniform, row.comments,
     ]), [700, 2200, 1300, 1300, 2600, 2700])
-    : (template || isKitchenPackOut) ? catereasePackOutTable(new Map([...groups.entries()].map(([group, values]) => [
+    : isKitchenPackOut ? catereaseKitchenPackOutTable(groups)
+    : usesFoodServicePackOut ? packOutTable(rows, decorImages, false)
+    : template ? catereasePackOutTable(new Map([...groups.entries()].map(([group, values]) => [
       group,
       values.map((row) => ({
         itemName: row.itemName,
         quantity: row.quantity,
-        notes: [row.unit, template ? row.vendor : row.prepArea].filter(Boolean).join(' · '),
+        notes: [row.notes, row.unit, row.vendor].filter((value, index, values) => value && values.indexOf(value) === index).join(' · '),
       })),
     ]))) : packOutTable(rows, decorImages, includePackOutTemplate);
   const parsedEventGuestCount = Number(event?.meta?.guestCount);
@@ -677,6 +704,26 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
     [`Guests: ${guestCount}`, `Delivery Time: ${deliveryTime}`],
     [`Event Number: ${displayedEventNumber(event?.externalId || snapshot?.eventId || '')}`, `Date PO Modified: ${new Intl.DateTimeFormat('en-US').format(new Date())}`],
   ], [5300, 5300]);
+  const staffMealRow = rows.find((row) => /^option\s+[a-z0-9]+\s*:/i.test(clean(row?.station, 300)));
+  const staffMealQuantity = formatQuantity(staffMealRow?.quantity);
+  const staffMeal = [staffMealQuantity, clean(staffMealRow?.station, 300)].filter(Boolean).join(' - ');
+  const kitchenPackOutDetailsTable = table([], [[
+    [
+      eventNameCell('Event Name: ', event?.title),
+      `Date: ${longDate(event?.date)}`,
+      `Guest Count: ${guestCount}`,
+      `Client: ${event?.client || ''}`,
+      `Location: ${event?.meta?.venue || event?.meta?.nowsta?.venue || ''}`,
+      `Address: ${event?.meta?.address || event?.meta?.nowsta?.address || ''}`,
+    ],
+    [
+      { runs: [{ value: title, bold: true, size: 32 }] },
+      `Event Date: ${longDate(event?.date)}`,
+      `Delivery: ${deliveryTime}`,
+      `Tape: ${event?.meta?.tape || ''}`,
+      `Staff Meal: ${staffMeal}`,
+    ],
+  ]], [5300, 5300]);
   const documentHeader = isKitchenMenu ? `${documentTitleRow(title)}${zoneHeading}${table([], [
     [eventNameCell('Event Name: ', event?.title), `Event Timing: ${eventTiming}`],
     [`Date: ${longDate(event?.date)}`, `Staff Arrival on Site: ${event?.meta?.staffArrivalTime || ''}`],
@@ -687,7 +734,9 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
     [`Client Notes: ${event?.meta?.clientNotes || ''}`, `Meeting Point: ${event?.meta?.meetingPoint || ''}`],
     [`Venue Notes: ${event?.meta?.venueNotes || ''}`, `Event Number: ${displayedEventNumber(event?.externalId || snapshot?.eventId || '')}`],
     [`Allergen/Restrictions: ${event?.meta?.allergens || event?.meta?.restrictions || ''}`, ''],
-  ], [5300, 5300])}` : isStaffRequest
+  ], [5300, 5300])}` : isKitchenPackOut
+    ? `${zoneHeading}${kitchenPackOutDetailsTable}`
+    : isStaffRequest
     ? `${paragraph(title, { bold: true, size: 36, align: 'center', after: 120 })}${zoneHeading}${eventDetailsTable}`
     : `${paragraph('Revision', { bold: true, size: 28, align: 'right', after: 80 })}${paragraph(title, { bold: true, size: 36, align: 'center', after: 120 })}${zoneHeading}${eventDetailsTable}`;
   const templateTopNotes = clean(catereaseRichTextToPlain(template?.topNotes), 12000);

@@ -324,7 +324,7 @@ export const buildCatereaseOperationalSnapshot = ({
   );
   const packOutTemplates = buildCatereasePackOutTemplateSummaries(kitchenPackOut, printTemplateRows, packOut);
   const directKitchenMenu = applySubEventNames(normalizeCatereaseKitchenMenuDishRows(kitchenMenuRows), zoneNameBySubEvent)
-    .filter((row) => !/\bpack\s*out\b/i.test(row.zoneName));
+    .filter((row) => !/\b(?:pack\s*out|invoice)\b/i.test(row.zoneName));
   const derivedKitchenMenu = buildKitchenMenuRows(kitchenPackOut);
   const kitchenMenu = derivedKitchenMenu.length
     ? mergeKitchenMenuRows(derivedKitchenMenu, directKitchenMenu)
@@ -351,7 +351,7 @@ export const buildCatereaseOperationalSnapshot = ({
     packOutTemplates,
   })).digest('hex');
   return {
-    schemaVersion: 14,
+    schemaVersion: 15,
     eventId: clean(eventId, 120),
     syncedAt,
     checksum,
@@ -633,6 +633,22 @@ const operationalRows = (snapshot, type, zoneKey = '', templateKey = '') => {
     : (Array.isArray(rows) ? rows : []);
 };
 
+const withoutRepeatedItemPrefix = (value, itemName) => {
+  const text = clean(catereaseRichTextToPlain(value), 12000);
+  const ignored = new Set(['a', 'an', 'and', 'of', 'the', 'with']);
+  const tokens = (source) => [...String(source || '').matchAll(/[\p{L}\p{N}]+/gu)]
+    .map((match) => ({
+      value: match[0].normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase(),
+      end: Number(match.index) + match[0].length,
+    }))
+    .filter((token) => !ignored.has(token.value));
+  const nameTokens = tokens(itemName).map((token) => token.value);
+  const detailTokens = tokens(text);
+  if (!text || !nameTokens.length || detailTokens.length < nameTokens.length) return text;
+  if (!nameTokens.every((token, index) => detailTokens[index]?.value === token)) return text;
+  return text.slice(detailTokens[nameTokens.length - 1].end).replace(/^[\s:;,\-.()]+/, '').trim();
+};
+
 const kitchenMenuSections = (rows, recipes, includeAnnotations = false) => {
   const recipeIndex = buildExactRecipeMatchIndex(recipes);
   const preparedRows = rows.map((row) => {
@@ -640,7 +656,7 @@ const kitchenMenuSections = (rows, recipes, includeAnnotations = false) => {
     const recipe = match.status === 'matched' ? match.recipe : null;
     const dishKey = itemKey(row?.itemName);
     const comments = [row?.description, row?.notes]
-      .map((value) => clean(catereaseRichTextToPlain(value), 12000))
+      .map((value) => withoutRepeatedItemPrefix(value, row?.itemName))
       .filter((value, index, values) => value && itemKey(value) !== dishKey && values.indexOf(value) === index);
     const labels = [recipe?.instructions, recipe?.notes]
       .map((value) => clean(catereaseRichTextToPlain(value), 12000))
@@ -653,9 +669,10 @@ const kitchenMenuSections = (rows, recipes, includeAnnotations = false) => {
       labels: includeAnnotations ? labels : [],
     };
   });
-  const isBeverage = (row) => /\b(?:bar|beverage|cocktail|wine|beer|liquor)\b/i.test([
+  const isBeverage = (row) => /\b(?:bar|beverages?|cocktails?|wine|beer|liquor)\b/i.test([
     row?.menuGroup, row?.category, row?.prepArea,
   ].filter(Boolean).join(' '));
+  const kitchenMenuQuantity = (value) => Number(value) > 0 ? formatQuantity(value) : '';
   const renderSection = (heading, values) => {
     const bodyRows = [];
     [...groupedRows(values, (row) => row.group).entries()].forEach(([group, grouped]) => {
@@ -663,7 +680,7 @@ const kitchenMenuSections = (rows, recipes, includeAnnotations = false) => {
         bodyRows.push(['', group.toUpperCase(), '', '']);
       }
       grouped.forEach((row) => bodyRows.push([
-        formatQuantity(row.quantity),
+        kitchenMenuQuantity(row.quantity),
         row.itemName,
         row.comments,
         row.labels,

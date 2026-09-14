@@ -717,6 +717,23 @@ test('operational snapshot keeps direct Kitchen Menu rows missing from required 
   assert.equal(snapshot.kitchenMenu[0].componentCount, 1);
 });
 
+test('Kitchen Menu excludes food-service rows from an Invoice sub-event', () => {
+  const snapshot = buildCatereaseOperationalSnapshot({
+    eventId: 'E22856',
+    subEventRows: [
+      { SubEvtNum: 'S-MENU', Description: 'Menu' },
+      { SubEvtNum: 'S-INVOICE', Description: 'Invoice' },
+    ],
+    kitchenMenuRows: [
+      { FdSvNum: '1', SubEvtNum: 'S-MENU', ItemName: 'Blini with caviar' },
+      { FdSvNum: '2', SubEvtNum: 'S-INVOICE', ItemName: 'Passed HDs - Select 3', Qty: 40 },
+      { FdSvNum: '3', SubEvtNum: 'S-INVOICE', ItemName: 'Rentals - Additional', Qty: 1 },
+    ],
+  });
+
+  assert.deepEqual(snapshot.kitchenMenu.map((row) => row.itemName), ['Blini with caviar']);
+});
+
 test('Caterease Kitchen Menu converts rich text fields to plain text', () => {
   const rows = normalizeCatereaseKitchenMenuDishRows([{
     ItemName: 'Caramel Apple',
@@ -772,7 +789,7 @@ test('operational snapshot checksum is stable when API row order changes', () =>
     packOutRows: [{ ItemName: 'B', Qty: 2 }, { ItemName: 'A', Qty: 1 }],
     syncedAt: new Date('2026-09-11T12:00:00Z'),
   });
-  assert.equal(first.schemaVersion, 14);
+  assert.equal(first.schemaVersion, 15);
   const second = buildCatereaseOperationalSnapshot({
     eventId: 'E22672',
     packOutRows: [{ ItemName: 'A', Qty: 1 }, { ItemName: 'B', Qty: 2 }],
@@ -860,6 +877,33 @@ test('Kitchen Menu keeps Caterease comments in the standard four-column table', 
   assert.match(xml, />Comment</);
   assert.match(xml, /Label \(OCC; Rentals\)/);
   assert.match(xml, />Plate cold\.</);
+});
+
+test('Kitchen Menu renders plural beverage sections, hides zero quantities, and removes repeated item prefixes', async () => {
+  const buffer = await renderCatereaseOperationalDocx({
+    event: { title: 'Cocktail', date: '2026-09-14', externalId: 'E22856' },
+    snapshot: {
+      schemaVersion: 15,
+      kitchenPackOut: [],
+      kitchenMenu: [{
+        itemName: 'BONFIRE NIGHTS',
+        quantity: 0,
+        menuGroup: 'PASSED BEVERAGES',
+        description: 'BONFIRE NIGHTS Mezcal, Tequila, Fresh Grapefruit',
+        notes: 'NO MEZCAL',
+      }],
+    },
+    recipes: [],
+    type: 'kitchen_menu',
+  });
+  const zip = await JSZip.loadAsync(buffer);
+  const xml = await zip.file('word/document.xml').async('string');
+  assert.match(xml, />BEVERAGE</);
+  assert.match(xml, />PASSED BEVERAGES</);
+  assert.match(xml, />Mezcal, Tequila, Fresh Grapefruit</);
+  assert.match(xml, />NO MEZCAL</);
+  assert.doesNotMatch(xml, />BONFIRE NIGHTS Mezcal/);
+  assert.doesNotMatch(xml, /<w:t xml:space="preserve">0<\/w:t>/);
 });
 
 test('Kitchen Menu prints a non-main zone name below its title', async () => {

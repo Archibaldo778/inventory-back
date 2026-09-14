@@ -25,6 +25,18 @@ const foodServiceDishKey = (row, name = row?.itemName) => [
   normalized(name),
 ].join('|');
 
+const isKitchenPackOutMenuDish = (row) => !/\b(?:staff\s*meal|bar|beverages?|cocktails?|wine|beer|liquor)\b/i.test([
+  row?.menuGroup,
+  row?.category,
+  row?.prepArea,
+].filter(Boolean).join(' '));
+
+const isGenericZeroQuantityHeading = (row) => {
+  if (Number(row?.quantity) !== 0 || clean(row?.notes, 1000)) return false;
+  const letters = clean(row?.itemName, 300).replace(/[^A-Za-z]+/g, '');
+  return Boolean(letters) && letters === letters.toUpperCase();
+};
+
 const FIELD_MAP = Object.freeze({
   type: 'fsType',
   fstype: 'fsType',
@@ -153,6 +165,8 @@ export const catereaseOperationalTemplateRows = (snapshot = {}, templateKey, tem
   const foodServiceRows = (snapshot?.foodService || snapshot?.packOut || [])
     .filter((row) => !/\binvoice\b/i.test(clean(row?.zoneName, 200)));
   if (template.documentType === 'kitchen_packout') {
+    const kitchenMenuRows = Array.isArray(snapshot?.kitchenMenu) ? snapshot.kitchenMenu : [];
+    const kitchenMenuByDish = new Map(kitchenMenuRows.map((row) => [foodServiceDishKey(row), row]));
     const representedFoodServiceIds = new Set(requiredRows
       .map((row) => clean(row?.foodServiceId, 120).toLowerCase())
       .filter(Boolean));
@@ -165,6 +179,13 @@ export const catereaseOperationalTemplateRows = (snapshot = {}, templateKey, tem
         const foodServiceId = clean(row?.foodServiceId, 120).toLowerCase();
         if (foodServiceId && representedFoodServiceIds.has(foodServiceId)) return false;
         return !representedDishes.has(foodServiceDishKey(row));
+      })
+      .filter((row) => {
+        const kitchenMenuRow = kitchenMenuByDish.get(foodServiceDishKey(row));
+        if (kitchenMenuRows.length) return Boolean(kitchenMenuRow) && isKitchenPackOutMenuDish(kitchenMenuRow);
+        return Boolean(clean(row?.category, 160))
+          && isKitchenPackOutMenuDish(row)
+          && !isGenericZeroQuantityHeading(row);
       })
       .map((row) => ({
         ...row,
@@ -196,7 +217,7 @@ export const catereaseOperationalTemplateRows = (snapshot = {}, templateKey, tem
   return explicitPackOutRows.length ? explicitPackOutRows : requiredMatches;
 };
 
-export const buildCatereasePackOutTemplateSummaries = (rows = [], printTemplateRows, foodServiceRows = []) => {
+export const buildCatereasePackOutTemplateSummaries = (rows = [], printTemplateRows, foodServiceRows = [], kitchenMenuRows = []) => {
   const templates = Array.isArray(printTemplateRows)
     ? normalizeCatereasePrintTemplates(printTemplateRows)
     : CATEREASE_PACK_OUT_TEMPLATES;
@@ -204,6 +225,6 @@ export const buildCatereasePackOutTemplateSummaries = (rows = [], printTemplateR
     ...template,
     groupBy: [...template.groupBy],
     conditions: (template.conditions || []).map((condition) => ({ ...condition })),
-    rowCount: catereaseOperationalTemplateRows({ requiredItems: rows, foodService: foodServiceRows }, template.key, templates).length,
+    rowCount: catereaseOperationalTemplateRows({ requiredItems: rows, foodService: foodServiceRows, kitchenMenu: kitchenMenuRows }, template.key, templates).length,
   }));
 };

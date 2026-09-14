@@ -322,13 +322,13 @@ export const buildCatereaseOperationalSnapshot = ({
     normalizeCatereaseKitchenPackOutRows(kitchenPackOutRows),
     packOut
   );
-  const packOutTemplates = buildCatereasePackOutTemplateSummaries(kitchenPackOut, printTemplateRows, packOut);
   const directKitchenMenu = applySubEventNames(normalizeCatereaseKitchenMenuDishRows(kitchenMenuRows), zoneNameBySubEvent)
     .filter((row) => !/\b(?:pack\s*out|invoice)\b/i.test(row.zoneName));
   const derivedKitchenMenu = buildKitchenMenuRows(kitchenPackOut);
   const kitchenMenu = derivedKitchenMenu.length
     ? mergeKitchenMenuRows(derivedKitchenMenu, directKitchenMenu)
     : directKitchenMenu;
+  const packOutTemplates = buildCatereasePackOutTemplateSummaries(kitchenPackOut, printTemplateRows, packOut, kitchenMenu);
   const fallbackZoneNameBySubEvent = new Map(
     [...packOut, ...kitchenPackOut, ...directKitchenMenu]
       .filter((row) => row?.subEvent && row?.zoneName)
@@ -351,7 +351,7 @@ export const buildCatereaseOperationalSnapshot = ({
     packOutTemplates,
   })).digest('hex');
   return {
-    schemaVersion: 15,
+    schemaVersion: 16,
     eventId: clean(eventId, 120),
     syncedAt,
     checksum,

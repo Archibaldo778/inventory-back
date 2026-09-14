@@ -162,7 +162,7 @@ test('required items inherit a missing food type through FdSvNum before template
   ).map((row) => row.itemName), ['Caviar']);
 });
 
-test('Kitchen Pack Out includes a food-service dish that has no required-item breakdown', () => {
+test('Kitchen Pack Out includes an unexpanded dish but excludes menu headings, staff meal, and beverages', () => {
   const templates = normalizeCatereasePrintTemplates([
     { UID: 1, PrintKind: 'EvtReq', Title: 'Kitchen Pack Out', Condition2: "(Type = 'Food')" },
   ]);
@@ -178,7 +178,16 @@ test('Kitchen Pack Out includes a food-service dish that has no required-item br
     requiredItems,
     foodService: [
       { foodServiceId: 'FS-1', itemName: 'Dish 1', subEvent: 'S-MENU', fsType: 'Food' },
-      { foodServiceId: 'FS-BLINI', itemName: 'Blini with caviar & creme fraiche', subEvent: 'S-MENU', fsType: 'Food' },
+      { foodServiceId: 'FS-HEADING', itemName: "PASSED HORS D'OEUVRES", quantity: 0, subEvent: 'S-MENU', fsType: 'Food' },
+      { foodServiceId: 'FS-BLINI', itemName: 'Blini with caviar & creme fraiche', subEvent: 'S-MENU', fsType: 'Food', category: 'Seafood' },
+      { foodServiceId: 'FS-STAFF', itemName: 'Option A: 5 hours or less', subEvent: 'S-MENU', fsType: 'Food', category: 'Staff Meal' },
+      { foodServiceId: 'FS-DRINK', itemName: 'BONFIRE NIGHTS', subEvent: 'S-MENU', fsType: 'Food' },
+    ],
+    kitchenMenu: [
+      { itemName: 'Dish 1', subEvent: 'S-MENU', menuGroup: "PASSED HORS D'OEUVRES" },
+      { itemName: 'Blini with caviar & creme fraiche', subEvent: 'S-MENU', menuGroup: "PASSED HORS D'OEUVRES" },
+      { itemName: 'Option A: 5 hours or less', subEvent: 'S-MENU', menuGroup: 'STAFF MEAL' },
+      { itemName: 'BONFIRE NIGHTS', subEvent: 'S-MENU', menuGroup: 'PASSED BEVERAGES' },
     ],
   }, 'print-1', templates);
   assert.equal(rows.length, 16);
@@ -789,7 +798,7 @@ test('operational snapshot checksum is stable when API row order changes', () =>
     packOutRows: [{ ItemName: 'B', Qty: 2 }, { ItemName: 'A', Qty: 1 }],
     syncedAt: new Date('2026-09-11T12:00:00Z'),
   });
-  assert.equal(first.schemaVersion, 15);
+  assert.equal(first.schemaVersion, 16);
   const second = buildCatereaseOperationalSnapshot({
     eventId: 'E22672',
     packOutRows: [{ ItemName: 'A', Qty: 1 }, { ItemName: 'B', Qty: 2 }],

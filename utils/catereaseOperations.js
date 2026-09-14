@@ -102,6 +102,23 @@ const isKitchenMenuNoise = (value) => {
   return !name || /^option\s+[a-z0-9]+\s*:/.test(name) || /^\d+(?:\.\d+)?\+?\s*hours?\b/.test(name);
 };
 
+const normalizedItemText = (value) => clean(value, 12000)
+  .toLowerCase()
+  .replace(/[^a-z0-9]+/g, ' ')
+  .trim();
+
+const isKitchenMenuSectionHeading = ({ itemName, quantity, description, notes }) => {
+  const name = clean(itemName, 300);
+  if (!name || numberOrNull(quantity) !== 0) return false;
+  const letters = name.replace(/[^A-Za-z]+/g, '');
+  if (!letters || letters !== letters.toUpperCase()) return false;
+  const nameKey = normalizedItemText(name);
+  const hasDistinctDetails = [description, notes]
+    .map(normalizedItemText)
+    .some((value) => value && value !== nameKey);
+  return !hasDistinctDetails;
+};
+
 export const buildKitchenMenuRows = (kitchenPackOutRows = []) => {
   const dishes = new Map();
   (Array.isArray(kitchenPackOutRows) ? kitchenPackOutRows : []).forEach((row) => {
@@ -142,40 +159,52 @@ export const buildKitchenMenuRows = (kitchenPackOutRows = []) => {
 
 export const normalizeCatereaseKitchenMenuDishRows = (rows = []) => {
   const dishes = new Map();
+  const currentSectionBySubEvent = new Map();
   (Array.isArray(rows) ? rows : []).slice(0, 10000).forEach((row) => {
     const itemName = clean(first(row, ['ItemName', 'Name', 'Title']), 300);
-    if (isKitchenMenuNoise(itemName)) return;
     const subEvent = clean(first(row, ['SubEvtNum', 'SubEvent']), 120);
     const zoneName = clean(first(row, ['SEDescription', 'Room', 'SubEventName']), 200);
+    const zoneIdentity = operationalZoneIdentity({ subEvent, zoneName }) || '__main__';
+    const quantity = numberOrNull(first(row, ['Qty', 'Quantity', 'Servings', 'RServings']));
+    const description = clean(catereaseRichTextToPlain(first(row, ['Description', 'UseDesc'])), 12000);
+    const notes = clean(catereaseRichTextToPlain(first(row, ['Comment', 'Notes'])), 12000);
+    if (isKitchenMenuSectionHeading({ itemName, quantity, description, notes })) {
+      currentSectionBySubEvent.set(zoneIdentity, itemName);
+      return;
+    }
     const key = `${operationalZoneIdentity({ subEvent, zoneName })}|${itemName.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()}`;
     if (!itemName || dishes.has(key)) return;
     dishes.set(key, {
       sourceId: clean(first(row, ['UID', 'FdSvNum', 'FSNum', 'ItemNum', 'ItemID', 'ID']), 120) || fallbackSourceId(row),
       itemName,
-      quantity: numberOrNull(first(row, ['Qty', 'Quantity', 'Servings', 'RServings'])),
+      quantity,
       unit: clean(first(row, ['Unit']), 80),
       prepArea: clean(first(row, ['PrepArea', 'FSPrepArea']), 160),
       subEvent,
       zoneName,
       category: clean(first(row, ['Category', 'FSCategory']), 160),
-      menuGroup: clean(first(row, ['MenuGroup', 'FSCategory', 'GroupName']), 160),
-      description: clean(catereaseRichTextToPlain(first(row, ['Description', 'UseDesc'])), 12000),
-      notes: clean(catereaseRichTextToPlain(first(row, ['Comment', 'Notes'])), 12000),
+      menuGroup: currentSectionBySubEvent.get(zoneIdentity)
+        || clean(first(row, ['MenuGroup', 'FSCategory', 'GroupName']), 160),
+      description,
+      notes,
     });
   });
   return [...dishes.values()];
 };
 
 const mergeKitchenMenuRows = (derivedRows = [], directRows = []) => {
-  const directByName = new Map();
-  directRows.forEach((row) => {
-    const key = `${operationalZoneIdentity(row)}|${clean(row?.itemName, 300).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()}`;
-    if (key && !directByName.has(key)) directByName.set(key, row);
+  const rowKey = (row) => `${operationalZoneIdentity(row)}|${normalizedItemText(row?.itemName)}`;
+  const derivedByName = new Map();
+  derivedRows.forEach((row) => {
+    const key = rowKey(row);
+    if (key && !derivedByName.has(key)) derivedByName.set(key, row);
   });
-  return derivedRows.map((row) => {
-    const key = `${operationalZoneIdentity(row)}|${clean(row?.itemName, 300).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()}`;
-    const direct = directByName.get(key);
-    if (!direct) return row;
+  const mergedKeys = new Set();
+  const merged = directRows.map((direct) => {
+    const key = rowKey(direct);
+    const row = derivedByName.get(key);
+    mergedKeys.add(key);
+    if (!row) return direct;
     return {
       ...direct,
       ...row,
@@ -188,6 +217,10 @@ const mergeKitchenMenuRows = (derivedRows = [], directRows = []) => {
       notes: direct.notes,
     };
   });
+  derivedRows.forEach((row) => {
+    if (!mergedKeys.has(rowKey(row))) merged.push(row);
+  });
+  return merged;
 };
 
 const stableRows = (rows) => [...rows].sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
@@ -318,7 +351,7 @@ export const buildCatereaseOperationalSnapshot = ({
     packOutTemplates,
   })).digest('hex');
   return {
-    schemaVersion: 13,
+    schemaVersion: 14,
     eventId: clean(eventId, 120),
     syncedAt,
     checksum,

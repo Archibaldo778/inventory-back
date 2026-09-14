@@ -667,6 +667,56 @@ test('Caterease food service rows preserve Kitchen Menu dish details', () => {
   });
 });
 
+test('Kitchen Menu follows sequential Caterease section headings within each sub-event', () => {
+  const rows = normalizeCatereaseKitchenMenuDishRows([
+    { FdSvNum: '4', SubEvtNum: 'S-MENU', ItemName: "PASSED HORS D'OEUVRES", Qty: 0 },
+    { FdSvNum: '5', SubEvtNum: 'S-MENU', ItemName: 'Spicy tuna tartare', Category: 'Seafood' },
+    { FdSvNum: '7', SubEvtNum: 'S-MENU', ItemName: 'Blini with caviar', Qty: 0, Category: 'Seafood' },
+    { FdSvNum: '9', SubEvtNum: 'S-MENU', ItemName: 'STAFF MEAL', Qty: 0 },
+    { FdSvNum: '10', SubEvtNum: 'S-MENU', ItemName: 'Option A: 5 hours or less', Qty: 8 },
+    { FdSvNum: '12', SubEvtNum: 'S-MENU', ItemName: 'PASSED BEVERAGES', Qty: 0 },
+    { FdSvNum: '18', SubEvtNum: 'S-MENU', ItemName: 'BONFIRE NIGHTS', Qty: 0, Description: 'Tequila, mezcal and citrus', Comment: 'NO MEZCAL' },
+    { FdSvNum: '19', SubEvtNum: 'S-MENU', ItemName: 'BOURBON MINT SMASH', Qty: 0, Description: 'Bourbon, mint and lemon' },
+  ]);
+
+  assert.deepEqual(rows.map(({ itemName, menuGroup }) => [itemName, menuGroup]), [
+    ['Spicy tuna tartare', "PASSED HORS D'OEUVRES"],
+    ['Blini with caviar', "PASSED HORS D'OEUVRES"],
+    ['Option A: 5 hours or less', 'STAFF MEAL'],
+    ['BONFIRE NIGHTS', 'PASSED BEVERAGES'],
+    ['BOURBON MINT SMASH', 'PASSED BEVERAGES'],
+  ]);
+  assert.equal(rows[3].notes, 'NO MEZCAL');
+});
+
+test('operational snapshot keeps direct Kitchen Menu rows missing from required items', () => {
+  const snapshot = buildCatereaseOperationalSnapshot({
+    eventId: 'E22856',
+    subEventRows: [{ SubEvtNum: 'S-MENU', Description: 'Menu' }],
+    packOutRows: [{ FdSvNum: '5', SubEvtNum: 'S-MENU', ItemName: 'Spicy tuna tartare' }],
+    kitchenPackOutRows: [
+      { UID: 'R1', FdSvNum: '5', ItemName: 'Crispy rice cake', FSName: 'Spicy tuna tartare' },
+    ],
+    kitchenMenuRows: [
+      { FdSvNum: '4', SubEvtNum: 'S-MENU', ItemName: "PASSED HORS D'OEUVRES", Qty: 0 },
+      { FdSvNum: '5', SubEvtNum: 'S-MENU', ItemName: 'Spicy tuna tartare', Category: 'Seafood' },
+      { FdSvNum: '7', SubEvtNum: 'S-MENU', ItemName: 'Blini with caviar', Qty: 0, Category: 'Seafood' },
+      { FdSvNum: '9', SubEvtNum: 'S-MENU', ItemName: 'STAFF MEAL', Qty: 0 },
+      { FdSvNum: '10', SubEvtNum: 'S-MENU', ItemName: 'Option A: 5 hours or less', Qty: 8 },
+      { FdSvNum: '12', SubEvtNum: 'S-MENU', ItemName: 'PASSED BEVERAGES', Qty: 0 },
+      { FdSvNum: '18', SubEvtNum: 'S-MENU', ItemName: 'BONFIRE NIGHTS', Qty: 0, Description: 'Tequila and citrus', Comment: 'NO MEZCAL' },
+    ],
+  });
+
+  assert.deepEqual(snapshot.kitchenMenu.map(({ itemName, menuGroup }) => [itemName, menuGroup]), [
+    ['Spicy tuna tartare', "PASSED HORS D'OEUVRES"],
+    ['Blini with caviar', "PASSED HORS D'OEUVRES"],
+    ['Option A: 5 hours or less', 'STAFF MEAL'],
+    ['BONFIRE NIGHTS', 'PASSED BEVERAGES'],
+  ]);
+  assert.equal(snapshot.kitchenMenu[0].componentCount, 1);
+});
+
 test('Caterease Kitchen Menu converts rich text fields to plain text', () => {
   const rows = normalizeCatereaseKitchenMenuDishRows([{
     ItemName: 'Caramel Apple',
@@ -688,7 +738,7 @@ test('operational snapshot separates Kitchen Pack Out components from Kitchen Me
   assert.equal(snapshot.kitchenMenu[0].itemName, 'Caramel Apple');
 });
 
-test('Kitchen Menu prefers dishes derived from Kitchen Pack Out over generic food service rows', () => {
+test('Kitchen Menu merges Kitchen Pack Out dishes with additional food service rows', () => {
   const snapshot = buildCatereaseOperationalSnapshot({
     eventId: 'E22672',
     kitchenPackOutRows: [
@@ -697,8 +747,8 @@ test('Kitchen Menu prefers dishes derived from Kitchen Pack Out over generic foo
     ],
     kitchenMenuRows: [{ ItemName: 'Passed Sweets, select 2', Description: String.raw`{\rtf1\ansi Generic group}` }],
   });
-  assert.deepEqual(snapshot.kitchenMenu.map((row) => row.itemName), ['Caramel Apple']);
-  assert.equal(snapshot.kitchenMenu[0].componentCount, 2);
+  assert.deepEqual(snapshot.kitchenMenu.map((row) => row.itemName), ['Passed Sweets, select 2', 'Caramel Apple']);
+  assert.equal(snapshot.kitchenMenu[1].componentCount, 2);
 });
 
 test('Kitchen Menu keeps exact Caterease dish quantity while using packout components', () => {
@@ -722,7 +772,7 @@ test('operational snapshot checksum is stable when API row order changes', () =>
     packOutRows: [{ ItemName: 'B', Qty: 2 }, { ItemName: 'A', Qty: 1 }],
     syncedAt: new Date('2026-09-11T12:00:00Z'),
   });
-  assert.equal(first.schemaVersion, 13);
+  assert.equal(first.schemaVersion, 14);
   const second = buildCatereaseOperationalSnapshot({
     eventId: 'E22672',
     packOutRows: [{ ItemName: 'A', Qty: 1 }, { ItemName: 'B', Qty: 2 }],

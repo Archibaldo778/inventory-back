@@ -558,7 +558,27 @@ const catereasePackOutTable = (groups, decorImages = []) => {
   return `<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/><w:tblLayout w:type="fixed"/>${tableBorders}</w:tblPr><w:tblGrid>${widths.map((width) => `<w:gridCol w:w="${width}"/>`).join('')}</w:tblGrid>${header}${body}</w:tbl>`;
 };
 
-const catereaseKitchenPackOutTable = (groups) => {
+const expandKitchenPackOutRecipeGroups = (groups, recipes = []) => {
+  const recipeIndex = buildExactRecipeMatchIndex(recipes);
+  return new Map([...groups.entries()].map(([group, values]) => {
+    const requiredItems = values.filter((row) => !row?.topLevelFoodService);
+    if (requiredItems.length) return [group, requiredItems];
+    const match = resolveExactRecipeMatch(group, recipeIndex);
+    const ingredients = match.status === 'matched' && Array.isArray(match.recipe?.ingredients)
+      ? match.recipe.ingredients.filter((ingredient) => clean(ingredient?.name, 300))
+      : [];
+    if (!ingredients.length) return [group, values];
+    return [group, ingredients.map((ingredient) => ({
+      itemName: clean(ingredient.name, 300),
+      quantity: numberOrNull(ingredient.quantity),
+      unit: clean(ingredient.unit, 80),
+      recipeFallback: true,
+    }))];
+  }));
+};
+
+const catereaseKitchenPackOutTable = (groups, recipes = []) => {
+  const expandedGroups = expandKitchenPackOutRecipeGroups(groups, recipes);
   const widths = [5300, 1400, 1600, 1600, 1500];
   const headers = ['', 'Quantity', 'Not Enough', 'Just Enough', 'Too Much'];
   const header = `<w:tr>${headers.map((value, index) => cell(value, {
@@ -568,7 +588,7 @@ const catereaseKitchenPackOutTable = (groups) => {
     align: 'center',
   })).join('')}</w:tr>`;
   const sectionRow = (name) => `<w:tr><w:tc><w:tcPr><w:gridSpan w:val="${widths.length}"/><w:tcW w:w="${widths.reduce((total, width) => total + width, 0)}" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr>${paragraph(name, { bold: true, size: 20, after: 0 })}</w:tc></w:tr>`;
-  const body = [...groups.entries()].map(([group, values]) => `${sectionRow(group)}${values.filter((row) => !row.topLevelFoodService).map((row) => `<w:tr>${[
+  const body = [...expandedGroups.entries()].map(([group, values]) => `${sectionRow(group)}${values.filter((row) => !row.topLevelFoodService).map((row) => `<w:tr>${[
     row.itemName, '', '', '', '',
   ].map((value, index) => cell(value, { width: widths[index], align: index ? 'center' : '' })).join('')}</w:tr>`).join('')}`).join('');
   return `<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/><w:tblLayout w:type="fixed"/>${tableBorders}</w:tblPr><w:tblGrid>${widths.map((width) => `<w:gridCol w:w="${width}"/>`).join('')}</w:tblGrid>${header}${body}</w:tbl>`;
@@ -757,7 +777,7 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
     ? table(['#', 'Position', 'Start', 'End', 'Uniform', 'Comments'], rows.map((row) => [
       formatQuantity(row.required), row.position, row.startTime, row.endTime, row.uniform, row.comments,
     ]), [700, 2200, 1300, 1300, 2600, 2700])
-    : isKitchenPackOut ? catereaseKitchenPackOutTable(groups)
+    : isKitchenPackOut ? catereaseKitchenPackOutTable(groups, recipes)
     : usesFoodServicePackOut ? packOutTable(rows, decorImages, false)
     : template ? catereasePackOutTable(new Map([...groups.entries()].map(([group, values]) => [
       group,

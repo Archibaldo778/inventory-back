@@ -866,6 +866,49 @@ test('Kitchen Menu DOCX does not render packout components as menu dishes', asyn
   assert.doesNotMatch(xml, />Apple center</);
 });
 
+test('Kitchen Pack Out fills an unexpanded food-service dish from its exact Caterease recipe', async () => {
+  const buffer = await renderCatereaseOperationalDocx({
+    event: { title: 'Cocktail', date: '2026-09-14', externalId: 'E22856' },
+    snapshot: {
+      schemaVersion: 17,
+      packOutTemplates: [{
+        key: 'print-6',
+        label: 'Kitchen Pack Out',
+        documentType: 'kitchen_packout',
+        supported: true,
+        groupBy: ['station'],
+        conditions: [],
+      }],
+      requiredItems: [{ itemName: 'Tuna tartare', station: 'Spicy tuna tartare' }],
+      foodService: [
+        { itemName: 'Spicy tuna tartare', fsType: 'Food' },
+        { itemName: 'Blini with caviar & creme fraiche', fsType: 'Food', category: 'Seafood' },
+      ],
+      kitchenMenu: [
+        { itemName: 'Spicy tuna tartare', category: 'Passed Hors D\u2019oeuvres' },
+        { itemName: 'Blini with caviar & creme fraiche', category: 'Passed Hors D\u2019oeuvres' },
+      ],
+    },
+    recipes: [{
+      name: 'Blini with caviar & creme fraiche',
+      ingredients: [
+        { name: 'Wet blini mix \u2013 Eggs', quantity: 1, unit: 'Each' },
+        { name: 'Caviar \u2013 1 jar', quantity: 1, unit: 'Jar' },
+      ],
+    }],
+    type: 'kitchen_packout',
+    templateKey: 'print-6',
+  });
+  const zip = await JSZip.loadAsync(buffer);
+  const xml = await zip.file('word/document.xml').async('string');
+  assert.match(xml, />Spicy tuna tartare</);
+  assert.match(xml, />Tuna tartare</);
+  assert.match(xml, />Blini with caviar &amp; creme fraiche</);
+  assert.match(xml, />Wet blini mix \u2013 Eggs</);
+  assert.match(xml, />Caviar \u2013 1 jar</);
+  assert.doesNotMatch(xml, /<w:t xml:space="preserve">1<\/w:t>/);
+});
+
 test('Kitchen Menu keeps Caterease comments in the standard four-column table', async () => {
   const buffer = await renderCatereaseOperationalDocx({
     event: { title: 'Dinner', date: '2026-09-11', externalId: 'E22672' },

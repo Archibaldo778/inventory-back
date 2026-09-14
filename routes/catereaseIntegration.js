@@ -996,7 +996,7 @@ router.get('/operations/events/:id/export/:type', requireAuth, async (req, res) 
       : undefined;
     const template = templateKey ? catereasePackOutTemplate(templateKey, templates) : null;
     if (templateKey && (!template || template.documentType !== type)) return res.status(400).json({ error: 'Unknown Pack Out template' });
-    const recipes = type === 'annotated_kitchen_menu'
+    const recipes = ['kitchen_packout', 'annotated_kitchen_menu'].includes(type)
       ? await KitchenRecipe.find({ sourceProvider: 'caterease', sourceDeletedAt: null })
         .select('name description instructions notes prepArea ingredients inactive hidden revisedAt updatedAt')
         .lean()

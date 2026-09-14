@@ -231,6 +231,9 @@ const normalizeCatereaseSubEventRows = (rows = []) => (Array.isArray(rows) ? row
     subEvent: clean(first(row, ['SubEvtNum', 'SubEvent']), 120),
     description: clean(first(row, ['Description', 'SEDescription', 'SubEventName']), 200),
     room: clean(first(row, ['Room']), 200),
+    serviceDate: clean(first(row, ['SEvtDate', 'EventDate']), 40),
+    startTime: clean(first(row, ['StartTime']), 80),
+    endTime: clean(first(row, ['EndTime']), 80),
   }))
   .filter((row) => row.subEvent);
 
@@ -351,7 +354,7 @@ export const buildCatereaseOperationalSnapshot = ({
     packOutTemplates,
   })).digest('hex');
   return {
-    schemaVersion: 16,
+    schemaVersion: 17,
     eventId: clean(eventId, 120),
     syncedAt,
     checksum,
@@ -655,7 +658,8 @@ const kitchenMenuSections = (rows, recipes, includeAnnotations = false) => {
     const match = resolveExactRecipeMatch(row?.itemName, recipeIndex);
     const recipe = match.status === 'matched' ? match.recipe : null;
     const dishKey = itemKey(row?.itemName);
-    const comments = [row?.description, row?.notes]
+    const description = withoutRepeatedItemPrefix(row?.description, row?.itemName);
+    const comments = [row?.notes]
       .map((value) => withoutRepeatedItemPrefix(value, row?.itemName))
       .filter((value, index, values) => value && itemKey(value) !== dishKey && values.indexOf(value) === index);
     const labels = [recipe?.instructions, recipe?.notes]
@@ -665,6 +669,9 @@ const kitchenMenuSections = (rows, recipes, includeAnnotations = false) => {
       ...row,
       group: clean(row?.menuGroup || row?.category || row?.prepArea, 160) || 'Menu',
       itemName: clean(row?.itemName, 300) || 'Untitled dish',
+      itemDetails: description
+        ? [clean(row?.itemName, 300) || 'Untitled dish', description]
+        : clean(row?.itemName, 300) || 'Untitled dish',
       comments,
       labels: includeAnnotations ? labels : [],
     };
@@ -681,7 +688,7 @@ const kitchenMenuSections = (rows, recipes, includeAnnotations = false) => {
       }
       grouped.forEach((row) => bodyRows.push([
         kitchenMenuQuantity(row.quantity),
-        row.itemName,
+        row.itemDetails,
         row.comments,
         row.labels,
       ]));
@@ -695,19 +702,29 @@ const kitchenMenuSections = (rows, recipes, includeAnnotations = false) => {
   return `${renderSection('MENU', menuRows)}${beverageRows.length ? renderSection('BEVERAGE', beverageRows) : ''}`;
 };
 
-const kitchenStaffingSection = (event) => {
-  const shifts = Array.isArray(event?.meta?.nowsta?.shifts) ? event.meta.nowsta.shifts : [];
+const kitchenStaffingSection = (event, snapshot) => {
+  const catereaseShifts = Array.isArray(snapshot?.staffRequest) ? snapshot.staffRequest : [];
+  const shifts = catereaseShifts.length
+    ? catereaseShifts.map((shift) => ({
+      position: shift.position,
+      startTime: shift.startTime,
+      uniform: shift.uniform,
+      comments: shift.comments,
+      quantity: shift.required,
+    }))
+    : (Array.isArray(event?.meta?.nowsta?.shifts) ? event.meta.nowsta.shifts : []);
   if (!shifts.length) return '';
   const uniform = clean(event?.meta?.nowsta?.uniform, 300);
   const rows = shifts.map((shift) => {
     const assigned = Array.isArray(shift?.workers) ? shift.workers.length : 0;
     const unfilled = Math.max(0, Number(shift?.unfilled) || 0);
+    const requested = Number(shift?.quantity);
     return [
-      formatQuantity(assigned + unfilled),
+      formatQuantity(Number.isFinite(requested) ? requested : assigned + unfilled),
       clean(shift?.position, 200),
       clean(shift?.startTime, 80),
-      uniform,
-      shift?.endTime ? `End: ${clean(shift.endTime, 80)}` : '',
+      clean(shift?.uniform, 300) || uniform,
+      clean(shift?.comments, 1000),
     ];
   }).filter((row) => row[1]);
   if (!rows.length) return '';
@@ -756,8 +773,18 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
   const guestCount = Number.isFinite(parsedEventGuestCount) && parsedEventGuestCount > 0
     ? parsedEventGuestCount
     : Number.isFinite(parsedSnapshotGuestCount) && parsedSnapshotGuestCount > 0 ? parsedSnapshotGuestCount : '';
-  const eventTiming = event?.meta?.eventTime || event?.meta?.nowsta?.eventTime || '';
+  const rowSubEvent = clean(rows.find((row) => row?.subEvent)?.subEvent, 120).toLowerCase();
+  const matchingSubEvent = (snapshot?.subEvents || []).find((subEvent) => (
+    clean(subEvent?.subEvent, 120).toLowerCase() === rowSubEvent
+  ));
+  const subEventTiming = [matchingSubEvent?.startTime, matchingSubEvent?.endTime].filter(Boolean).join(' – ');
+  const eventTiming = subEventTiming || event?.meta?.eventTime || event?.meta?.nowsta?.eventTime || '';
   const deliveryTime = event?.meta?.deliveryTime || '';
+  const staffingRows = Array.isArray(snapshot?.staffRequest) && snapshot.staffRequest.length
+    ? snapshot.staffRequest
+    : Array.isArray(event?.meta?.nowsta?.shifts) ? event.meta.nowsta.shifts : [];
+  const staffArrivalTime = event?.meta?.staffArrivalTime
+    || clean(staffingRows.find((shift) => shift?.startTime)?.startTime, 80);
   const printableZoneName = clean(zoneName, 200);
   const zoneHeading = printableZoneName && printableZoneName.toLowerCase() !== 'main'
     ? paragraph(printableZoneName, { bold: true, size: 36, color: 'FF0000', align: 'center', after: 120 })
@@ -788,9 +815,9 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
       `Staff Meal: ${staffMeal}`,
     ],
   ]], [5300, 5300]);
-  const documentHeader = isKitchenMenu ? `${documentTitleRow(title)}${zoneHeading}${table([], [
+  const documentHeader = isKitchenMenu ? `${paragraph(title, { bold: true, size: 36, align: 'center', after: 120 })}${zoneHeading}${table([], [
     [eventNameCell('Event Name: ', event?.title), `Event Timing: ${eventTiming}`],
-    [`Date: ${longDate(event?.date)}`, `Staff Arrival on Site: ${event?.meta?.staffArrivalTime || ''}`],
+    [`Date: ${longDate(event?.date)}`, `Staff Arrival on Site: ${staffArrivalTime}`],
     [`Guest Count: ${guestCount}`, `Sales Rep: ${event?.meta?.salesRep || ''}`],
     [`Client: ${event?.client || ''}`, `Site Contact: ${event?.meta?.siteContact || ''}`],
     [`Location: ${event?.meta?.venue || event?.meta?.nowsta?.venue || ''}`, `Last Modified: ${new Intl.DateTimeFormat('en-US').format(new Date(event?.updatedAt || Date.now()))}`],
@@ -805,7 +832,7 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
     : `${paragraph('Revision', { bold: true, size: 28, align: 'right', after: 80 })}${paragraph(title, { bold: true, size: 36, align: 'center', after: 120 })}${zoneHeading}${eventDetailsTable}`;
   const templateTopNotes = clean(catereaseRichTextToPlain(template?.topNotes), 12000);
   const templateBottomNotes = clean(catereaseRichTextToPlain(template?.bottomNotes), 12000);
-  const documentFooterSections = isKitchenMenu ? kitchenStaffingSection(event) : '';
+  const documentFooterSections = isKitchenMenu ? kitchenStaffingSection(event, snapshot) : '';
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><w:body>
   ${includeBrandLogo ? brandLogoParagraph() : ''}

@@ -798,7 +798,7 @@ test('operational snapshot checksum is stable when API row order changes', () =>
     packOutRows: [{ ItemName: 'B', Qty: 2 }, { ItemName: 'A', Qty: 1 }],
     syncedAt: new Date('2026-09-11T12:00:00Z'),
   });
-  assert.equal(first.schemaVersion, 16);
+  assert.equal(first.schemaVersion, 17);
   const second = buildCatereaseOperationalSnapshot({
     eventId: 'E22672',
     packOutRows: [{ ItemName: 'A', Qty: 1 }, { ItemName: 'B', Qty: 2 }],
@@ -913,6 +913,41 @@ test('Kitchen Menu renders plural beverage sections, hides zero quantities, and 
   assert.match(xml, />NO MEZCAL</);
   assert.doesNotMatch(xml, />BONFIRE NIGHTS Mezcal/);
   assert.doesNotMatch(xml, /<w:t xml:space="preserve">0<\/w:t>/);
+});
+
+test('Kitchen Menu uses Caterease sub-event timing and staffing details', async () => {
+  const buffer = await renderCatereaseOperationalDocx({
+    event: {
+      title: 'Cocktail',
+      date: '2026-09-14',
+      externalId: 'E22856',
+      meta: { eventTime: '4:30 PM – 9:30 PM' },
+    },
+    snapshot: {
+      schemaVersion: 17,
+      subEvents: [{ subEvent: 'S-MENU', startTime: '6:30 PM', endTime: '8:00 PM' }],
+      kitchenPackOut: [],
+      kitchenMenu: [{
+        itemName: 'BONFIRE NIGHTS',
+        subEvent: 'S-MENU',
+        menuGroup: 'PASSED BEVERAGES',
+        description: 'BONFIRE NIGHTS Mezcal, Tequila, Fresh Grapefruit',
+        notes: 'NO MEZCAL',
+      }],
+      staffRequest: [{ position: 'Food Passer', required: 1, startTime: '4:30 PM', uniform: 'White shirt / Black tie' }],
+    },
+    recipes: [],
+    type: 'kitchen_menu',
+  });
+  const zip = await JSZip.loadAsync(buffer);
+  const xml = await zip.file('word/document.xml').async('string');
+  assert.match(xml, /Event Timing: 6:30 PM – 8:00 PM/);
+  assert.match(xml, /Staff Arrival on Site: 4:30 PM/);
+  assert.match(xml, /White shirt \/ Black tie/);
+  assert.match(xml, />Mezcal, Tequila, Fresh Grapefruit</);
+  assert.match(xml, />NO MEZCAL</);
+  assert.doesNotMatch(xml, />Revision</);
+  assert.doesNotMatch(xml, />End:/);
 });
 
 test('Kitchen Menu prints a non-main zone name below its title', async () => {

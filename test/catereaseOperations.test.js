@@ -13,6 +13,7 @@ import {
   packOutRenderedItemNames,
   renderCatereaseOperationalDocx,
 } from '../utils/catereaseOperations.js';
+import { renderCatereaseStaffRequestXlsx } from '../utils/catereaseStaffRequestXlsx.js';
 import {
   CATEREASE_OPERATIONAL_BAR_ITEMS_VERSION,
   catereaseOperationalPackOutToBarItems,
@@ -632,6 +633,39 @@ test('Staff Request DOCX is generated from Caterease shifts', async () => {
   assert.match(xml, />Hours</);
   assert.match(xml, />7</);
   assert.match(xml, /TOTAL STAFF NEEDED/);
+});
+
+test('Staff Request XLSX matches the Caterease staffing sheet fields', async () => {
+  const buffer = await renderCatereaseStaffRequestXlsx({
+    event: {
+      title: 'Chanel YPO Cocktail',
+      date: '2026-09-14',
+      externalId: 'E22856 - S62650',
+      meta: { guestCount: 40, eventTime: '6:30 pm - 8:00 pm', salesRep: 'Olivier Cheng' },
+    },
+    snapshot: {
+      staffRequest: [
+        { subEvent: 'S1', zoneName: 'Staffing', position: 'Captain - Working', required: 1, startTime: '16:30:00', endTime: '21:30:00' },
+        { subEvent: 'S1', zoneName: 'Staffing', position: 'Food Passer', required: 1, startTime: '16:30:00', endTime: '21:30:00', uniform: 'Wht BttnDwn Shrt-Blk Tie (OC)' },
+        { subEvent: 'S2', zoneName: 'Other', position: 'Excluded', required: 9, startTime: '10:00:00', endTime: '11:00:00' },
+      ],
+    },
+    zoneKey: 's1|staffing',
+  });
+  const zip = await JSZip.loadAsync(buffer);
+  const workbook = await zip.file('xl/workbook.xml').async('string');
+  const sheet = await zip.file('xl/worksheets/sheet1.xml').async('string');
+  assert.match(workbook, /Staff Request/);
+  assert.match(sheet, /Chanel YPO Cocktail/);
+  assert.match(sheet, /Olivier Cheng/);
+  assert.match(sheet, /6:30 pm - 8:00 pm/);
+  assert.match(sheet, /4:30 pm/);
+  assert.match(sheet, /9:30 pm/);
+  assert.match(sheet, />Hours</);
+  assert.match(sheet, />5</);
+  assert.match(sheet, /Wht BttnDwn Shrt-Blk Tie \(OC\)/);
+  assert.match(sheet, /TOTAL STAFF NEEDED/);
+  assert.doesNotMatch(sheet, /Excluded/);
 });
 
 test('Kitchen Menu contains one dish per Kitchen Pack Out station', () => {

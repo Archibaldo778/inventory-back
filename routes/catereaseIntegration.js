@@ -48,6 +48,7 @@ import {
   packOutRenderedItemNames,
   renderCatereaseOperationalDocx,
 } from '../utils/catereaseOperations.js';
+import { renderCatereaseStaffRequestXlsx } from '../utils/catereaseStaffRequestXlsx.js';
 import { catereaseOperationalTemplateRows, catereasePackOutTemplate } from '../utils/catereasePackOutTemplates.js';
 import { normalizeKitchenRecipeName, syncKitchenRecipeMatches } from '../utils/kitchenRecipeMatching.js';
 import {
@@ -1007,17 +1008,24 @@ router.get('/operations/events/:id/export/:type', requireAuth, async (req, res) 
       : undefined;
     const decorImages = type === 'po' ? await loadMatchedDecorImages(event.catereaseOperations, templateRows) : [];
     const zoneName = String(req.query.zoneName || '');
-    const docx = await renderCatereaseOperationalDocx({
-      event,
-      snapshot: event.catereaseOperations,
-      type,
-      recipes,
-      brandLogoSvg,
-      decorImages,
-      zoneKey: String(req.query.zone || ''),
-      zoneName,
-      templateKey,
-    });
+    const isStaffRequest = type === 'staff_request';
+    const output = isStaffRequest
+      ? await renderCatereaseStaffRequestXlsx({
+        event,
+        snapshot: event.catereaseOperations,
+        zoneKey: String(req.query.zone || ''),
+      })
+      : await renderCatereaseOperationalDocx({
+        event,
+        snapshot: event.catereaseOperations,
+        type,
+        recipes,
+        brandLogoSvg,
+        decorImages,
+        zoneKey: String(req.query.zone || ''),
+        zoneName,
+        templateKey,
+      });
     const safeTitle = String(event.title || 'Event').replace(/[<>:"/\\|?*\u0000-\u001F]/g, '').replace(/\s+/g, ' ').trim().slice(0, 100) || 'Event';
     const dateMatch = String(event.date || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
     const datePrefix = dateMatch ? `${dateMatch[2]}-${dateMatch[3]}-${dateMatch[1].slice(-2)}` : '';
@@ -1027,9 +1035,12 @@ router.get('/operations/events/:id/export/:type', requireAuth, async (req, res) 
     const safeZone = String(req.query.fileZoneName || '').replace(/[<>:"/\\|?*\u0000-\u001F]/g, '').replace(/\s+/g, ' ').trim().slice(0, 80);
     const fileName = [datePrefix, safeTitle, safeZone.toLowerCase() === 'main' ? '' : safeZone, documentCode].filter(Boolean).join('_');
     res.setHeader('Cache-Control', 'private, no-store');
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-    res.setHeader('Content-Disposition', `attachment; filename="${fileName}.docx"`);
-    return res.send(docx);
+    const extension = isStaffRequest ? 'xlsx' : 'docx';
+    res.setHeader('Content-Type', isStaffRequest
+      ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}.${extension}"`);
+    return res.send(output);
   } catch (error) {
     return sendApiError(res, error, { context: 'Caterease operational export failed', fallbackMessage: 'Failed to generate Caterease operational document' });
   }

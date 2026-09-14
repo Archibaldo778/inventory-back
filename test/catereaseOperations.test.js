@@ -625,9 +625,13 @@ test('Staff Request DOCX is generated from Caterease shifts', async () => {
   });
   const zip = await JSZip.loadAsync(buffer);
   const xml = await zip.file('word/document.xml').async('string');
-  assert.match(xml, /STAFF REQUEST/);
+  assert.match(xml, /STAFF REQUEST FORM/);
   assert.match(xml, /Captain/);
-  assert.match(xml, /16:00/);
+  assert.match(xml, /4:00 pm/);
+  assert.match(xml, /11:00 pm/);
+  assert.match(xml, />Hours</);
+  assert.match(xml, />7</);
+  assert.match(xml, /TOTAL STAFF NEEDED/);
 });
 
 test('Kitchen Menu contains one dish per Kitchen Pack Out station', () => {
@@ -958,17 +962,17 @@ test('Kitchen Menu renders plural beverage sections, hides zero quantities, and 
   assert.doesNotMatch(xml, /<w:t xml:space="preserve">0<\/w:t>/);
 });
 
-test('Kitchen Menu uses Caterease sub-event timing and staffing details', async () => {
+test('Kitchen Menu does not confuse Caterease staff call times with event timing', async () => {
   const buffer = await renderCatereaseOperationalDocx({
     event: {
       title: 'Cocktail',
       date: '2026-09-14',
       externalId: 'E22856',
-      meta: { eventTime: '4:30 PM – 9:30 PM' },
+      meta: { eventTime: '6:30 PM – 8:00 PM' },
     },
     snapshot: {
       schemaVersion: 17,
-      subEvents: [{ subEvent: 'S-MENU', startTime: '6:30 PM', endTime: '8:00 PM' }],
+      subEvents: [{ subEvent: 'S-MENU', startTime: '4:30 PM', endTime: '9:30 PM' }],
       kitchenPackOut: [],
       kitchenMenu: [{
         itemName: 'BONFIRE NIGHTS',
@@ -985,7 +989,8 @@ test('Kitchen Menu uses Caterease sub-event timing and staffing details', async 
   const zip = await JSZip.loadAsync(buffer);
   const xml = await zip.file('word/document.xml').async('string');
   assert.match(xml, /Event Timing: 6:30 PM – 8:00 PM/);
-  assert.match(xml, /Staff Arrival on Site: 4:30 PM/);
+  assert.match(xml, /Staff Arrival on Site: 4:30 pm/);
+  assert.doesNotMatch(xml, /Event Timing: 4:30 PM/);
   assert.match(xml, /White shirt \/ Black tie/);
   assert.match(xml, />Mezcal, Tequila, Fresh Grapefruit</);
   assert.match(xml, />NO MEZCAL</);

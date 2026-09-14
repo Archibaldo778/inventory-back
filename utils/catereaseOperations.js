@@ -614,6 +614,38 @@ const formatQuantity = (value) => {
   return Number.isInteger(numeric) ? String(numeric) : String(Math.round(numeric * 1000) / 1000);
 };
 
+const operationalTimeParts = (value) => {
+  const text = clean(value, 80);
+  const twentyFourHour = text.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
+  if (twentyFourHour) {
+    const hour = Number(twentyFourHour[1]);
+    const minute = Number(twentyFourHour[2]);
+    if (hour >= 0 && hour < 24 && minute >= 0 && minute < 60) return { hour, minute };
+  }
+  const twelveHour = text.match(/^(\d{1,2}):(\d{2})\s*([ap])\.?m\.?$/i);
+  if (!twelveHour) return null;
+  const displayHour = Number(twelveHour[1]);
+  const minute = Number(twelveHour[2]);
+  if (displayHour < 1 || displayHour > 12 || minute < 0 || minute >= 60) return null;
+  return { hour: (displayHour % 12) + (twelveHour[3].toLowerCase() === 'p' ? 12 : 0), minute };
+};
+
+const formatOperationalTime = (value) => {
+  const parts = operationalTimeParts(value);
+  if (!parts) return clean(value, 80);
+  return `${parts.hour % 12 || 12}:${String(parts.minute).padStart(2, '0')} ${parts.hour >= 12 ? 'pm' : 'am'}`;
+};
+
+const operationalShiftHours = (startTime, endTime) => {
+  const start = operationalTimeParts(startTime);
+  const end = operationalTimeParts(endTime);
+  if (!start || !end) return '';
+  const startMinutes = start.hour * 60 + start.minute;
+  let endMinutes = end.hour * 60 + end.minute;
+  if (endMinutes < startMinutes) endMinutes += 24 * 60;
+  return formatQuantity((endMinutes - startMinutes) / 60);
+};
+
 const groupedRows = (rows, groupSelector) => {
   const groups = new Map();
   rows.forEach((row) => {
@@ -742,7 +774,7 @@ const kitchenStaffingSection = (event, snapshot) => {
     return [
       formatQuantity(Number.isFinite(requested) ? requested : assigned + unfilled),
       clean(shift?.position, 200),
-      clean(shift?.startTime, 80),
+      formatOperationalTime(shift?.startTime),
       clean(shift?.uniform, 300) || uniform,
       clean(shift?.comments, 1000),
     ];
@@ -760,7 +792,7 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
   const isAnnotatedKitchenMenu = type === 'annotated_kitchen_menu';
   const template = catereasePackOutTemplate(templateKey, snapshot?.packOutTemplates);
   const rows = operationalRows(snapshot, type, zoneKey, templateKey);
-  const title = template?.label?.toUpperCase() || (isAnnotatedKitchenMenu ? 'ANNOTATED KITCHEN MENU' : isKitchenMenu ? 'KITCHEN MENU' : isKitchenPackOut ? 'KITCHEN PACK OUT' : isStaffRequest ? 'STAFF REQUEST' : 'PACK OUT');
+  const title = template?.label?.toUpperCase() || (isAnnotatedKitchenMenu ? 'ANNOTATED KITCHEN MENU' : isKitchenMenu ? 'KITCHEN MENU' : isKitchenPackOut ? 'KITCHEN PACK OUT' : isStaffRequest ? 'STAFF REQUEST FORM' : 'PACK OUT');
   const groups = groupedRows(rows, (row) => (
     template?.groupBy?.length
       ? template.groupBy.map((field) => row?.[field]).filter(Boolean).join(' / ')
@@ -773,10 +805,21 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
   ));
   const usesFoodServicePackOut = type === 'po'
     && rows.some((row) => (snapshot?.foodService || snapshot?.packOut || []).includes(row));
+  const staffTotal = rows.reduce((total, row) => total + (Number(row?.required) || 0), 0);
   const sections = isKitchenMenu ? kitchenMenuSections(rows, recipes, isAnnotatedKitchenMenu) : isStaffRequest
-    ? table(['#', 'Position', 'Start', 'End', 'Uniform', 'Comments'], rows.map((row) => [
-      formatQuantity(row.required), row.position, row.startTime, row.endTime, row.uniform, row.comments,
-    ]), [700, 2200, 1300, 1300, 2600, 2700])
+    ? table(['#', 'Position', 'Start', 'End', 'Hours', 'Uniform', 'Admin Notes', 'Comments'], [
+      ...rows.map((row) => [
+        formatQuantity(row.required),
+        row.position,
+        formatOperationalTime(row.startTime),
+        formatOperationalTime(row.endTime),
+        operationalShiftHours(row.startTime, row.endTime),
+        row.uniform,
+        '',
+        row.comments,
+      ]),
+      [formatQuantity(staffTotal), 'TOTAL STAFF NEEDED', '', '', '', '', '', ''],
+    ], [550, 1900, 1000, 1000, 700, 2100, 1500, 1850])
     : isKitchenPackOut ? catereaseKitchenPackOutTable(groups, recipes)
     : usesFoodServicePackOut ? packOutTable(rows, decorImages, false)
     : template ? catereasePackOutTable(new Map([...groups.entries()].map(([group, values]) => [
@@ -793,20 +836,17 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
   const guestCount = Number.isFinite(parsedEventGuestCount) && parsedEventGuestCount > 0
     ? parsedEventGuestCount
     : Number.isFinite(parsedSnapshotGuestCount) && parsedSnapshotGuestCount > 0 ? parsedSnapshotGuestCount : '';
-  const rowSubEvent = clean(rows.find((row) => row?.subEvent)?.subEvent, 120).toLowerCase();
-  const matchingSubEvent = (snapshot?.subEvents || []).find((subEvent) => (
-    clean(subEvent?.subEvent, 120).toLowerCase() === rowSubEvent
-  ));
-  const subEventTiming = [matchingSubEvent?.startTime, matchingSubEvent?.endTime].filter(Boolean).join(' – ');
-  const eventTiming = subEventTiming || event?.meta?.eventTime || event?.meta?.nowsta?.eventTime || '';
+  const eventTiming = event?.meta?.eventTime || '';
   const deliveryTime = event?.meta?.deliveryTime || '';
   const staffingRows = Array.isArray(snapshot?.staffRequest) && snapshot.staffRequest.length
     ? snapshot.staffRequest
     : Array.isArray(event?.meta?.nowsta?.shifts) ? event.meta.nowsta.shifts : [];
-  const staffArrivalTime = event?.meta?.staffArrivalTime
-    || clean(staffingRows.find((shift) => shift?.startTime)?.startTime, 80);
+  const staffArrivalTime = formatOperationalTime(
+    event?.meta?.staffArrivalTime || staffingRows.find((shift) => shift?.startTime)?.startTime || ''
+  );
   const printableZoneName = clean(zoneName, 200);
-  const zoneHeading = printableZoneName && printableZoneName.toLowerCase() !== 'main'
+  const genericZoneNames = new Set(['main', 'menu', 'pack out', 'staffing']);
+  const zoneHeading = printableZoneName && !genericZoneNames.has(printableZoneName.toLowerCase())
     ? paragraph(printableZoneName, { bold: true, size: 36, color: 'FF0000', align: 'center', after: 120 })
     : '';
   const eventDetailsTable = table([], [

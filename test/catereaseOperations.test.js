@@ -72,6 +72,44 @@ test('manual operational additions appear only in their matching document templa
   assert.equal(operationalRows(snapshot, 'kitchen_packout', 's-dinner|dinner', 'kpo-template', additions).length, 0);
 });
 
+test('document-level manual additions are rendered for staff and kitchen menu document types', () => {
+  const snapshot = { schemaVersion: 9, staffRequest: [], kitchenMenu: [], kitchenPackOut: [] };
+  const additions = [
+    { _id: 'staff-one', documentType: 'staff_request', itemName: 'Coat Check', quantity: 2, notes: 'Call at 4 PM' },
+    { _id: 'menu-one', documentType: 'kitchen_menu', itemName: 'Fruit Skewers', quantity: 24 },
+    { _id: 'annotated-one', documentType: 'annotated_kitchen_menu', itemName: 'Macarons', quantity: 30 },
+  ];
+
+  assert.deepEqual(
+    operationalRows(snapshot, 'staff_request', '', '', additions)
+      .map(({ position, required, comments }) => ({ position, required, comments })),
+    [{ position: 'Coat Check', required: 2, comments: 'Call at 4 PM' }]
+  );
+  assert.equal(operationalRows(snapshot, 'kitchen_menu', '', '', additions)[0].itemName, 'Fruit Skewers');
+  assert.equal(operationalRows(snapshot, 'annotated_kitchen_menu', '', '', additions)[0].itemName, 'Macarons');
+});
+
+test('a manual Kitchen Menu row appears in the generated Word document', async () => {
+  const buffer = await renderCatereaseOperationalDocx({
+    event: { title: 'Manual menu', date: '2026-09-15', externalId: 'E1', meta: {} },
+    snapshot: { schemaVersion: 9, kitchenMenu: [], kitchenPackOut: [], staffRequest: [] },
+    type: 'kitchen_menu',
+    manualAdditions: [{
+      _id: 'menu-one',
+      documentType: 'kitchen_menu',
+      itemName: 'Fruit Skewers',
+      quantity: 24,
+      notes: 'Added in OCC Decks',
+    }],
+  });
+  const zip = await JSZip.loadAsync(buffer);
+  const xml = await zip.file('word/document.xml').async('string');
+
+  assert.match(xml, /MANUAL ADDITIONS/);
+  assert.match(xml, /Fruit Skewers/);
+  assert.match(xml, /Added in OCC Decks/);
+});
+
 test('manual food-service rows in a Pack Out sub-event are used when event required items are empty', () => {
   const templates = normalizeCatereasePrintTemplates([
     { UID: 36, PrintKind: 'EvtReq', Title: 'Pack Out', Condition1: "(FSType = 'Equipment')" },
@@ -726,6 +764,14 @@ test('Staff Request XLSX matches the Caterease staffing sheet fields', async () 
       ],
     },
     zoneKey: 's1|staffing',
+    manualAdditions: [{
+      _id: 'manual-staff',
+      documentType: 'staff_request',
+      zoneKey: 's1|staffing',
+      itemName: 'Coat Check',
+      quantity: 2,
+      notes: 'Call at 4 PM',
+    }],
   });
   const zip = await JSZip.loadAsync(buffer);
   const workbook = await zip.file('xl/workbook.xml').async('string');
@@ -742,6 +788,8 @@ test('Staff Request XLSX matches the Caterease staffing sheet fields', async () 
   assert.match(sheet, />Hours</);
   assert.match(sheet, />5</);
   assert.match(sheet, /Wht BttnDwn Shrt-Blk Tie \(OC\)/);
+  assert.match(sheet, /Coat Check/);
+  assert.match(sheet, /Call at 4 PM/);
   assert.match(sheet, /TOTAL STAFF NEEDED/);
   assert.match(sheet, /<sheetFormatPr baseColWidth="10" defaultRowHeight="16"\/>/);
   assert.match(sheet, /<col min="2" max="2" width="19\.33203125" customWidth="1"\/>/);

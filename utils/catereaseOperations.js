@@ -677,7 +677,7 @@ const manualAdditionMatches = (addition, type, zoneKey, templateKey) => (
   && (!clean(addition?.zoneKey, 200) || clean(addition.zoneKey, 200).toLowerCase() === clean(zoneKey, 200).toLowerCase())
 );
 
-const manualAdditionRow = (addition) => ({
+const manualAdditionRow = (addition, type = '') => ({
   sourceId: `manual:${clean(addition?._id, 100)}`,
   manualAdditionId: clean(addition?._id, 100),
   manual: true,
@@ -687,6 +687,10 @@ const manualAdditionRow = (addition) => ({
   notes: clean(addition?.notes, 1000),
   station: clean(addition?.station, 200),
   category: clean(addition?.category, 200),
+  menuGroup: 'Manual additions',
+  position: type === 'staff_request' ? clean(addition?.itemName, 300) : '',
+  required: type === 'staff_request' ? addition?.quantity : undefined,
+  comments: type === 'staff_request' ? clean(addition?.notes, 1000) : '',
 });
 
 export const operationalRows = (snapshot, type, zoneKey = '', templateKey = '', manualAdditions = []) => {
@@ -718,7 +722,7 @@ export const operationalRows = (snapshot, type, zoneKey = '', templateKey = '', 
     : (Array.isArray(rows) ? rows : []);
   const additions = (Array.isArray(manualAdditions) ? manualAdditions : [])
     .filter((addition) => manualAdditionMatches(addition, type, zoneKey, templateKey))
-    .map(manualAdditionRow)
+    .map((addition) => manualAdditionRow(addition, type))
     .filter((row) => row.itemName);
   return [...sourceRows, ...additions];
 };
@@ -829,7 +833,8 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
   const rows = operationalRows(snapshot, type, zoneKey, templateKey, manualAdditions);
   const title = template?.label?.toUpperCase() || (isAnnotatedKitchenMenu ? 'ANNOTATED KITCHEN MENU' : isKitchenMenu ? 'KITCHEN MENU' : isKitchenPackOut ? 'KITCHEN PACK OUT' : isStaffRequest ? 'STAFF REQUEST FORM' : 'PACK OUT');
   const groups = groupedRows(rows, (row) => (
-    template?.groupBy?.length
+    row?.manual ? 'Manual additions'
+      : template?.groupBy?.length
       ? template.groupBy.map((field) => row?.[field]).filter(Boolean).join(' / ')
         || row.station || row.prepArea || row.category
       : template

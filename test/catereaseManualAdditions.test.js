@@ -64,6 +64,22 @@ test('editing and deleting a manual addition targets only the matching subdocume
   assert.equal(event.catereaseManualAdditions.id(secondId).itemName, 'Macarons');
 });
 
+test('manual additions accept every generated operational document type', () => {
+  const event = new Event({
+    title: 'All document types',
+    catereaseManualAdditions: [
+      { documentType: 'po', itemName: 'PO row' },
+      { documentType: 'kitchen_packout', itemName: 'KPO row' },
+      { documentType: 'staff_request', itemName: 'Staff row' },
+      { documentType: 'kitchen_menu', itemName: 'KM row' },
+      { documentType: 'annotated_kitchen_menu', itemName: 'AKM row' },
+    ],
+  });
+
+  assert.equal(event.validateSync(), undefined);
+  assert.equal(event.catereaseManualAdditions.length, 5);
+});
+
 test('an unassigned bar captain receives the operational-event 403 guard', async (context) => {
   const eventQuery = {
     select() { return this; },

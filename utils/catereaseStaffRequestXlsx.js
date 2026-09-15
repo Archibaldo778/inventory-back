@@ -1,5 +1,5 @@
 import JSZip from 'jszip';
-import { catereaseOperationalZoneKey } from './catereaseOperations.js';
+import { operationalRows } from './catereaseOperations.js';
 
 const clean = (value, maxLength = 1000) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, maxLength);
 const escapeXml = (value) => String(value ?? '')
@@ -87,10 +87,8 @@ const eventNumber = (value) => {
   return match ? `E${match[1]}` : clean(value, 120);
 };
 
-const worksheetXml = ({ event, snapshot, zoneKey = '' }) => {
-  const normalizedZone = clean(zoneKey, 300).toLowerCase();
-  const rows = (Array.isArray(snapshot?.staffRequest) ? snapshot.staffRequest : [])
-    .filter((row) => !normalizedZone || catereaseOperationalZoneKey(row) === normalizedZone);
+const worksheetXml = ({ event, snapshot, zoneKey = '', manualAdditions = [] }) => {
+  const rows = operationalRows(snapshot, 'staff_request', zoneKey, '', manualAdditions);
   const guestCount = Number(event?.meta?.guestCount ?? snapshot?.guestCount);
   const totalStaff = rows.reduce((total, row) => total + (Number(row?.required) || 0), 0);
   const firstStart = rows.find((row) => row?.startTime)?.startTime || '';
@@ -166,14 +164,14 @@ ${sheetRow(totalLabelRow, ['TOTAL STAFF NEEDED'], { styles: [12] })}
 const stylesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="12"><font><sz val="12"/><color rgb="FF000000"/><name val="Aptos Narrow"/><family val="2"/></font><font><b/><u/><sz val="12"/><color rgb="FF000000"/><name val="Helvetica"/><family val="2"/></font><font><b/><sz val="12"/><color rgb="FF000000"/><name val="Helvetica"/><family val="2"/></font><font><b/><sz val="16"/><color rgb="FF000000"/><name val="Helvetica"/><family val="2"/></font><font><b/><u/><sz val="16"/><color rgb="FF000000"/><name val="Helvetica"/><family val="2"/></font><font><b/><u/><sz val="14"/><color rgb="FF000000"/><name val="Helvetica"/><family val="2"/></font><font><sz val="11"/><color rgb="FF000000"/><name val="Helvetica"/><family val="2"/></font><font><u/><sz val="11"/><color rgb="FF000000"/><name val="Helvetica"/><family val="2"/></font><font><b/><sz val="11"/><color rgb="FF000000"/><name val="Helvetica"/><family val="2"/></font><font><sz val="11"/><color rgb="FF000000"/><name val="Arial"/><family val="2"/></font><font><b/><u/><sz val="11"/><color rgb="FF000000"/><name val="Helvetica"/><family val="2"/></font><font><b/><sz val="11"/><color rgb="FFFF0000"/><name val="Helvetica"/><family val="2"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFFFF00"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="14"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="0" fontId="7" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="0" fontId="8" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="0" fontId="6" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="14" fontId="6" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1"/><xf numFmtId="18" fontId="6" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1"/><xf numFmtId="0" fontId="9" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="0" fontId="10" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="0" fontId="7" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="0" fontId="6" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="0" fontId="8" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="0" fontId="11" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="0" fontId="6" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`;
 
-export const renderCatereaseStaffRequestXlsx = async ({ event, snapshot, zoneKey = '' }) => {
+export const renderCatereaseStaffRequestXlsx = async ({ event, snapshot, zoneKey = '', manualAdditions = [] }) => {
   const zip = new JSZip();
   zip.file('[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>`);
   zip.folder('_rels').file('.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`);
   const xl = zip.folder('xl');
   xl.file('workbook.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><bookViews><workbookView/></bookViews><sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets><calcPr calcId="181029"/></workbook>`);
   xl.folder('_rels').file('workbook.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`);
-  xl.folder('worksheets').file('sheet1.xml', worksheetXml({ event, snapshot, zoneKey }));
+  xl.folder('worksheets').file('sheet1.xml', worksheetXml({ event, snapshot, zoneKey, manualAdditions }));
   xl.file('styles.xml', stylesXml);
   return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
 };

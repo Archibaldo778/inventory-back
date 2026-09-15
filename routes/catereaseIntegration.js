@@ -1061,8 +1061,8 @@ const manualItemPayload = (body = {}, { partial = false } = {}) => {
   const payload = {};
   if (!partial || Object.hasOwn(body, 'documentType')) {
     const documentType = cleanManualItemValue(body.documentType, 40).toLowerCase();
-    if (!['po', 'kitchen_packout'].includes(documentType)) {
-      throw Object.assign(new Error('Manual items are supported only for Pack Out and Kitchen Pack Out'), { statusCode: 400 });
+    if (!['po', 'kitchen_packout', 'staff_request', 'kitchen_menu', 'annotated_kitchen_menu'].includes(documentType)) {
+      throw Object.assign(new Error('Manual items are not supported for this document type'), { statusCode: 400 });
     }
     payload.documentType = documentType;
   }
@@ -1102,7 +1102,12 @@ const buildOperationalAttachment = async (event, type, options = {}) => {
   const templateRows = template ? catereaseOperationalTemplateRows(event.catereaseOperations, template.key, templates) : undefined;
   const isStaffRequest = type === 'staff_request';
   const output = isStaffRequest
-    ? await renderCatereaseStaffRequestXlsx({ event, snapshot: event.catereaseOperations, zoneKey: String(options.zone || '') })
+    ? await renderCatereaseStaffRequestXlsx({
+      event,
+      snapshot: event.catereaseOperations,
+      zoneKey: String(options.zone || ''),
+      manualAdditions: event.catereaseManualAdditions || [],
+    })
     : await renderCatereaseOperationalDocx({
       event,
       snapshot: event.catereaseOperations,

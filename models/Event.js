@@ -34,7 +34,7 @@ const eventDocumentSchema = new mongoose.Schema(
 
 const catereaseManualAdditionSchema = new mongoose.Schema(
   {
-    documentType: { type: String, enum: ['po', 'kitchen_packout'], required: true },
+    documentType: { type: String, enum: ['po', 'kitchen_packout', 'staff_request', 'kitchen_menu', 'annotated_kitchen_menu'], required: true },
     templateKey: { type: String, default: '', trim: true },
     zoneKey: { type: String, default: '', trim: true },
     itemName: { type: String, required: true, trim: true },

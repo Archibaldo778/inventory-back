@@ -54,6 +54,7 @@ import { renderCatereaseStaffRequestXlsx } from '../utils/catereaseStaffRequestX
 import { catereaseOperationalTemplateRows, catereasePackOutTemplate } from '../utils/catereasePackOutTemplates.js';
 import { applyCatereaseAlcoholClientChargesFromBundle } from '../utils/catereaseBarFinancials.js';
 import { createEmlDraft } from '../utils/emlDraft.js';
+import { createOperationalShareArchive } from '../utils/operationalShareArchive.js';
 import {
   buildOutlookAuthorizeUrl,
   createOutlookDraft,
@@ -1355,6 +1356,30 @@ router.post('/operations/events/:id/email-draft', requireAuth, emailDraftRateLim
     return res.send(eml);
   } catch (error) {
     return sendApiError(res, error, { context: 'Email draft failed', defaultStatus: 502, fallbackMessage: 'Could not create the email draft' });
+  }
+});
+
+router.post('/operations/events/:id/share-archive', requireAuth, emailDraftRateLimit, async (req, res) => {
+  try {
+    const event = await loadAuthorizedOperationalEvent(req, res);
+    if (!event) return undefined;
+    const requested = Array.isArray(req.body?.documents) ? req.body.documents.slice(0, 50) : [];
+    if (!requested.length) return res.status(400).json({ error: 'Select at least one document' });
+    if (!event.catereaseOperations && requested.some((descriptor) => String(descriptor?.type || '').toLowerCase() !== 'decor_packout')) {
+      return res.status(404).json({ error: 'Caterease operational data has not been synced for this event' });
+    }
+    const { attachments } = await buildRequestedEmailAttachments(event, requested);
+    const archive = await createOperationalShareArchive(attachments);
+    const dateMatch = String(event.date || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    const date = dateMatch ? `${dateMatch[2]}-${dateMatch[3]}-${dateMatch[1].slice(-2)}` : '';
+    const title = safeOperationalFilePart(event.title, 100).replace(/[^\x20-\x7E]/g, '') || 'Event';
+    const fileName = `${[date, title, requested.length === 1 ? 'Document' : 'Leadership Files'].filter(Boolean).join('_')}.zip`;
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    return res.send(archive);
+  } catch (error) {
+    return sendApiError(res, error, { context: 'Document share failed', defaultStatus: 502, fallbackMessage: 'Could not prepare the documents for sharing' });
   }
 });
 

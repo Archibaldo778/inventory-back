@@ -8,7 +8,6 @@ import DecorPackout from '../models/DecorPackout.js';
 import KitchenIngredient from '../models/KitchenIngredient.js';
 import KitchenIngredientUnit from '../models/KitchenIngredientUnit.js';
 import KitchenRecipe from '../models/KitchenRecipe.js';
-import Product from '../models/Product.js';
 import OutlookIntegration from '../models/OutlookIntegration.js';
 import { requireAdmin, requireAuth } from '../middleware/auth.js';
 import { createMemoryRateLimiter } from '../middleware/rateLimit.js';
@@ -43,15 +42,13 @@ import {
   selectLatestCatereaseFiles,
 } from '../utils/catereaseFiles.js';
 import { nyToday } from '../utils/dropboxDocuments.js';
-import { normalizeProductImages } from '../utils/productImages.js';
 import { buildCatereaseFinancialPreview, buildCatereaseKitchenCatalog } from '../utils/catereaseKitchen.js';
 import {
   buildCatereaseOperationalSnapshot,
-  packOutRenderedItemNames,
   renderCatereaseOperationalDocx,
 } from '../utils/catereaseOperations.js';
 import { renderCatereaseStaffRequestXlsx } from '../utils/catereaseStaffRequestXlsx.js';
-import { catereaseOperationalTemplateRows, catereasePackOutTemplate } from '../utils/catereasePackOutTemplates.js';
+import { catereasePackOutTemplate } from '../utils/catereasePackOutTemplates.js';
 import { applyCatereaseAlcoholClientChargesFromBundle } from '../utils/catereaseBarFinancials.js';
 import { createEmlDraft } from '../utils/emlDraft.js';
 import { createOperationalShareArchive } from '../utils/operationalShareArchive.js';
@@ -69,7 +66,6 @@ import {
 } from '../utils/outlookApi.js';
 import { normalizeKitchenRecipeName, syncKitchenRecipeMatches } from '../utils/kitchenRecipeMatching.js';
 import {
-  cloudinaryWordThumbnailUrl,
   loadBrandLogoSvg,
   loadCloudinaryWordImages,
 } from '../utils/operationalDocumentAssets.js';
@@ -111,34 +107,6 @@ export const loadAuthorizedOperationalEvent = async (req, res, { mutable = false
   }
   return event;
 };
-const loadMatchedDecorImages = async (snapshot, rows = snapshot?.packOut) => {
-  const requestedNames = new Map(packOutRenderedItemNames(rows, false).map((itemName) => (
-    [normalizeKitchenRecipeName(itemName), itemName]
-  )).filter(([key]) => key));
-  if (!requestedNames.size) return [];
-  const products = await Product.find({ inventoryType: { $ne: 'disposable' } })
-    .select('name image imageUrl images')
-    .lean();
-  const candidates = new Map();
-  products.forEach((product) => {
-    const key = normalizeKitchenRecipeName(product?.name);
-    if (!requestedNames.has(key)) return;
-    const url = normalizeProductImages(product).find((value) => cloudinaryWordThumbnailUrl(value));
-    if (!url) return;
-    const matches = candidates.get(key) || [];
-    matches.push({ product, url });
-    candidates.set(key, matches);
-  });
-  const matched = [...candidates.entries()]
-    .filter(([, productsForName]) => productsForName.length === 1)
-    .map(([key, [{ url }]]) => ({
-      itemName: requestedNames.get(key),
-      url,
-    }))
-    .slice(0, 40);
-  return loadCloudinaryWordImages(matched);
-};
-
 export const OPERATIONAL_FIELDS = Object.freeze({
   eventrequireditem: 'UID,FdSvNum,ItemName,OTFItemName,Qty,Unit,PUnit,QtyPerPUnit,FSPrepArea,FSName,FSType,Category,RentalItem,Vendor,SEDescription,SEvtDate,StartTime',
   foodserv: 'ItemName,Qty,Unit,PUnit,PrepArea,SubEvtNum,Category,Comment,Description,FdSvNum,ItemNum,ItemType,Type,ReqItem',
@@ -1103,7 +1071,6 @@ const buildOperationalAttachment = async (event, type, options = {}) => {
   const recipes = ['kitchen_packout', 'annotated_kitchen_menu'].includes(type)
     ? await KitchenRecipe.find({ sourceProvider: 'caterease', sourceDeletedAt: null }).select('name description instructions notes prepArea ingredients inactive hidden revisedAt updatedAt').lean()
     : [];
-  const templateRows = template ? catereaseOperationalTemplateRows(event.catereaseOperations, template.key, templates) : undefined;
   const isStaffRequest = type === 'staff_request';
   const output = isStaffRequest
     ? await renderCatereaseStaffRequestXlsx({
@@ -1118,7 +1085,7 @@ const buildOperationalAttachment = async (event, type, options = {}) => {
       type,
       recipes,
       brandLogoSvg: await loadBrandLogoSvg(),
-      decorImages: type === 'po' ? await loadMatchedDecorImages(event.catereaseOperations, templateRows) : [],
+      decorImages: [],
       zoneKey: String(options.zone || ''),
       zoneName: String(options.zoneName || ''),
       templateKey,

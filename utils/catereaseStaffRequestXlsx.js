@@ -33,6 +33,14 @@ const shiftHours = (startTime, endTime) => {
   return Number.isInteger(hours) ? hours : Math.round(hours * 100) / 100;
 };
 
+const displayTime = (value) => {
+  const parts = timeParts(value);
+  if (!parts) return clean(value, 80);
+  const suffix = parts.hour >= 12 ? 'pm' : 'am';
+  const hour = parts.hour % 12 || 12;
+  return `${hour}:${String(parts.minute).padStart(2, '0')} ${suffix}`;
+};
+
 const parsedDate = (value) => {
   const match = clean(value, 20).match(/^(\d{4})-(\d{2})-(\d{2})$/);
   return match ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12) : null;
@@ -93,6 +101,8 @@ const worksheetXml = ({ event, snapshot, zoneKey = '', manualAdditions = [] }) =
   const totalStaff = rows.reduce((total, row) => total + (Number(row?.required) || 0), 0);
   const firstStart = rows.find((row) => row?.startTime)?.startTime || '';
   const meta = event?.meta || {};
+  const snapshotEventTime = [displayTime(snapshot?.eventStartTime), displayTime(snapshot?.eventEndTime)]
+    .filter(Boolean).join(' – ');
   const revision = clean(meta.staffRequestRevision || 1, 20);
   const spacerRun = '<b/><sz val="12"/><color rgb="FF000000"/><rFont val="Helvetica"/><family val="2"/>';
   const revisionRun = '<b/><sz val="16"/><color rgb="FF000000"/><rFont val="Helvetica"/><family val="2"/>';
@@ -116,7 +126,7 @@ const worksheetXml = ({ event, snapshot, zoneKey = '', manualAdditions = [] }) =
     sheetRow(7, ['', 'Event type:', clean(meta.eventType || meta.category || snapshot?.eventType)], { styles: [2, 4, 4] }),
     sheetRow(8, ['', 'Guests:', Number.isFinite(guestCount) && guestCount > 0 ? guestCount : ''], { styles: [2, 4, 4], numeric: [2] }),
     sheetRow(9, ['', 'Staff Arrival Time:', excelTime(meta.staffArrivalTime || firstStart)], { styles: [2, 3, 6], numeric: [2] }),
-    sheetRow(10, ['', 'Event time:', clean(meta.eventTime)], { styles: [2, 4, 4] }),
+    sheetRow(10, ['', 'Event time:', clean(snapshotEventTime || meta.eventTime)], { styles: [2, 4, 4] }),
     sheetRow(11, ['', 'Staff Departure:', excelTime(meta.staffDepartureTime)], { styles: [2, 3, 6], numeric: [2] }),
     sheetRow(12, ['LOCATION:', 'Address:', clean(meta.venue || meta.nowsta?.venue)], { styles: [10, 11, 4] }),
     sheetRow(13, ['', '', clean(meta.address || meta.nowsta?.address)], { styles: [10, 11, 4] }),

@@ -155,6 +155,38 @@ test('Kitchen Pack Out section exports select only the requested operational men
   );
 });
 
+test('Kitchen Pack Out assigns operational rows that lack a mapped menu dish', () => {
+  const snapshot = {
+    schemaVersion: 18,
+    requiredItems: [
+      { sourceId: 'staff', itemName: 'Bread', station: 'Option C: 7.5+ hours', category: 'Staff Meal' },
+      { sourceId: 'almonds', itemName: 'Spiced almonds', station: 'Spiced almonds VEGAN, GF, DF' },
+      { sourceId: 'raw-decor', itemName: 'RAW BAR STATION DECOR: FRESH LEMONS, SEAWEED', topLevelFoodService: true },
+      { sourceId: 'jello', itemName: 'Jello molds (12 pcs): lime, orange, grape, watermelon', topLevelFoodService: true },
+      { sourceId: 'tofu', itemName: 'TOFU, heirloom tomato, baby zucchini, summer squash, basil pangrattato', topLevelFoodService: true },
+    ],
+    foodService: [],
+    packOutTemplates: [{ key: 'print-kpo', documentType: 'kitchen_packout', conditions: [] }],
+  };
+
+  assert.deepEqual(
+    operationalRows(snapshot, 'kitchen_packout', 'kpo-section:dinner', 'print-kpo').map(({ sourceId }) => sourceId),
+    ['staff', 'tofu']
+  );
+  assert.deepEqual(
+    operationalRows(snapshot, 'kitchen_packout', 'kpo-section:passed-hds', 'print-kpo').map(({ sourceId }) => sourceId),
+    ['almonds']
+  );
+  assert.deepEqual(
+    operationalRows(snapshot, 'kitchen_packout', 'kpo-section:raw-bar-station', 'print-kpo').map(({ sourceId }) => sourceId),
+    ['raw-decor']
+  );
+  assert.deepEqual(
+    operationalRows(snapshot, 'kitchen_packout', 'kpo-section:late-night', 'print-kpo').map(({ sourceId }) => sourceId),
+    ['jello']
+  );
+});
+
 test('document-level manual additions are rendered for staff and kitchen menu document types', () => {
   const snapshot = { schemaVersion: 9, staffRequest: [], kitchenMenu: [], kitchenPackOut: [] };
   const additions = [
@@ -565,7 +597,7 @@ test('operational snapshot uses Caterease guest fields without a Standard Food r
   assert.equal(catereaseOperationalGuestCount(rows), 120);
 });
 
-test('operational snapshot keeps event-level Caterease guests and sales rep', () => {
+test('operational snapshot keeps event-level Caterease details and service timing', () => {
   const snapshot = buildCatereaseOperationalSnapshot({
     eventId: 'E22856',
     eventRow: {
@@ -573,15 +605,23 @@ test('operational snapshot keeps event-level Caterease guests and sales rep', ()
       GtdGuests: null,
       PlnGuests: null,
       SalesRep: 'Olivier Cheng',
+      Client: 'Studio Sully Event Production & Design',
       Status: 'Definite',
       Category: "Passed HD's",
     },
     packOutRows: [{ ItemName: 'Club Soda', Qty: 2 }],
+    subEventRows: [
+      { SubEvtNum: 'S-STAFF', Description: 'Staffing', StartTime: '12:00:00', EndTime: '03:00:00' },
+      { SubEvtNum: 'S-INVOICE', Description: 'Invoice', StartTime: '16:00:00', EndTime: '02:00:00' },
+    ],
   });
   assert.equal(snapshot.guestCount, 40);
   assert.equal(snapshot.salesRep, 'Olivier Cheng');
+  assert.equal(snapshot.client, 'Studio Sully Event Production & Design');
   assert.equal(snapshot.eventStatus, 'Definite');
   assert.equal(snapshot.eventType, "Passed HD's");
+  assert.equal(snapshot.eventStartTime, '16:00:00');
+  assert.equal(snapshot.eventEndTime, '02:00:00');
 });
 
 test('Caterease actual guests override planned guests and respect a larger guarantee', () => {
@@ -839,13 +879,15 @@ test('Staff Request XLSX matches the Caterease staffing sheet fields', async () 
       title: 'Chanel YPO Cocktail',
       date: '2026-09-14',
       externalId: 'E22856 - S62650',
-      meta: { eventTime: '6:30 pm - 8:00 pm' },
+      meta: { eventTime: '4:30 pm - 9:30 pm' },
     },
     snapshot: {
       guestCount: 40,
       salesRep: 'Olivier Cheng',
       eventStatus: 'Definite',
       eventType: "Passed HD's",
+      eventStartTime: '18:30:00',
+      eventEndTime: '20:00:00',
       staffRequest: [
         { subEvent: 'S1', zoneName: 'Staffing', position: 'Captain - Working', required: 1, startTime: '16:30:00', endTime: '21:30:00' },
         { subEvent: 'S1', zoneName: 'Staffing', position: 'Food Passer', required: 1, startTime: '16:30:00', endTime: '21:30:00', uniform: 'Wht BttnDwn Shrt-Blk Tie (OC)' },
@@ -871,7 +913,8 @@ test('Staff Request XLSX matches the Caterease staffing sheet fields', async () 
   assert.match(sheet, /Olivier Cheng/);
   assert.match(sheet, /Definite/);
   assert.match(sheet, /Passed HD&apos;s/);
-  assert.match(sheet, /6:30 pm - 8:00 pm/);
+  assert.match(sheet, /6:30 pm – 8:00 pm/);
+  assert.doesNotMatch(sheet, /4:30 pm - 9:30 pm/);
   assert.match(sheet, /<c r="C9" s="6"><v>0\.6875<\/v><\/c>/);
   assert.match(sheet, /<c r="D31" s="6"><v>0\.8958333333333334<\/v><\/c>/);
   assert.match(sheet, />Hours</);
@@ -1058,7 +1101,7 @@ test('operational snapshot checksum is stable when API row order changes', () =>
     packOutRows: [{ ItemName: 'B', Qty: 2 }, { ItemName: 'A', Qty: 1 }],
     syncedAt: new Date('2026-09-11T12:00:00Z'),
   });
-  assert.equal(first.schemaVersion, 18);
+  assert.equal(first.schemaVersion, 19);
   const second = buildCatereaseOperationalSnapshot({
     eventId: 'E22672',
     packOutRows: [{ ItemName: 'A', Qty: 1 }, { ItemName: 'B', Qty: 2 }],
@@ -1252,6 +1295,46 @@ test('Kitchen Menu does not confuse Caterease staff call times with event timing
   assert.match(xml, />NO MEZCAL</);
   assert.doesNotMatch(xml, />Revision</);
   assert.doesNotMatch(xml, />End:/);
+});
+
+test('operational documents prefer Caterease service timing and client over staffing-window metadata', async () => {
+  const buffer = await renderCatereaseOperationalDocx({
+    event: {
+      title: 'Wedding',
+      date: '2026-09-12',
+      externalId: 'E20244',
+      meta: { eventTime: '12:00 PM – 3:00 AM' },
+    },
+    snapshot: {
+      schemaVersion: 19,
+      client: 'Studio Sully Event Production & Design',
+      eventStartTime: '16:00:00',
+      eventEndTime: '02:00:00',
+      kitchenPackOut: [{ itemName: 'Tray', station: 'Dinner' }],
+      packOutTemplates: [],
+    },
+    type: 'kitchen_packout',
+  });
+  const zip = await JSZip.loadAsync(buffer);
+  const xml = await zip.file('word/document.xml').async('string');
+  assert.match(xml, /Client: Studio Sully Event Production &amp; Design/);
+  assert.match(xml, /Event Date: Saturday, September 12, 2026/);
+
+  const menuBuffer = await renderCatereaseOperationalDocx({
+    event: { title: 'Wedding', date: '2026-09-12', externalId: 'E20244', meta: { eventTime: '12:00 PM – 3:00 AM' } },
+    snapshot: {
+      schemaVersion: 19,
+      client: 'Studio Sully Event Production & Design',
+      eventStartTime: '16:00:00',
+      eventEndTime: '02:00:00',
+      kitchenMenu: [{ itemName: 'Dinner', menuGroup: 'MENU' }],
+    },
+    type: 'kitchen_menu',
+  });
+  const menuZip = await JSZip.loadAsync(menuBuffer);
+  const menuXml = await menuZip.file('word/document.xml').async('string');
+  assert.match(menuXml, /Event Timing: 4:00 pm – 2:00 am/);
+  assert.doesNotMatch(menuXml, /Event Timing: 12:00 PM/);
 });
 
 test('Kitchen Menu prints a non-main zone name below its title', async () => {

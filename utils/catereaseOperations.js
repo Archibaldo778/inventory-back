@@ -327,9 +327,14 @@ export const buildCatereaseOperationalSnapshot = ({
     first(guestRow, ['Qty', 'Quantity'])
   );
   const salesRep = clean(first(eventRow, ['SalesRep', 'SalesRepresentative', 'SalesPerson']), 200);
+  const client = clean(first(eventRow, ['Client', 'Organization']), 300);
   const eventStatus = clean(first(eventRow, ['Status']), 120);
   const eventType = clean(first(eventRow, ['Category', 'EventType']), 200);
   const subEvents = normalizeCatereaseSubEventRows(subEventRows);
+  const timedEvent = subEvents.find((row) => /\binvoice\b/i.test(row.description))
+    || subEvents.find((row) => !/\b(?:staff(?:ing)?|menu|pack\s*out)\b/i.test(row.description));
+  const eventStartTime = clean(timedEvent?.startTime, 80);
+  const eventEndTime = clean(timedEvent?.endTime, 80);
   const zoneNameBySubEvent = new Map(subEvents.map((row) => [
     clean(row.subEvent, 120).toLowerCase(),
     row.description || row.room,
@@ -362,8 +367,11 @@ export const buildCatereaseOperationalSnapshot = ({
     eventId: clean(eventId, 120),
     guestCount,
     salesRep,
+    client,
     eventStatus,
     eventType,
+    eventStartTime,
+    eventEndTime,
     packOut: stableRows(packOut),
     kitchenPackOut: stableRows(kitchenPackOut),
     kitchenMenu: stableRows(kitchenMenu),
@@ -371,14 +379,17 @@ export const buildCatereaseOperationalSnapshot = ({
     packOutTemplates,
   })).digest('hex');
   return {
-    schemaVersion: 18,
+    schemaVersion: 19,
     eventId: clean(eventId, 120),
     syncedAt,
     checksum,
     guestCount,
     salesRep,
+    client,
     eventStatus,
     eventType,
+    eventStartTime,
+    eventEndTime,
     packOut,
     kitchenPackOut,
     requiredItems: kitchenPackOut,
@@ -893,7 +904,11 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
   const guestCount = Number.isFinite(parsedEventGuestCount) && parsedEventGuestCount > 0
     ? parsedEventGuestCount
     : Number.isFinite(parsedSnapshotGuestCount) && parsedSnapshotGuestCount > 0 ? parsedSnapshotGuestCount : '';
-  const eventTiming = event?.meta?.eventTime || '';
+  const snapshotEventTiming = [
+    formatOperationalTime(snapshot?.eventStartTime),
+    formatOperationalTime(snapshot?.eventEndTime),
+  ].filter(Boolean).join(' – ');
+  const eventTiming = snapshotEventTiming || event?.meta?.eventTime || '';
   const salesRep = event?.meta?.salesRep || snapshot?.salesRep || '';
   const deliveryTime = event?.meta?.deliveryTime || '';
   const staffingRows = Array.isArray(snapshot?.staffRequest) && snapshot.staffRequest.length
@@ -921,7 +936,7 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
       eventNameCell('Event Name: ', event?.title),
       `Date: ${longDate(event?.date)}`,
       `Guest Count: ${guestCount}`,
-      `Client: ${event?.client || ''}`,
+      `Client: ${event?.client || snapshot?.client || ''}`,
       `Location: ${event?.meta?.venue || event?.meta?.nowsta?.venue || ''}`,
       `Address: ${event?.meta?.address || event?.meta?.nowsta?.address || ''}`,
     ],
@@ -937,7 +952,7 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
     [eventNameCell('Event Name: ', event?.title), `Event Timing: ${eventTiming}`],
     [`Date: ${longDate(event?.date)}`, `Staff Arrival on Site: ${staffArrivalTime}`],
     [`Guest Count: ${guestCount}`, `Sales Rep: ${salesRep}`],
-    [`Client: ${event?.client || ''}`, `Site Contact: ${event?.meta?.siteContact || ''}`],
+    [`Client: ${event?.client || snapshot?.client || ''}`, `Site Contact: ${event?.meta?.siteContact || ''}`],
     [`Location: ${event?.meta?.venue || event?.meta?.nowsta?.venue || ''}`, `Last Modified: ${new Intl.DateTimeFormat('en-US').format(new Date(event?.updatedAt || Date.now()))}`],
     [`Address: ${event?.meta?.address || event?.meta?.nowsta?.address || ''}`, `Service Entrance: ${event?.meta?.serviceEntrance || ''}`],
     [`Client Notes: ${event?.meta?.clientNotes || ''}`, `Meeting Point: ${event?.meta?.meetingPoint || ''}`],

@@ -142,13 +142,34 @@ const kitchenPackOutStationGroups = (snapshot = {}) => {
   return groups;
 };
 
+const kitchenPackOutFallbackGroup = (row, stationGroups) => {
+  const station = clean(row?.station, 300);
+  const mapped = stationGroups.get(normalizedMenuText(station || row?.itemName));
+  if (mapped) return mapped;
+  const context = normalizedMenuText([
+    station,
+    row?.itemName,
+    row?.menuGroup,
+    row?.category,
+    row?.prepArea,
+  ].filter(Boolean).join(' '));
+  if (/\bstaff meal\b|\boption [a-z0-9]+ \d+(?: \d+)? hours?\b/.test(context)) return 'dinner';
+  if (/\bjello molds?\b|\blate night decor\b/.test(context)) return 'late-night';
+  if (/\bspiced almonds?\b/.test(context)) return 'passed-hds';
+  const explicitHeading = kitchenPackOutHeadingGroup(station)
+    || kitchenPackOutHeadingGroup(row?.itemName);
+  if (explicitHeading) return explicitHeading;
+  if (/\btofu\b/.test(context) && /\b(?:heirloom|zucchini|squash|pangrattato)\b/.test(context)) return 'dinner';
+  return kitchenPackOutDishOverride({ ...row, itemName: station || row?.itemName }, '');
+};
+
 export const catereaseKitchenPackOutDocumentGroups = (snapshot = {}, rows = []) => {
   const values = Array.isArray(rows) ? rows : [];
   const stationGroups = kitchenPackOutStationGroups(snapshot);
   return KITCHEN_PACK_OUT_DOCUMENT_GROUPS.map((definition) => ({
     ...definition,
     zoneKey: `kpo-section:${definition.key}`,
-    rows: values.filter((row) => stationGroups.get(normalizedMenuText(row?.station || row?.itemName)) === definition.key),
+    rows: values.filter((row) => kitchenPackOutFallbackGroup(row, stationGroups) === definition.key),
   })).filter((group) => group.rows.length);
 };
 

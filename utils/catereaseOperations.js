@@ -562,7 +562,7 @@ const catereasePackOutTable = (groups, decorImages = []) => {
   const body = [...groups.entries()].map(([group, values]) => `${sectionRow(group.toUpperCase())}${values.map((row) => `<w:tr>${[
     { value: row.itemName, align: 'center' },
     { value: formatQuantity(row.quantity), align: 'center' },
-    { value: row.notes || '', align: '' },
+    { value: row.manual ? [row.notes, row.unit].filter(Boolean).join(' · ') : row.notes || '', align: '' },
     { value: '', align: '' },
     { value: '', align: '' },
   ].map(({ value, align }, index) => cell(value, { width: widths[index], align })).join('')}${includePhotos ? imageCell(imageByName.get(itemKey(row.itemName)), widths[5]) : ''}</w:tr>`).join('')}`).join('');
@@ -600,7 +600,8 @@ const catereaseKitchenPackOutTable = (groups, recipes = []) => {
   })).join('')}</w:tr>`;
   const sectionRow = (name) => `<w:tr><w:tc><w:tcPr><w:gridSpan w:val="${widths.length}"/><w:tcW w:w="${widths.reduce((total, width) => total + width, 0)}" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr>${paragraph(name, { bold: true, size: 20, after: 0 })}</w:tc></w:tr>`;
   const body = [...expandedGroups.entries()].map(([group, values]) => `${sectionRow(group)}${values.filter((row) => !row.topLevelFoodService).map((row) => `<w:tr>${[
-    row.itemName, '', '', '', '',
+    row.manual && row.notes ? `${row.itemName} — ${row.notes}` : row.itemName,
+    row.manual ? [formatQuantity(row.quantity), row.unit].filter(Boolean).join(' ') : '', '', '', '',
   ].map((value, index) => cell(value, { width: widths[index], align: index ? 'center' : '' })).join('')}</w:tr>`).join('')}`).join('');
   return `<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/><w:tblLayout w:type="fixed"/>${tableBorders}</w:tblPr><w:tblGrid>${widths.map((width) => `<w:gridCol w:w="${width}"/>`).join('')}</w:tblGrid>${header}${body}</w:tbl>`;
 };
@@ -670,7 +671,25 @@ const groupedRows = (rows, groupSelector) => {
 
 export const catereaseOperationalZoneKey = operationalZoneIdentity;
 
-const operationalRows = (snapshot, type, zoneKey = '', templateKey = '') => {
+const manualAdditionMatches = (addition, type, zoneKey, templateKey) => (
+  clean(addition?.documentType, 40).toLowerCase() === clean(type, 40).toLowerCase()
+  && (!clean(addition?.templateKey, 200) || clean(addition.templateKey, 200).toLowerCase() === clean(templateKey, 200).toLowerCase())
+  && (!clean(addition?.zoneKey, 200) || clean(addition.zoneKey, 200).toLowerCase() === clean(zoneKey, 200).toLowerCase())
+);
+
+const manualAdditionRow = (addition) => ({
+  sourceId: `manual:${clean(addition?._id, 100)}`,
+  manualAdditionId: clean(addition?._id, 100),
+  manual: true,
+  itemName: clean(addition?.itemName, 300),
+  quantity: addition?.quantity,
+  unit: clean(addition?.unit, 80),
+  notes: clean(addition?.notes, 1000),
+  station: clean(addition?.station, 200),
+  category: clean(addition?.category, 200),
+});
+
+export const operationalRows = (snapshot, type, zoneKey = '', templateKey = '', manualAdditions = []) => {
   const version = Number(snapshot?.schemaVersion) || 1;
   let rows;
   const templates = Array.isArray(snapshot?.packOutTemplates) ? snapshot.packOutTemplates : undefined;
@@ -694,9 +713,14 @@ const operationalRows = (snapshot, type, zoneKey = '', templateKey = '') => {
     rows = buildKitchenMenuRows(legacyKitchenPackOut);
   }
   const normalizedZoneKey = clean(zoneKey, 200).toLowerCase();
-  return normalizedZoneKey
+  const sourceRows = normalizedZoneKey
     ? (Array.isArray(rows) ? rows : []).filter((row) => catereaseOperationalZoneKey(row) === normalizedZoneKey)
     : (Array.isArray(rows) ? rows : []);
+  const additions = (Array.isArray(manualAdditions) ? manualAdditions : [])
+    .filter((addition) => manualAdditionMatches(addition, type, zoneKey, templateKey))
+    .map(manualAdditionRow)
+    .filter((row) => row.itemName);
+  return [...sourceRows, ...additions];
 };
 
 const withoutRepeatedItemPrefix = (value, itemName) => {
@@ -796,13 +820,13 @@ const kitchenStaffingSection = (event, snapshot) => {
   }`;
 };
 
-const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = false, decorImages = [], includePackOutTemplate = true, zoneKey = '', zoneName = '', templateKey = '' }) => {
+const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = false, decorImages = [], includePackOutTemplate = true, zoneKey = '', zoneName = '', templateKey = '', manualAdditions = [] }) => {
   const isKitchenPackOut = type === 'kitchen_packout';
   const isStaffRequest = type === 'staff_request';
   const isKitchenMenu = ['kitchen_menu', 'annotated_kitchen_menu'].includes(type);
   const isAnnotatedKitchenMenu = type === 'annotated_kitchen_menu';
   const template = catereasePackOutTemplate(templateKey, snapshot?.packOutTemplates);
-  const rows = operationalRows(snapshot, type, zoneKey, templateKey);
+  const rows = operationalRows(snapshot, type, zoneKey, templateKey, manualAdditions);
   const title = template?.label?.toUpperCase() || (isAnnotatedKitchenMenu ? 'ANNOTATED KITCHEN MENU' : isKitchenMenu ? 'KITCHEN MENU' : isKitchenPackOut ? 'KITCHEN PACK OUT' : isStaffRequest ? 'STAFF REQUEST FORM' : 'PACK OUT');
   const groups = groupedRows(rows, (row) => (
     template?.groupBy?.length
@@ -928,6 +952,7 @@ export const renderCatereaseOperationalDocx = async ({
   zoneKey = '',
   zoneName = '',
   templateKey = '',
+  manualAdditions = [],
 }) => {
   const includeBrandLogo = Buffer.isBuffer(brandLogoSvg) && brandLogoSvg.length > 0;
   const embeddedDecorImages = (Array.isArray(decorImages) ? decorImages : [])
@@ -954,6 +979,7 @@ export const renderCatereaseOperationalDocx = async ({
     zoneKey,
     zoneName,
     templateKey,
+    manualAdditions,
   }));
   word.file('styles.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:rPr><w:rFonts w:ascii="Avenir Medium" w:hAnsi="Avenir Medium"/><w:sz w:val="20"/></w:rPr></w:style></w:styles>`);
   if (includeBrandLogo) word.folder('media').file('logo.svg', brandLogoSvg);

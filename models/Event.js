@@ -32,6 +32,25 @@ const eventDocumentSchema = new mongoose.Schema(
   { _id: true }
 );
 
+const catereaseManualAdditionSchema = new mongoose.Schema(
+  {
+    documentType: { type: String, enum: ['po', 'kitchen_packout'], required: true },
+    templateKey: { type: String, default: '', trim: true },
+    zoneKey: { type: String, default: '', trim: true },
+    itemName: { type: String, required: true, trim: true },
+    quantity: { type: Number, default: 0, min: 0 },
+    unit: { type: String, default: '', trim: true },
+    notes: { type: String, default: '', trim: true },
+    station: { type: String, default: '', trim: true },
+    category: { type: String, default: '', trim: true },
+    addedBy: { type: String, default: '', trim: true },
+    addedAt: { type: Date, default: Date.now },
+    updatedBy: { type: String, default: '', trim: true },
+    updatedAt: { type: Date, default: Date.now },
+  },
+  { _id: true }
+);
+
 const eventSchema = new mongoose.Schema(
   {
     externalId: { type: String, trim: true, index: true, sparse: true },
@@ -45,6 +64,7 @@ const eventSchema = new mongoose.Schema(
     documents: { type: [eventDocumentSchema], default: [] },
     documentHistory: { type: [eventDocumentSchema], default: [] },
     catereaseOperations: { type: mongoose.Schema.Types.Mixed, default: null },
+    catereaseManualAdditions: { type: [catereaseManualAdditionSchema], default: [] },
     deckRevision: { type: Number, default: 0, min: 0, select: false },
   },
   { timestamps: true }

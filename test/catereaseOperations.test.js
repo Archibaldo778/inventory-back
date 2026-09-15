@@ -10,6 +10,7 @@ import {
   normalizeCatereaseKitchenPackOutRows,
   normalizeCatereasePackOutRows,
   normalizeCatereaseStaffRequestRows,
+  operationalRows,
   packOutRenderedItemNames,
   renderCatereaseOperationalDocx,
 } from '../utils/catereaseOperations.js';
@@ -40,6 +41,35 @@ test('Caterease exposes only the two real operational Pack Out document types', 
   assert.deepEqual(catereasePackOutTemplateRows(rows, 'pack_out').map((row) => row.itemName), ['Chafing Dish']);
   assert.equal(rows[0].fsType, 'Equipment');
   assert.equal(rows[0].category, 'Hot');
+});
+
+test('manual operational additions appear only in their matching document template and zone', () => {
+  const snapshot = {
+    schemaVersion: 9,
+    packOutTemplates: [
+      { key: 'pack-template', documentType: 'po' },
+      { key: 'kpo-template', documentType: 'kitchen_packout' },
+    ],
+    requiredItems: [],
+    foodService: [],
+  };
+  const additions = [{
+    _id: 'manual-one',
+    documentType: 'po',
+    templateKey: 'pack-template',
+    zoneKey: 's-dinner|dinner',
+    itemName: 'Fruit Skewers',
+    quantity: 12,
+    unit: 'pcs',
+    notes: 'Add by hand',
+  }];
+  assert.deepEqual(
+    operationalRows(snapshot, 'po', 's-dinner|dinner', 'pack-template', additions)
+      .map(({ itemName, quantity, unit, manual }) => ({ itemName, quantity, unit, manual })),
+    [{ itemName: 'Fruit Skewers', quantity: 12, unit: 'pcs', manual: true }]
+  );
+  assert.equal(operationalRows(snapshot, 'po', 's-cocktail|cocktail', 'pack-template', additions).length, 0);
+  assert.equal(operationalRows(snapshot, 'kitchen_packout', 's-dinner|dinner', 'kpo-template', additions).length, 0);
 });
 
 test('manual food-service rows in a Pack Out sub-event are used when event required items are empty', () => {

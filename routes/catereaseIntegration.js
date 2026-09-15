@@ -86,10 +86,10 @@ let operationalSyncProgress = null;
 let printTemplatePromise = null;
 let printTemplateCache = { locationId: '', expiresAt: 0, rows: null };
 
-const loadAuthorizedOperationalEvent = async (req, res) => {
-  const event = await Event.findById(req.params.id)
-    .select('externalId title date client meta catereaseOperations updatedAt')
-    .lean();
+export const loadAuthorizedOperationalEvent = async (req, res, { mutable = false } = {}) => {
+  const query = Event.findById(req.params.id)
+    .select('externalId title date client meta catereaseOperations catereaseManualAdditions updatedAt');
+  const event = mutable ? await query : await query.lean();
   if (!event) {
     res.status(404).json({ error: 'Event not found' });
     return null;
@@ -463,16 +463,20 @@ export const fetchCatereaseOperationalSnapshot = async (eventId, eventDate = '',
   });
 };
 
-const syncOperationalEvent = async (event) => {
+export const syncOperationalEvent = async (event, {
+  fetchSnapshot = fetchCatereaseOperationalSnapshot,
+  syncBarItems = syncCatereaseOperationalBarItems,
+  primaryFiles = getCatereaseConfig().primaryFiles,
+} = {}) => {
   const eventId = normalizeCatereaseEventId(event?.externalId);
   if (!eventId) return { status: 'skipped', reason: 'missing_event_id' };
-  const snapshot = await fetchCatereaseOperationalSnapshot(eventId, String(event?.date || ''), String(event?.title || ''));
+  const snapshot = await fetchSnapshot(eventId, String(event?.date || ''), String(event?.title || ''));
   const previousChecksum = String(event?.catereaseOperations?.checksum || '');
   event.catereaseOperations = snapshot;
   event.markModified('catereaseOperations');
   await event.save();
-  const barSync = getCatereaseConfig().primaryFiles
-    ? await syncCatereaseOperationalBarItems(event, snapshot)
+  const barSync = primaryFiles
+    ? await syncBarItems(event, snapshot)
     : { synced: false, items: 0, reason: 'dropbox_primary' };
   return {
     status: previousChecksum === snapshot.checksum ? 'unchanged' : 'updated',
@@ -1052,6 +1056,38 @@ router.post('/operations/sync', ...requireCatereaseAdmin, syncRateLimit, async (
 const safeOperationalFilePart = (value, limit = 100) => String(value || '')
   .replace(/[<>:"/\\|?*\u0000-\u001F]/g, '').replace(/\s+/g, ' ').trim().slice(0, limit);
 
+const cleanManualItemValue = (value, limit) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, limit);
+const manualItemPayload = (body = {}, { partial = false } = {}) => {
+  const payload = {};
+  if (!partial || Object.hasOwn(body, 'documentType')) {
+    const documentType = cleanManualItemValue(body.documentType, 40).toLowerCase();
+    if (!['po', 'kitchen_packout'].includes(documentType)) {
+      throw Object.assign(new Error('Manual items are supported only for Pack Out and Kitchen Pack Out'), { statusCode: 400 });
+    }
+    payload.documentType = documentType;
+  }
+  if (!partial || Object.hasOwn(body, 'itemName')) {
+    const itemName = cleanManualItemValue(body.itemName, 300);
+    if (!itemName) throw Object.assign(new Error('Item name is required'), { statusCode: 400 });
+    payload.itemName = itemName;
+  }
+  if (!partial || Object.hasOwn(body, 'quantity')) {
+    const quantity = body.quantity === '' || body.quantity === null || body.quantity === undefined ? 0 : Number(body.quantity);
+    if (!Number.isFinite(quantity) || quantity < 0) throw Object.assign(new Error('Quantity must be zero or greater'), { statusCode: 400 });
+    payload.quantity = quantity;
+  }
+  const stringFields = { templateKey: 200, zoneKey: 200, unit: 80, notes: 1000, station: 200, category: 200 };
+  Object.entries(stringFields).forEach(([field, limit]) => {
+    if (!partial || Object.hasOwn(body, field)) payload[field] = cleanManualItemValue(body[field], limit);
+  });
+  return payload;
+};
+
+const operationalActor = (auth) => cleanManualItemValue(
+  auth?.userId || auth?.username || auth?.email,
+  200
+);
+
 const buildOperationalAttachment = async (event, type, options = {}) => {
   if (!['po', 'kitchen_packout', 'staff_request', 'kitchen_menu', 'annotated_kitchen_menu'].includes(type)) {
     throw Object.assign(new Error('Unknown operational document type'), { statusCode: 400 });
@@ -1077,6 +1113,7 @@ const buildOperationalAttachment = async (event, type, options = {}) => {
       zoneKey: String(options.zone || ''),
       zoneName: String(options.zoneName || ''),
       templateKey,
+      manualAdditions: event.catereaseManualAdditions || [],
     });
   const safeTitle = safeOperationalFilePart(event.title, 100) || 'Event';
   const dateMatch = String(event.date || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -1099,9 +1136,67 @@ router.get('/operations/events/:id', requireAuth, async (req, res) => {
   try {
     const event = await loadAuthorizedOperationalEvent(req, res);
     if (!event) return undefined;
-    return res.json({ snapshot: event.catereaseOperations || null });
+    return res.json({
+      snapshot: event.catereaseOperations || null,
+      manualAdditions: event.catereaseManualAdditions || [],
+    });
   } catch (error) {
     return sendApiError(res, error, { context: 'Caterease event operational data failed', fallbackMessage: 'Failed to load Caterease operational data' });
+  }
+});
+
+router.post('/operations/events/:id/manual-items', requireAuth, async (req, res) => {
+  try {
+    const event = await loadAuthorizedOperationalEvent(req, res, { mutable: true });
+    if (!event) return undefined;
+    const now = new Date();
+    const actor = operationalActor(req.auth);
+    event.catereaseManualAdditions.push({
+      ...manualItemPayload(req.body),
+      addedBy: actor,
+      addedAt: now,
+      updatedBy: actor,
+      updatedAt: now,
+    });
+    await event.save();
+    clearApiCacheGroups('events');
+    const item = event.catereaseManualAdditions[event.catereaseManualAdditions.length - 1];
+    return res.status(201).json({ item, manualAdditions: event.catereaseManualAdditions });
+  } catch (error) {
+    return sendApiError(res, error, { context: 'Caterease manual item add failed', fallbackMessage: 'Failed to add the manual item' });
+  }
+});
+
+router.patch('/operations/events/:id/manual-items/:itemId', requireAuth, async (req, res) => {
+  try {
+    const event = await loadAuthorizedOperationalEvent(req, res, { mutable: true });
+    if (!event) return undefined;
+    const item = event.catereaseManualAdditions.id(req.params.itemId);
+    if (!item) return res.status(404).json({ error: 'Manual item not found' });
+    Object.assign(item, manualItemPayload(req.body, { partial: true }), {
+      updatedBy: operationalActor(req.auth),
+      updatedAt: new Date(),
+    });
+    await event.save();
+    clearApiCacheGroups('events');
+    return res.json({ item, manualAdditions: event.catereaseManualAdditions });
+  } catch (error) {
+    return sendApiError(res, error, { context: 'Caterease manual item edit failed', fallbackMessage: 'Failed to edit the manual item' });
+  }
+});
+
+router.delete('/operations/events/:id/manual-items/:itemId', requireAuth, async (req, res) => {
+  try {
+    const event = await loadAuthorizedOperationalEvent(req, res, { mutable: true });
+    if (!event) return undefined;
+    const item = event.catereaseManualAdditions.id(req.params.itemId);
+    if (!item) return res.status(404).json({ error: 'Manual item not found' });
+    event.catereaseManualAdditions.pull(item._id);
+    await event.save();
+    clearApiCacheGroups('events');
+    return res.json({ ok: true, manualAdditions: event.catereaseManualAdditions });
+  } catch (error) {
+    return sendApiError(res, error, { context: 'Caterease manual item delete failed', fallbackMessage: 'Failed to delete the manual item' });
   }
 });
 

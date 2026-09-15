@@ -4,6 +4,7 @@ import { catereaseRichTextToPlain } from './catereaseKitchen.js';
 import { buildExactRecipeMatchIndex, resolveExactRecipeMatch } from './kitchenRecipeMatching.js';
 import {
   buildCatereasePackOutTemplateSummaries,
+  catereaseKitchenPackOutDocumentGroups,
   catereaseOperationalTemplateRows,
   catereasePackOutTemplate,
   catereasePackOutTemplateRows,
@@ -717,9 +718,15 @@ export const operationalRows = (snapshot, type, zoneKey = '', templateKey = '', 
     rows = buildKitchenMenuRows(legacyKitchenPackOut);
   }
   const normalizedZoneKey = clean(zoneKey, 200).toLowerCase();
-  const sourceRows = normalizedZoneKey
-    ? (Array.isArray(rows) ? rows : []).filter((row) => catereaseOperationalZoneKey(row) === normalizedZoneKey)
-    : (Array.isArray(rows) ? rows : []);
+  const kitchenPackOutSection = type === 'kitchen_packout' && normalizedZoneKey.startsWith('kpo-section:')
+    ? catereaseKitchenPackOutDocumentGroups(snapshot, rows)
+      .find((group) => group.zoneKey === normalizedZoneKey)
+    : null;
+  const sourceRows = kitchenPackOutSection
+    ? kitchenPackOutSection.rows
+    : normalizedZoneKey
+      ? (Array.isArray(rows) ? rows : []).filter((row) => catereaseOperationalZoneKey(row) === normalizedZoneKey)
+      : (Array.isArray(rows) ? rows : []);
   const additions = (Array.isArray(manualAdditions) ? manualAdditions : [])
     .filter((addition) => manualAdditionMatches(addition, type, zoneKey, templateKey))
     .map((addition) => manualAdditionRow(addition, type))

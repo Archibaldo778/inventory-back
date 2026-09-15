@@ -72,6 +72,66 @@ test('manual operational additions appear only in their matching document templa
   assert.equal(operationalRows(snapshot, 'kitchen_packout', 's-dinner|dinner', 'kpo-template', additions).length, 0);
 });
 
+test('Kitchen Pack Out section exports select only the requested operational menu group', () => {
+  const foodService = [
+    ['PASSED HORS D’OEUVRES', '', ''],
+    ['Spicy tuna tartare', 'Seafood', 'Food'],
+    ['FIRST COURSE', '', 'Food'],
+    ['Lobster panzanella', '', 'Food'],
+    ['LATE NIGHT PASSED BITES', '', 'Food'],
+    ['Pigs in a blanket', '', 'Food'],
+    ['PASSED SWEETS', '', 'Food'],
+    ['Carrot cake', '', 'Food'],
+    ['ADDITIONAL', '', 'Food'],
+    ['Artisanal breads', '', 'Food'],
+    ['Young coconut ceviche', 'Vegetable', 'Food'],
+    ['RAW BAR STATION', '', 'Food'],
+    ['East coast oysters', '', 'Food'],
+  ].map(([itemName, category, fsType], index) => ({
+    sourceId: `food-${index}`,
+    itemName,
+    category,
+    fsType,
+    subEvent: 'S-MENU',
+    zoneName: 'Menu',
+  }));
+  const requiredItems = [
+    'Spicy tuna tartare',
+    'Lobster panzanella',
+    'Pigs in a blanket',
+    'Carrot cake',
+    'Artisanal breads',
+    'Young coconut ceviche',
+    'East coast oysters',
+  ].map((station, index) => ({
+    sourceId: `required-${index}`,
+    itemName: `Component ${index}`,
+    station,
+    fsType: 'Food',
+    subEvent: 'S-MENU',
+    zoneName: 'Menu',
+  }));
+  const snapshot = {
+    schemaVersion: 18,
+    requiredItems,
+    foodService,
+    packOutTemplates: [{ key: 'print-kpo', documentType: 'kitchen_packout', conditions: [] }],
+  };
+
+  assert.deepEqual(
+    operationalRows(snapshot, 'kitchen_packout', 'kpo-section:passed-hds', 'print-kpo').map(({ station }) => station),
+    ['Spicy tuna tartare', 'Young coconut ceviche']
+  );
+  assert.deepEqual(
+    operationalRows(snapshot, 'kitchen_packout', 'kpo-section:dinner', 'print-kpo').map(({ station }) => station),
+    ['Lobster panzanella', 'Artisanal breads']
+  );
+  assert.deepEqual(
+    operationalRows(snapshot, 'kitchen_packout', 'kpo-section:raw-bar-station', 'print-kpo').map(({ station }) => station),
+    ['East coast oysters']
+  );
+});
+
 test('document-level manual additions are rendered for staff and kitchen menu document types', () => {
   const snapshot = { schemaVersion: 9, staffRequest: [], kitchenMenu: [], kitchenPackOut: [] };
   const additions = [

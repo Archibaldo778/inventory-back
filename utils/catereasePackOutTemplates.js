@@ -37,6 +37,84 @@ const isGenericZeroQuantityHeading = (row) => {
   return Boolean(letters) && letters === letters.toUpperCase();
 };
 
+const KITCHEN_PACK_OUT_DOCUMENT_GROUPS = Object.freeze([
+  Object.freeze({ key: 'passed-hds', label: 'Passed HDs' }),
+  Object.freeze({ key: 'dinner', label: 'Dinner' }),
+  Object.freeze({ key: 'late-night', label: 'Late Night' }),
+  Object.freeze({ key: 'passed-sweets', label: 'Passed Sweets' }),
+  Object.freeze({ key: 'raw-bar-station', label: 'Raw Bar Station' }),
+]);
+
+const normalizedMenuText = (value) => clean(value, 500).toLowerCase()
+  .normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+  .replace(/[^a-z0-9]+/g, ' ').trim();
+
+const kitchenPackOutHeadingGroup = (value) => {
+  const name = normalizedMenuText(value);
+  if (/\braw bar\b/.test(name)) return 'raw-bar-station';
+  if (/\bpassed sweets?\b|\bpassed desserts?\b/.test(name)) return 'passed-sweets';
+  if (/\blate night\b/.test(name)) return 'late-night';
+  if (/\bfirst course\b|\bplated main course\b|\bdinner\b/.test(name)) return 'dinner';
+  if (/\bpassed hors d oeuvres\b|\bpassed hds?\b/.test(name)) return 'passed-hds';
+  return '';
+};
+
+const kitchenPackOutDishOverride = (row, currentGroup) => {
+  const name = normalizedMenuText(row?.itemName);
+  const category = clean(row?.category, 160).toLowerCase();
+  if (/staff\s*meal|beverages?|cocktails?|wine|beer|liquor/.test([
+    row?.menuGroup,
+    row?.category,
+    row?.prepArea,
+  ].filter(Boolean).join(' ').toLowerCase())) return '';
+  if (/\b(?:breads?|baguettes?|rolls?|butter)\b/.test(name)) return 'dinner';
+  if (/\b(?:carrot cake|confetti cake|s mores?|meringue tartlet|ice pop|sorbet|gelato|cookies?|brownies?|desserts?|sweets?)\b/.test(name)) return 'passed-sweets';
+  if (/\b(?:oysters?|jumbo wild shrimp|shrimp cocktail|raw bar)\b/.test(name) || /^tuna tartare\b/.test(name)) return 'raw-bar-station';
+  if (currentGroup === 'dinner' || currentGroup === 'late-night') return currentGroup;
+  if (['meat', 'seafood', 'vegetable'].includes(category)) return 'passed-hds';
+  return currentGroup;
+};
+
+const isUppercaseMenuHeading = (value) => {
+  const textValue = clean(value, 500);
+  const letters = textValue.replace(/[^A-Za-z]+/g, '');
+  return Boolean(letters) && letters === letters.toUpperCase();
+};
+
+const kitchenPackOutStationGroups = (snapshot = {}) => {
+  const groups = new Map();
+  const activeBySubEvent = new Map();
+  (Array.isArray(snapshot?.foodService) ? snapshot.foodService : snapshot?.packOut || [])
+    .filter((row) => !/\binvoice\b|\bpack\s*out\b/i.test(clean(row?.zoneName, 200)))
+    .forEach((row) => {
+      const streamKey = clean(row?.subEvent, 120).toLowerCase()
+        || clean(row?.zoneName, 200).toLowerCase() || '__main__';
+      const headingGroup = kitchenPackOutHeadingGroup(row?.itemName);
+      if (headingGroup) {
+        activeBySubEvent.set(streamKey, headingGroup);
+        return;
+      }
+      if (isUppercaseMenuHeading(row?.itemName)) {
+        activeBySubEvent.set(streamKey, '');
+        return;
+      }
+      const group = kitchenPackOutDishOverride(row, activeBySubEvent.get(streamKey) || '');
+      const name = normalizedMenuText(row?.itemName);
+      if (name && group && !groups.has(name)) groups.set(name, group);
+    });
+  return groups;
+};
+
+export const catereaseKitchenPackOutDocumentGroups = (snapshot = {}, rows = []) => {
+  const values = Array.isArray(rows) ? rows : [];
+  const stationGroups = kitchenPackOutStationGroups(snapshot);
+  return KITCHEN_PACK_OUT_DOCUMENT_GROUPS.map((definition) => ({
+    ...definition,
+    zoneKey: `kpo-section:${definition.key}`,
+    rows: values.filter((row) => stationGroups.get(normalizedMenuText(row?.station || row?.itemName)) === definition.key),
+  })).filter((group) => group.rows.length);
+};
+
 const FIELD_MAP = Object.freeze({
   type: 'fsType',
   fstype: 'fsType',

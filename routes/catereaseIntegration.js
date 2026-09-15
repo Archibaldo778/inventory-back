@@ -4,6 +4,7 @@ import CatereaseFile from '../models/CatereaseFile.js';
 import CatereaseIntegration from '../models/CatereaseIntegration.js';
 import Event from '../models/Event.js';
 import BarEvent from '../models/BarEvent.js';
+import DecorPackout from '../models/DecorPackout.js';
 import KitchenIngredient from '../models/KitchenIngredient.js';
 import KitchenIngredientUnit from '../models/KitchenIngredientUnit.js';
 import KitchenRecipe from '../models/KitchenRecipe.js';
@@ -52,6 +53,7 @@ import {
 import { renderCatereaseStaffRequestXlsx } from '../utils/catereaseStaffRequestXlsx.js';
 import { catereaseOperationalTemplateRows, catereasePackOutTemplate } from '../utils/catereasePackOutTemplates.js';
 import { applyCatereaseAlcoholClientChargesFromBundle } from '../utils/catereaseBarFinancials.js';
+import { createEmlDraft } from '../utils/emlDraft.js';
 import {
   buildOutlookAuthorizeUrl,
   createOutlookDraft,
@@ -76,6 +78,7 @@ const requireCatereaseAdmin = [requireAuth, requireAdmin];
 const syncRateLimit = createMemoryRateLimiter({ windowMs: 10 * 60 * 1000, max: 8, message: 'Too many Caterease sync requests' });
 const downloadRateLimit = createMemoryRateLimiter({ windowMs: 60 * 1000, max: 120, message: 'Too many Caterease file downloads' });
 const outlookDraftRateLimit = createMemoryRateLimiter({ windowMs: 10 * 60 * 1000, max: 20, message: 'Too many Outlook draft requests' });
+const emailDraftRateLimit = createMemoryRateLimiter({ windowMs: 10 * 60 * 1000, max: 20, message: 'Too many email draft requests' });
 const OPERATIONAL_EVENT_RESTRICTED_ROLES = new Set(['bar captain', 'bartender']);
 let syncPromise = null;
 let syncProgress = null;
@@ -1137,6 +1140,64 @@ const buildOperationalAttachment = async (event, type, options = {}) => {
   };
 };
 
+const buildDecorPackoutAttachment = async (event, requestedId = '') => {
+  const id = String(requestedId || '').trim();
+  if (id && !/^[a-f\d]{24}$/i.test(id)) throw Object.assign(new Error('Invalid Decor Pack Out id'), { statusCode: 400 });
+  const query = { eventId: event._id };
+  if (id) query._id = id;
+  const packout = await DecorPackout.findOne(query).sort({ updatedAt: -1 }).lean();
+  if (!packout) throw Object.assign(new Error('Decor Pack Out was not found for this event'), { statusCode: 404 });
+  const rows = (packout.items || []).map((item) => ({
+    itemName: item.name,
+    quantity: item.quantity,
+    menuGroup: item.category || 'DECOR',
+    notes: [item.inventoryCode, item.location, item.description].filter(Boolean).join(' · '),
+  }));
+  const [brandLogoSvg, decorImages] = await Promise.all([
+    loadBrandLogoSvg(),
+    loadCloudinaryWordImages((packout.items || []).map((item) => ({ itemName: item.name, url: item.image }))),
+  ]);
+  const buffer = await renderCatereaseOperationalDocx({
+    event,
+    snapshot: { schemaVersion: 3, eventId: event.externalId || '', packOut: rows },
+    type: 'po',
+    brandLogoSvg,
+    decorImages,
+    includePackOutTemplate: false,
+  });
+  const safeTitle = safeOperationalFilePart(event.title, 100) || 'Event';
+  const dateMatch = String(event.date || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const datePrefix = dateMatch ? `${dateMatch[2]}-${dateMatch[3]}-${dateMatch[1].slice(-2)}` : '';
+  return {
+    buffer,
+    fileName: `${[datePrefix, safeTitle, 'Decor PO'].filter(Boolean).join('_')}.docx`,
+    displayName: 'Decor Pack Out',
+    contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  };
+};
+
+const buildRequestedEmailAttachments = async (event, requested) => {
+  const generatedDocuments = [];
+  const attachments = [];
+  for (const descriptor of requested) {
+    const type = String(descriptor?.type || '').toLowerCase();
+    const generated = type === 'decor_packout'
+      ? await buildDecorPackoutAttachment(event, descriptor?.packoutId)
+      : await buildOperationalAttachment(event, type, descriptor || {});
+    generatedDocuments.push(generated);
+    attachments.push({ name: generated.fileName, contentType: generated.contentType, buffer: generated.buffer });
+  }
+  return { generatedDocuments, attachments };
+};
+
+const operationalEmailSubject = (event, requested, generatedDocuments) => {
+  const dateMatch = String(event.date || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const date = dateMatch ? `${dateMatch[2]}-${dateMatch[3]}-${dateMatch[1].slice(-2)}` : String(event.date || '');
+  return requested.length === 1
+    ? `${date} - ${event.title} - ${generatedDocuments[0].displayName}`
+    : `${date} - ${event.title} - Leadership Files`;
+};
+
 router.get('/operations/events/:id', requireAuth, async (req, res) => {
   try {
     const event = await loadAuthorizedOperationalEvent(req, res);
@@ -1267,6 +1328,36 @@ router.get('/outlook/status', requireAuth, async (req, res) => {
   }
 });
 
+router.post('/operations/events/:id/email-draft', requireAuth, emailDraftRateLimit, async (req, res) => {
+  try {
+    const event = await loadAuthorizedOperationalEvent(req, res);
+    if (!event) return undefined;
+    const requested = Array.isArray(req.body?.documents) ? req.body.documents.slice(0, 50) : [];
+    if (!requested.length) return res.status(400).json({ error: 'Select at least one document' });
+    if (!event.catereaseOperations && requested.some((descriptor) => String(descriptor?.type || '').toLowerCase() !== 'decor_packout')) {
+      return res.status(404).json({ error: 'Caterease operational data has not been synced for this event' });
+    }
+    const { generatedDocuments, attachments } = await buildRequestedEmailAttachments(event, requested);
+    const subject = operationalEmailSubject(event, requested, generatedDocuments);
+    const safeEventTitle = String(event.title || '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
+    const eml = createEmlDraft({
+      subject,
+      html: `<p>Leadership files for <strong>${safeEventTitle}</strong> are attached.</p>`,
+      attachments,
+    });
+    const dateMatch = String(event.date || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    const date = dateMatch ? `${dateMatch[2]}-${dateMatch[3]}-${dateMatch[1].slice(-2)}` : '';
+    const title = safeOperationalFilePart(event.title, 100).replace(/[^\x20-\x7E]/g, '') || 'Event';
+    const fileName = `${[date, title, requested.length === 1 ? generatedDocuments[0].displayName : 'Leadership Files'].filter(Boolean).join('_')}.eml`;
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('Content-Type', 'message/rfc822');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    return res.send(eml);
+  } catch (error) {
+    return sendApiError(res, error, { context: 'Email draft failed', defaultStatus: 502, fallbackMessage: 'Could not create the email draft' });
+  }
+});
+
 router.post('/outlook/events/:id/draft', requireAuth, outlookDraftRateLimit, async (req, res) => {
   try {
     const event = await loadAuthorizedOperationalEvent(req, res);
@@ -1281,18 +1372,8 @@ router.post('/outlook/events/:id/draft', requireAuth, outlookDraftRateLimit, asy
       integration.refreshToken = encryptOutlookSecret(token.refresh_token);
       await integration.save();
     }
-    const attachments = [];
-    const generatedDocuments = [];
-    for (const descriptor of requested) {
-      const generated = await buildOperationalAttachment(event, String(descriptor?.type || '').toLowerCase(), descriptor || {});
-      generatedDocuments.push(generated);
-      attachments.push({ name: generated.fileName, contentType: generated.contentType, buffer: generated.buffer });
-    }
-    const dateMatch = String(event.date || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    const date = dateMatch ? `${dateMatch[2]}-${dateMatch[3]}-${dateMatch[1].slice(-2)}` : String(event.date || '');
-    const subject = requested.length === 1
-      ? `${date} - ${event.title} - ${generatedDocuments[0].displayName}`
-      : `${date} - ${event.title} - Leadership Files`;
+    const { generatedDocuments, attachments } = await buildRequestedEmailAttachments(event, requested);
+    const subject = operationalEmailSubject(event, requested, generatedDocuments);
     const safeEventTitle = String(event.title || '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
     const draft = await createOutlookDraft({ accessToken: token.access_token, subject, html: `<p>Leadership files for <strong>${safeEventTitle}</strong> are attached.</p>`, attachments });
     return res.json({ ok: true, webLink: draft.webLink, attachments: attachments.length, subject });

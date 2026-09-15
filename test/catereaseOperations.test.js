@@ -655,16 +655,24 @@ test('Staff Request XLSX matches the Caterease staffing sheet fields', async () 
   const zip = await JSZip.loadAsync(buffer);
   const workbook = await zip.file('xl/workbook.xml').async('string');
   const sheet = await zip.file('xl/worksheets/sheet1.xml').async('string');
-  assert.match(workbook, /Staff Request/);
+  const styles = await zip.file('xl/styles.xml').async('string');
+  assert.match(workbook, /name="Sheet1"/);
   assert.match(sheet, /Chanel YPO Cocktail/);
   assert.match(sheet, /Olivier Cheng/);
   assert.match(sheet, /6:30 pm - 8:00 pm/);
-  assert.match(sheet, /4:30 pm/);
-  assert.match(sheet, /9:30 pm/);
+  assert.match(sheet, /<c r="C9" s="6"><v>0\.6875<\/v><\/c>/);
+  assert.match(sheet, /<c r="D31" s="6"><v>0\.8958333333333334<\/v><\/c>/);
   assert.match(sheet, />Hours</);
   assert.match(sheet, />5</);
   assert.match(sheet, /Wht BttnDwn Shrt-Blk Tie \(OC\)/);
   assert.match(sheet, /TOTAL STAFF NEEDED/);
+  assert.match(sheet, /<sheetFormatPr baseColWidth="10" defaultRowHeight="16"\/>/);
+  assert.match(sheet, /<col min="2" max="2" width="19\.33203125" customWidth="1"\/>/);
+  assert.match(sheet, /<mergeCell ref="A2:A3"\/>/);
+  assert.match(sheet, /<mergeCell ref="A12:A13"\/>/);
+  assert.match(sheet, /<mergeCell ref="B12:B13"\/>/);
+  assert.match(styles, /<name val="Helvetica"\/>/);
+  assert.doesNotMatch(styles, /<left style=/);
   assert.doesNotMatch(sheet, /Excluded/);
 });
 

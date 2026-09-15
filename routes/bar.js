@@ -156,6 +156,7 @@ const serializeBarEvent = (source, { includeFinancials = false } = {}) => {
     };
     if (!includeFinancials) {
       delete next.unitCostSnapshot;
+      delete next.clientChargeSnapshot;
       if (next.accounting) {
         delete next.accounting.unitCost;
         delete next.accounting.actualCost;

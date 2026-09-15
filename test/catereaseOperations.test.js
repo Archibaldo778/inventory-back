@@ -291,6 +291,7 @@ test('Caterease operational re-sync preserves recorded bar quantities and state'
     lostDamagedQty: 0.25,
     returnConfirmed: true,
     captainNotes: 'One bottle opened',
+    clientChargeSnapshot: { unitPrice: 75, lineTotal: 300, source: 'caterease-line-1' },
     prepTask: { scheduledDate: '2026-09-11', completedAt: new Date('2026-09-11T22:00:00Z') },
     updatedBy: 'captain',
     updatedAt: new Date('2026-09-11T22:05:00Z'),
@@ -316,6 +317,7 @@ test('Caterease operational re-sync preserves recorded bar quantities and state'
   assert.equal(item.lostDamagedQty, 0.25);
   assert.equal(item.returnConfirmed, true);
   assert.equal(item.captainNotes, 'One bottle opened');
+  assert.deepEqual(item.clientChargeSnapshot, { unitPrice: 75, lineTotal: 300, source: 'caterease-line-1' });
   assert.equal(item.prepTask.completedAt.toISOString(), '2026-09-11T22:00:00.000Z');
   assert.equal(item.updatedBy, 'captain');
   assert.equal(String(item._id), 'existing-item-id');

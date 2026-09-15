@@ -51,6 +51,7 @@ import {
 } from '../utils/catereaseOperations.js';
 import { renderCatereaseStaffRequestXlsx } from '../utils/catereaseStaffRequestXlsx.js';
 import { catereaseOperationalTemplateRows, catereasePackOutTemplate } from '../utils/catereasePackOutTemplates.js';
+import { applyCatereaseAlcoholClientChargesFromBundle } from '../utils/catereaseBarFinancials.js';
 import {
   buildOutlookAuthorizeUrl,
   createOutlookDraft,
@@ -979,6 +980,39 @@ router.get('/financial-preview/:eventId', ...requireCatereaseAdmin, async (req, 
     return res.json(buildCatereaseFinancialPreview(await getCatereaseEventBundle(eventId)));
   } catch (error) {
     return sendApiError(res, error, { context: 'Caterease financial preview failed', fallbackMessage: 'Failed to load Caterease financial preview' });
+  }
+});
+
+router.post('/financials/sync/:barEventId', ...requireCatereaseAdmin, syncRateLimit, async (req, res) => {
+  try {
+    if (!/^[a-f\d]{24}$/i.test(String(req.params.barEventId || ''))) {
+      return res.status(400).json({ error: 'A valid bar event id is required' });
+    }
+    const barEvent = await BarEvent.findById(req.params.barEventId);
+    if (!barEvent) return res.status(404).json({ error: 'Bar event not found' });
+    if (!barEvent.linkedEventId) return res.status(409).json({ error: 'Bar event is not linked to a dashboard event' });
+    const event = await Event.findById(barEvent.linkedEventId).select('externalId title date').lean();
+    if (!event) return res.status(409).json({ error: 'Linked dashboard event was not found' });
+    const requestedEventId = String(event.externalId || barEvent.eventNumber || '').trim();
+    const catereaseEventId = await resolveCatereaseOperationalEventId(requestedEventId, String(event.date || '').slice(0, 10), event.title);
+    const bundle = await getCatereaseEventBundle(catereaseEventId);
+    const summary = applyCatereaseAlcoholClientChargesFromBundle(barEvent.items, bundle);
+    if (summary.matchedItems > 0) {
+      barEvent.revision += 1;
+      barEvent.audit.push({
+        action: 'caterease_client_pricing_synced',
+        userId: String(req.auth?.userId || ''),
+        username: String(req.auth?.username || req.auth?.email || ''),
+        at: new Date(),
+        details: { catereaseEventId, ...summary },
+      });
+      barEvent.audit = barEvent.audit.slice(-200);
+      await barEvent.save();
+      clearApiCacheGroups('bar');
+    }
+    return res.json({ ok: true, catereaseEventId, summary });
+  } catch (error) {
+    return sendApiError(res, error, { context: 'Caterease client pricing sync failed', fallbackMessage: 'Failed to load client pricing from Caterease' });
   }
 });
 

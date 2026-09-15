@@ -33,6 +33,11 @@ const barPackoutItemSchema = new mongoose.Schema(
     lostDamagedQty: { type: Number, default: 0, min: 0 },
     returnConfirmed: { type: Boolean, default: false },
     unitCostSnapshot: { type: Number, default: 0, min: 0 },
+    clientChargeSnapshot: {
+      unitPrice: { type: Number, default: null, min: 0 },
+      lineTotal: { type: Number, default: null, min: 0 },
+      source: { type: String, default: '', trim: true },
+    },
     bottleSizeMl: { type: Number, default: null, min: 0 },
     notes: { type: String, default: '', trim: true },
     captainNotes: { type: String, default: '', trim: true },

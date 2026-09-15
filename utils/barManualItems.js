@@ -157,6 +157,7 @@ export const preservePackoutOperationalState = (existingItems, nextItems) => {
       lostDamagedQty: Number(match.lostDamagedQty ?? item.lostDamagedQty ?? 0),
       returnConfirmed: match.returnConfirmed === true || item.returnConfirmed === true,
       captainNotes: String(match.captainNotes || item.captainNotes || ''),
+      clientChargeSnapshot: match.clientChargeSnapshot || item.clientChargeSnapshot,
       prepTask: match.prepTask || item.prepTask,
       updatedBy: String(match.updatedBy || item.updatedBy || ''),
       updatedAt: match.updatedAt || item.updatedAt || null,

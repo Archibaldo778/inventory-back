@@ -1369,6 +1369,14 @@ router.post('/operations/events/:id/share-archive', requireAuth, emailDraftRateL
       return res.status(404).json({ error: 'Caterease operational data has not been synced for this event' });
     }
     const { attachments } = await buildRequestedEmailAttachments(event, requested);
+    if (attachments.length === 1) {
+      const attachment = attachments[0];
+      const fileName = safeOperationalFilePart(attachment.name, 180) || 'Event Document.docx';
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.setHeader('Content-Type', attachment.contentType || 'application/octet-stream');
+      res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+      return res.send(attachment.buffer);
+    }
     const archive = await createOperationalShareArchive(attachments);
     const dateMatch = String(event.date || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
     const date = dateMatch ? `${dateMatch[2]}-${dateMatch[3]}-${dateMatch[1].slice(-2)}` : '';

@@ -33,9 +33,10 @@ const operationalZoneIdentity = (row) => [
   clean(row?.zoneName, 200).toLowerCase(),
 ].filter(Boolean).join('|');
 
-export const normalizeCatereasePackOutRows = (rows = []) => (Array.isArray(rows) ? rows : [])
-  .slice(0, 10000)
-  .map((row) => ({
+export const normalizeCatereasePackOutRows = (rows = []) => {
+  const normalizedRows = (Array.isArray(rows) ? rows : [])
+    .slice(0, 10000)
+    .map((row) => ({
     sourceId: clean(first(row, ['UID', 'FdSvNum', 'FSNum', 'ItemNum', 'ItemID', 'ID']), 120) || fallbackSourceId(row),
     foodServiceId: clean(first(row, ['FdSvNum', 'FSNum']), 120),
     itemId: clean(first(row, ['ItemNum', 'ItemID']), 120),
@@ -48,16 +49,23 @@ export const normalizeCatereasePackOutRows = (rows = []) => (Array.isArray(rows)
     category: clean(first(row, ['Category']), 160),
     fsType: clean(first(row, ['FSType', 'Type', 'ItemType']), 160),
     menuGroup: clean(first(row, ['MenuGroup', 'FSCategory', 'GroupName']), 160),
-    notes: clean(catereaseRichTextToPlain(first(row, ['Notes', 'Comment', 'Description', 'Instructions'])), 1000),
-  }))
-  .map((row) => ({
-    ...row,
-    notes: row.notes.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
-      === row.itemName.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
-      ? ''
-      : row.notes,
-  }))
-  .filter((row) => row.itemName && row.menuGroup.toLowerCase() !== 'standard');
+      notes: clean(catereaseRichTextToPlain(first(row, ['Notes', 'Comment', 'Description', 'Instructions'])), 1000),
+    }));
+  const itemNames = new Set(normalizedRows.map((row) => itemKey(row.itemName)).filter(Boolean));
+  return normalizedRows
+    .map((row) => {
+      const nameKey = itemKey(row.itemName);
+      const notesKey = itemKey(row.notes);
+      const redundantDescription = notesKey && (
+        notesKey === nameKey
+        || itemNames.has(notesKey)
+        || (notesKey.length >= 4 && nameKey.startsWith(`${notesKey} `))
+        || ['garnish', 'specialty cocktail'].includes(notesKey)
+      );
+      return { ...row, notes: redundantDescription ? '' : row.notes };
+    })
+    .filter((row) => row.itemName && row.menuGroup.toLowerCase() !== 'standard');
+};
 
 export const normalizeCatereaseKitchenPackOutRows = (rows = []) => (Array.isArray(rows) ? rows : [])
   .slice(0, 10000)
@@ -466,6 +474,8 @@ const itemKey = (value) => clean(value, 300).toLowerCase().replace(/[^a-z0-9]+/g
 const matchesAny = (value, patterns) => patterns.some((pattern) => pattern.test(value));
 
 const packOutSection = (row) => {
+  const sourceSection = clean(row?.sourceSection, 160);
+  if (sourceSection) return sourceSection.toUpperCase();
   const name = itemKey(row?.itemName);
   const category = clean(row?.category, 160);
   const menuGroup = clean(row?.menuGroup, 160);
@@ -562,7 +572,7 @@ const catereasePackOutTable = (groups, decorImages = []) => {
   const sectionRow = (name) => `<w:tr><w:tc><w:tcPr><w:gridSpan w:val="${widths.length}"/><w:tcW w:w="${widths.reduce((total, width) => total + width, 0)}" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr>${paragraph(name, { bold: true, size: 20, align: 'center', after: 0 })}</w:tc></w:tr>`;
   const body = [...groups.entries()].map(([group, values]) => `${sectionRow(group.toUpperCase())}${values.map((row) => `<w:tr>${[
     { value: row.itemName, align: 'center' },
-    { value: formatQuantity(row.quantity), align: 'center' },
+    { value: Number(row.quantity) === 0 ? '' : formatQuantity(row.quantity), align: 'center' },
     { value: row.manual ? [row.notes, row.unit].filter(Boolean).join(' · ') : row.notes || '', align: '' },
     { value: '', align: '' },
     { value: '', align: '' },

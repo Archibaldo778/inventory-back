@@ -8,17 +8,54 @@ const PACK_OUT_SECTION_HEADINGS = new Set([
   'trays',
   'ice',
   'water',
+  'soda',
+  'juice',
   'garnish',
+  'beverage',
+  'additional',
+  'cleaning',
+  'cake stand',
   'staff items',
+  'coffee equipment',
+  'raw bar station',
+  'inserts/overserts',
+  'house cocktail wine',
+  'vodka',
+  'gin',
+  'tequila',
+  'whiskey',
+  'rum',
+  'other liquor',
+  'beer',
+  'specialty liquor purchases:',
+  'late night',
+  'late night vessels',
 ]);
 
-const isPackOutSectionHeading = (row) => (
-  PACK_OUT_SECTION_HEADINGS.has(normalized(row?.itemName))
-  && (!Number.isFinite(Number(row?.quantity)) || Number(row.quantity) === 0)
-);
+const isPackOutSectionHeading = (row) => {
+  const itemName = clean(row?.itemName, 300);
+  const quantityIsEmpty = !Number.isFinite(Number(row?.quantity)) || Number(row.quantity) === 0;
+  if (!itemName || !quantityIsEmpty) return false;
+  if (PACK_OUT_SECTION_HEADINGS.has(normalized(itemName))) return true;
+  const letters = itemName.replace(/[^A-Za-z]+/g, '');
+  return Boolean(letters) && letters === letters.toUpperCase() && !clean(row?.notes, 1000);
+};
 
 const foodServiceGroupKey = (row) => clean(row?.subEvent, 120).toLowerCase()
   || clean(row?.zoneName, 200).toLowerCase();
+
+const withPackOutSourceSections = (rows = []) => {
+  const sectionByGroup = new Map();
+  return (Array.isArray(rows) ? rows : []).map((row) => {
+    const groupKey = foodServiceGroupKey(row) || '__main__';
+    if (isPackOutSectionHeading(row)) {
+      const sourceSection = clean(row?.itemName, 300);
+      sectionByGroup.set(groupKey, sourceSection);
+      return { ...row, sourceSection, sectionHeading: true };
+    }
+    return { ...row, sourceSection: sectionByGroup.get(groupKey) || clean(row?.sourceSection, 300) };
+  });
+};
 
 const foodServiceDishKey = (row, name = row?.itemName) => [
   clean(row?.subEvent, 120).toLowerCase(),
@@ -240,8 +277,10 @@ export const catereaseOperationalTemplateRows = (snapshot = {}, templateKey, tem
   if (!template) return [];
   const requiredRows = snapshot?.requiredItems || snapshot?.kitchenPackOut || [];
   const requiredMatches = catereasePackOutTemplateRows(requiredRows, templateKey, templates);
-  const foodServiceRows = (snapshot?.foodService || snapshot?.packOut || [])
-    .filter((row) => !/\binvoice\b/i.test(clean(row?.zoneName, 200)));
+  const foodServiceRows = withPackOutSourceSections(
+    (snapshot?.foodService || snapshot?.packOut || [])
+      .filter((row) => !/\binvoice\b/i.test(clean(row?.zoneName, 200)))
+  );
   if (template.documentType === 'kitchen_packout') {
     const kitchenMenuRows = Array.isArray(snapshot?.kitchenMenu) ? snapshot.kitchenMenu : [];
     const kitchenMenuByDish = new Map(kitchenMenuRows.map((row) => [foodServiceDishKey(row), row]));

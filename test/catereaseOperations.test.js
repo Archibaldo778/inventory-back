@@ -72,6 +72,29 @@ test('manual operational additions appear only in their matching document templa
   assert.equal(operationalRows(snapshot, 'kitchen_packout', 's-dinner|dinner', 'kpo-template', additions).length, 0);
 });
 
+test('Pack Out rows preserve sequential Caterease sections and discard the heading records', () => {
+  const snapshot = {
+    schemaVersion: 18,
+    requiredItems: [],
+    foodService: [
+      { sourceId: 'heading-1', itemName: 'BEVERAGE', quantity: 0, subEvent: 'S-PO', zoneName: 'Pack Out - Beverage' },
+      { sourceId: 'wine-heading', itemName: 'HOUSE COCKTAIL WINE', quantity: 0, subEvent: 'S-PO', zoneName: 'Pack Out - Beverage' },
+      { sourceId: 'wine', itemName: 'Sancerre', quantity: 12, subEvent: 'S-PO', zoneName: 'Pack Out - Beverage' },
+      { sourceId: 'liquor-heading', itemName: 'VODKA', quantity: 0, subEvent: 'S-PO', zoneName: 'Pack Out - Beverage' },
+      { sourceId: 'liquor', itemName: 'Belvedere', quantity: 5, subEvent: 'S-PO', zoneName: 'Pack Out - Beverage' },
+    ],
+    packOutTemplates: [{ key: 'pack-template', documentType: 'po', conditions: [] }],
+  };
+  assert.deepEqual(
+    operationalRows(snapshot, 'po', 's-po|pack out - beverage', 'pack-template')
+      .map(({ itemName, sourceSection }) => [itemName, sourceSection]),
+    [
+      ['Sancerre', 'HOUSE COCKTAIL WINE'],
+      ['Belvedere', 'VODKA'],
+    ]
+  );
+});
+
 test('Kitchen Pack Out section exports select only the requested operational menu group', () => {
   const foodService = [
     ['PASSED HORS D’OEUVRES', '', ''],
@@ -503,10 +526,16 @@ test('Caterease Pack Out rows preserve operational grouping', () => {
 test('Caterease Pack Out suppresses a description that only repeats the item name', () => {
   const rows = normalizeCatereasePackOutRows([
     { ItemName: 'Chef apron', Description: 'Chef apron' },
+    { ItemName: 'Mixing Bowl- Medium' },
+    { ItemName: 'Mixing Bowl- Large', Description: 'Mixing Bowl- Medium' },
+    { ItemName: 'Simple Syrup - QUART', Description: 'Simple Syrup' },
+    { ItemName: 'Garnish for Specialty: Mint sprig', Description: 'Garnish' },
     { ItemName: 'Gloves- S, M, L', Comment: 'of each' },
     { ItemName: 'Square black inserts', Description: 'NEW INSERTS OR BEST CONDITION' },
   ]);
-  assert.deepEqual(rows.map((row) => row.notes), ['', 'of each', 'NEW INSERTS OR BEST CONDITION']);
+  assert.deepEqual(rows.map((row) => row.notes), [
+    '', '', '', '', '', 'of each', 'NEW INSERTS OR BEST CONDITION',
+  ]);
 });
 
 test('Caterease Pack Out excludes non-inventory Standard service rows', () => {

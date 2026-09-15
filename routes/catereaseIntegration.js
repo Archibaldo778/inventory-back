@@ -8,6 +8,7 @@ import KitchenIngredient from '../models/KitchenIngredient.js';
 import KitchenIngredientUnit from '../models/KitchenIngredientUnit.js';
 import KitchenRecipe from '../models/KitchenRecipe.js';
 import Product from '../models/Product.js';
+import OutlookIntegration from '../models/OutlookIntegration.js';
 import { requireAdmin, requireAuth } from '../middleware/auth.js';
 import { createMemoryRateLimiter } from '../middleware/rateLimit.js';
 import { sendApiError } from '../utils/apiErrors.js';
@@ -50,6 +51,18 @@ import {
 } from '../utils/catereaseOperations.js';
 import { renderCatereaseStaffRequestXlsx } from '../utils/catereaseStaffRequestXlsx.js';
 import { catereaseOperationalTemplateRows, catereasePackOutTemplate } from '../utils/catereasePackOutTemplates.js';
+import {
+  buildOutlookAuthorizeUrl,
+  createOutlookDraft,
+  createOutlookState,
+  decryptOutlookSecret,
+  encryptOutlookSecret,
+  exchangeOutlookCode,
+  getOutlookConfig,
+  getOutlookProfile,
+  refreshOutlookToken,
+  verifyOutlookState,
+} from '../utils/outlookApi.js';
 import { normalizeKitchenRecipeName, syncKitchenRecipeMatches } from '../utils/kitchenRecipeMatching.js';
 import {
   cloudinaryWordThumbnailUrl,
@@ -61,6 +74,7 @@ const router = Router();
 const requireCatereaseAdmin = [requireAuth, requireAdmin];
 const syncRateLimit = createMemoryRateLimiter({ windowMs: 10 * 60 * 1000, max: 8, message: 'Too many Caterease sync requests' });
 const downloadRateLimit = createMemoryRateLimiter({ windowMs: 60 * 1000, max: 120, message: 'Too many Caterease file downloads' });
+const outlookDraftRateLimit = createMemoryRateLimiter({ windowMs: 10 * 60 * 1000, max: 20, message: 'Too many Outlook draft requests' });
 const OPERATIONAL_EVENT_RESTRICTED_ROLES = new Set(['bar captain', 'bartender']);
 let syncPromise = null;
 let syncProgress = null;
@@ -1001,6 +1015,52 @@ router.post('/operations/sync', ...requireCatereaseAdmin, syncRateLimit, async (
   }
 });
 
+const safeOperationalFilePart = (value, limit = 100) => String(value || '')
+  .replace(/[<>:"/\\|?*\u0000-\u001F]/g, '').replace(/\s+/g, ' ').trim().slice(0, limit);
+
+const buildOperationalAttachment = async (event, type, options = {}) => {
+  if (!['po', 'kitchen_packout', 'staff_request', 'kitchen_menu', 'annotated_kitchen_menu'].includes(type)) {
+    throw Object.assign(new Error('Unknown operational document type'), { statusCode: 400 });
+  }
+  const templateKey = String(options.template || '').trim();
+  const templates = Array.isArray(event.catereaseOperations?.packOutTemplates) ? event.catereaseOperations.packOutTemplates : undefined;
+  const template = templateKey ? catereasePackOutTemplate(templateKey, templates) : null;
+  if (templateKey && (!template || template.documentType !== type)) throw Object.assign(new Error('Unknown Pack Out template'), { statusCode: 400 });
+  const recipes = ['kitchen_packout', 'annotated_kitchen_menu'].includes(type)
+    ? await KitchenRecipe.find({ sourceProvider: 'caterease', sourceDeletedAt: null }).select('name description instructions notes prepArea ingredients inactive hidden revisedAt updatedAt').lean()
+    : [];
+  const templateRows = template ? catereaseOperationalTemplateRows(event.catereaseOperations, template.key, templates) : undefined;
+  const isStaffRequest = type === 'staff_request';
+  const output = isStaffRequest
+    ? await renderCatereaseStaffRequestXlsx({ event, snapshot: event.catereaseOperations, zoneKey: String(options.zone || '') })
+    : await renderCatereaseOperationalDocx({
+      event,
+      snapshot: event.catereaseOperations,
+      type,
+      recipes,
+      brandLogoSvg: await loadBrandLogoSvg(),
+      decorImages: type === 'po' ? await loadMatchedDecorImages(event.catereaseOperations, templateRows) : [],
+      zoneKey: String(options.zone || ''),
+      zoneName: String(options.zoneName || ''),
+      templateKey,
+    });
+  const safeTitle = safeOperationalFilePart(event.title, 100) || 'Event';
+  const dateMatch = String(event.date || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const datePrefix = dateMatch ? `${dateMatch[2]}-${dateMatch[3]}-${dateMatch[1].slice(-2)}` : '';
+  const documentCode = template ? (template.documentType === 'po' ? 'PO' : 'KPO')
+    : type === 'po' ? 'PO' : type === 'kitchen_packout' ? 'KPO' : type === 'staff_request' ? 'Staff Request' : type === 'annotated_kitchen_menu' ? 'AKM' : 'KM';
+  const safeZone = safeOperationalFilePart(options.fileZoneName, 80);
+  const baseName = [datePrefix, safeTitle, safeZone.toLowerCase() === 'main' ? '' : safeZone, documentCode].filter(Boolean).join('_');
+  const extension = isStaffRequest ? 'xlsx' : 'docx';
+  return {
+    buffer: output,
+    fileName: `${baseName}.${extension}`,
+    baseName,
+    displayName: [safeZone.toLowerCase() === 'main' ? '' : safeZone, documentCode].filter(Boolean).join(' '),
+    contentType: isStaffRequest ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  };
+};
+
 router.get('/operations/events/:id', requireAuth, async (req, res) => {
   try {
     const event = await loadAuthorizedOperationalEvent(req, res);
@@ -1011,63 +1071,113 @@ router.get('/operations/events/:id', requireAuth, async (req, res) => {
   }
 });
 
-router.get('/operations/events/:id/export/:type', requireAuth, async (req, res) => {
+const safeOutlookReturnUrl = (value) => {
   try {
-    const type = String(req.params.type || '').toLowerCase();
-    if (!['po', 'kitchen_packout', 'staff_request', 'kitchen_menu', 'annotated_kitchen_menu'].includes(type)) return res.status(400).json({ error: 'Unknown operational document type' });
+    const url = new URL(String(value || ''));
+    const allowed = new Set(['https://occdecks.com', 'https://www.occdecks.com', 'https://ocdecks.com', 'https://www.ocdecks.com']);
+    if (process.env.NODE_ENV !== 'production') allowed.add('http://localhost:5173');
+    return allowed.has(url.origin) ? url.href : '';
+  } catch { return ''; }
+};
+
+const outlookCallbackHtml = (ok, message, returnTo = '') => {
+  const target = safeOutlookReturnUrl(returnTo);
+  const escaped = String(message || '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
+  const redirect = target ? `<script>if(window.opener){window.opener.postMessage({type:'occ-outlook-connected',ok:${ok}},${JSON.stringify(new URL(target).origin)});window.close()}else{location.href=${JSON.stringify(target)}}</script>` : '';
+  return `<!doctype html><meta charset="utf-8"><title>Outlook connection</title><body style="font-family:system-ui;padding:40px;background:#101316;color:#fff"><h1>${ok ? 'Outlook connected' : 'Outlook connection failed'}</h1><p>${escaped}</p>${redirect}</body>`;
+};
+
+const loadOutlookIntegration = (userId) => OutlookIntegration.findOne({ userId, enabled: true })
+  .select('+refreshToken.ciphertext +refreshToken.iv +refreshToken.tag');
+
+router.get('/outlook/connect-url', requireAuth, (req, res) => {
+  try {
+    const state = createOutlookState({ userId: req.auth.userId, returnTo: req.query.returnTo });
+    return res.json({ url: buildOutlookAuthorizeUrl({ state }) });
+  } catch (error) {
+    return sendApiError(res, error, { context: 'Outlook connect URL failed', fallbackMessage: 'Outlook is not configured' });
+  }
+});
+
+router.get('/outlook/callback', async (req, res) => {
+  let returnTo = '';
+  try {
+    const state = verifyOutlookState(req.query.state);
+    returnTo = state.returnTo;
+    const token = await exchangeOutlookCode(req.query.code);
+    if (!token.refresh_token) throw Object.assign(new Error('Microsoft did not return an offline refresh token'), { statusCode: 409 });
+    const profile = await getOutlookProfile(token.access_token);
+    await OutlookIntegration.findOneAndUpdate({ userId: state.userId }, {
+      $set: {
+        microsoftUserId: String(profile.id || ''),
+        accountEmail: String(profile.mail || profile.userPrincipalName || '').toLowerCase(),
+        displayName: String(profile.displayName || ''),
+        refreshToken: encryptOutlookSecret(token.refresh_token),
+        connectedAt: new Date(),
+        enabled: true,
+      },
+    }, { upsert: true, new: true, setDefaultsOnInsert: true });
+    return res.send(outlookCallbackHtml(true, `Connected to ${profile.mail || profile.userPrincipalName || 'Outlook'}.`, returnTo));
+  } catch (error) {
+    return res.status(Number(error?.statusCode) || 500).send(outlookCallbackHtml(false, error?.message || 'Outlook connection failed', returnTo));
+  }
+});
+
+router.get('/outlook/status', requireAuth, async (req, res) => {
+  try {
+    const integration = await OutlookIntegration.findOne({ userId: req.auth.userId, enabled: true }).lean();
+    const config = getOutlookConfig();
+    return res.json({ configured: Boolean(config.clientId && config.clientSecret), connected: Boolean(integration), accountEmail: integration?.accountEmail || '', displayName: integration?.displayName || '' });
+  } catch (error) {
+    return sendApiError(res, error, { context: 'Outlook status failed', fallbackMessage: 'Could not load Outlook status' });
+  }
+});
+
+router.post('/outlook/events/:id/draft', requireAuth, outlookDraftRateLimit, async (req, res) => {
+  try {
     const event = await loadAuthorizedOperationalEvent(req, res);
     if (!event) return undefined;
     if (!event.catereaseOperations) return res.status(404).json({ error: 'Caterease operational data has not been synced for this event' });
-    const templateKey = String(req.query.template || '').trim();
-    const templates = Array.isArray(event.catereaseOperations.packOutTemplates)
-      ? event.catereaseOperations.packOutTemplates
-      : undefined;
-    const template = templateKey ? catereasePackOutTemplate(templateKey, templates) : null;
-    if (templateKey && (!template || template.documentType !== type)) return res.status(400).json({ error: 'Unknown Pack Out template' });
-    const recipes = ['kitchen_packout', 'annotated_kitchen_menu'].includes(type)
-      ? await KitchenRecipe.find({ sourceProvider: 'caterease', sourceDeletedAt: null })
-        .select('name description instructions notes prepArea ingredients inactive hidden revisedAt updatedAt')
-        .lean()
-      : [];
-    const brandLogoSvg = await loadBrandLogoSvg();
-    const templateRows = template
-      ? catereaseOperationalTemplateRows(event.catereaseOperations, template.key, templates)
-      : undefined;
-    const decorImages = type === 'po' ? await loadMatchedDecorImages(event.catereaseOperations, templateRows) : [];
-    const zoneName = String(req.query.zoneName || '');
-    const isStaffRequest = type === 'staff_request';
-    const output = isStaffRequest
-      ? await renderCatereaseStaffRequestXlsx({
-        event,
-        snapshot: event.catereaseOperations,
-        zoneKey: String(req.query.zone || ''),
-      })
-      : await renderCatereaseOperationalDocx({
-        event,
-        snapshot: event.catereaseOperations,
-        type,
-        recipes,
-        brandLogoSvg,
-        decorImages,
-        zoneKey: String(req.query.zone || ''),
-        zoneName,
-        templateKey,
-      });
-    const safeTitle = String(event.title || 'Event').replace(/[<>:"/\\|?*\u0000-\u001F]/g, '').replace(/\s+/g, ' ').trim().slice(0, 100) || 'Event';
+    const requested = Array.isArray(req.body?.documents) ? req.body.documents.slice(0, 50) : [];
+    if (!requested.length) return res.status(400).json({ error: 'Select at least one document' });
+    const integration = await loadOutlookIntegration(req.auth.userId);
+    if (!integration) return res.status(409).json({ error: 'Connect Outlook before sharing documents', code: 'OUTLOOK_NOT_CONNECTED' });
+    const token = await refreshOutlookToken(decryptOutlookSecret(integration.refreshToken));
+    if (token.refresh_token) {
+      integration.refreshToken = encryptOutlookSecret(token.refresh_token);
+      await integration.save();
+    }
+    const attachments = [];
+    const generatedDocuments = [];
+    for (const descriptor of requested) {
+      const generated = await buildOperationalAttachment(event, String(descriptor?.type || '').toLowerCase(), descriptor || {});
+      generatedDocuments.push(generated);
+      attachments.push({ name: generated.fileName, contentType: generated.contentType, buffer: generated.buffer });
+    }
     const dateMatch = String(event.date || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    const datePrefix = dateMatch ? `${dateMatch[2]}-${dateMatch[3]}-${dateMatch[1].slice(-2)}` : '';
-    const documentCode = template
-      ? (template.documentType === 'po' ? 'PO' : 'KPO')
-      : type === 'po' ? 'PO' : type === 'kitchen_packout' ? 'KPO' : type === 'staff_request' ? 'Staff Request' : type === 'annotated_kitchen_menu' ? 'AKM' : 'KM';
-    const safeZone = String(req.query.fileZoneName || '').replace(/[<>:"/\\|?*\u0000-\u001F]/g, '').replace(/\s+/g, ' ').trim().slice(0, 80);
-    const fileName = [datePrefix, safeTitle, safeZone.toLowerCase() === 'main' ? '' : safeZone, documentCode].filter(Boolean).join('_');
+    const date = dateMatch ? `${dateMatch[2]}-${dateMatch[3]}-${dateMatch[1].slice(-2)}` : String(event.date || '');
+    const subject = requested.length === 1
+      ? `${date} - ${event.title} - ${generatedDocuments[0].displayName}`
+      : `${date} - ${event.title} - Leadership Files`;
+    const safeEventTitle = String(event.title || '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
+    const draft = await createOutlookDraft({ accessToken: token.access_token, subject, html: `<p>Leadership files for <strong>${safeEventTitle}</strong> are attached.</p>`, attachments });
+    return res.json({ ok: true, webLink: draft.webLink, attachments: attachments.length, subject });
+  } catch (error) {
+    return sendApiError(res, error, { context: 'Outlook draft failed', defaultStatus: 502, fallbackMessage: 'Could not create Outlook draft' });
+  }
+});
+
+router.get('/operations/events/:id/export/:type', requireAuth, async (req, res) => {
+  try {
+    const type = String(req.params.type || '').toLowerCase();
+    const event = await loadAuthorizedOperationalEvent(req, res);
+    if (!event) return undefined;
+    if (!event.catereaseOperations) return res.status(404).json({ error: 'Caterease operational data has not been synced for this event' });
+    const attachment = await buildOperationalAttachment(event, type, req.query);
     res.setHeader('Cache-Control', 'private, no-store');
-    const extension = isStaffRequest ? 'xlsx' : 'docx';
-    res.setHeader('Content-Type', isStaffRequest
-      ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-      : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-    res.setHeader('Content-Disposition', `attachment; filename="${fileName}.${extension}"`);
-    return res.send(output);
+    res.setHeader('Content-Type', attachment.contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${attachment.fileName}"`);
+    return res.send(attachment.buffer);
   } catch (error) {
     return sendApiError(res, error, { context: 'Caterease operational export failed', fallbackMessage: 'Failed to generate Caterease operational document' });
   }

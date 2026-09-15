@@ -298,6 +298,7 @@ export const catereaseOperationalGuestCount = (rows = [], legacyGuestCount = nul
 
 export const buildCatereaseOperationalSnapshot = ({
   eventId,
+  eventRow = null,
   packOutRows = [],
   kitchenPackOutRows = [],
   kitchenMenuRows,
@@ -311,10 +312,14 @@ export const buildCatereaseOperationalSnapshot = ({
     clean(first(row, ['ItemName', 'Name', 'Title'])).toLowerCase() === 'food'
     && clean(first(row, ['MenuGroup', 'GroupName'])).toLowerCase() === 'standard'
   ));
-  const guestCount = catereaseOperationalGuestCount(
+  const eventGuestCount = catereaseOperationalGuestCount(eventRow ? [eventRow] : []);
+  const guestCount = eventGuestCount ?? catereaseOperationalGuestCount(
     packOutRows,
     first(guestRow, ['Qty', 'Quantity'])
   );
+  const salesRep = clean(first(eventRow, ['SalesRep', 'SalesRepresentative', 'SalesPerson']), 200);
+  const eventStatus = clean(first(eventRow, ['Status']), 120);
+  const eventType = clean(first(eventRow, ['Category', 'EventType']), 200);
   const subEvents = normalizeCatereaseSubEventRows(subEventRows);
   const zoneNameBySubEvent = new Map(subEvents.map((row) => [
     clean(row.subEvent, 120).toLowerCase(),
@@ -347,6 +352,9 @@ export const buildCatereaseOperationalSnapshot = ({
   const checksum = crypto.createHash('sha256').update(JSON.stringify({
     eventId: clean(eventId, 120),
     guestCount,
+    salesRep,
+    eventStatus,
+    eventType,
     packOut: stableRows(packOut),
     kitchenPackOut: stableRows(kitchenPackOut),
     kitchenMenu: stableRows(kitchenMenu),
@@ -354,11 +362,14 @@ export const buildCatereaseOperationalSnapshot = ({
     packOutTemplates,
   })).digest('hex');
   return {
-    schemaVersion: 17,
+    schemaVersion: 18,
     eventId: clean(eventId, 120),
     syncedAt,
     checksum,
     guestCount,
+    salesRep,
+    eventStatus,
+    eventType,
     packOut,
     kitchenPackOut,
     requiredItems: kitchenPackOut,
@@ -837,6 +848,7 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
     ? parsedEventGuestCount
     : Number.isFinite(parsedSnapshotGuestCount) && parsedSnapshotGuestCount > 0 ? parsedSnapshotGuestCount : '';
   const eventTiming = event?.meta?.eventTime || '';
+  const salesRep = event?.meta?.salesRep || snapshot?.salesRep || '';
   const deliveryTime = event?.meta?.deliveryTime || '';
   const staffingRows = Array.isArray(snapshot?.staffRequest) && snapshot.staffRequest.length
     ? snapshot.staffRequest
@@ -851,7 +863,7 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
     : '';
   const eventDetailsTable = table([], [
     [eventNameCell('Event: ', event?.title), `Event Date: ${longDate(event?.date)}`],
-    [`Sales Rep: ${event?.meta?.salesRep || ''}`, `Event Timing: ${eventTiming}`],
+    [`Sales Rep: ${salesRep}`, `Event Timing: ${eventTiming}`],
     [`Guests: ${guestCount}`, `Delivery Time: ${deliveryTime}`],
     [`Event Number: ${displayedEventNumber(event?.externalId || snapshot?.eventId || '')}`, `Date PO Modified: ${new Intl.DateTimeFormat('en-US').format(new Date())}`],
   ], [5300, 5300]);
@@ -878,7 +890,7 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
   const documentHeader = isKitchenMenu ? `${paragraph(title, { bold: true, size: 36, align: 'center', after: 120 })}${zoneHeading}${table([], [
     [eventNameCell('Event Name: ', event?.title), `Event Timing: ${eventTiming}`],
     [`Date: ${longDate(event?.date)}`, `Staff Arrival on Site: ${staffArrivalTime}`],
-    [`Guest Count: ${guestCount}`, `Sales Rep: ${event?.meta?.salesRep || ''}`],
+    [`Guest Count: ${guestCount}`, `Sales Rep: ${salesRep}`],
     [`Client: ${event?.client || ''}`, `Site Contact: ${event?.meta?.siteContact || ''}`],
     [`Location: ${event?.meta?.venue || event?.meta?.nowsta?.venue || ''}`, `Last Modified: ${new Intl.DateTimeFormat('en-US').format(new Date(event?.updatedAt || Date.now()))}`],
     [`Address: ${event?.meta?.address || event?.meta?.nowsta?.address || ''}`, `Service Entrance: ${event?.meta?.serviceEntrance || ''}`],

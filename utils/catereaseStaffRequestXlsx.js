@@ -110,12 +110,12 @@ const worksheetXml = ({ event, snapshot, zoneKey = '' }) => {
     { value: revision, properties: revisionValueRun },
   ])}</row>`;
   const headerRows = [
-    sheetRow(2, ['', 'STATUS:', clean(meta.catereaseStatus || meta.status)], { styles: [9, 3, 4] }),
-    sheetRow(3, ['', 'Sales Rep:', clean(meta.salesRep)], { styles: [9, 4, 4] }),
+    sheetRow(2, ['', 'STATUS:', clean(meta.catereaseStatus || meta.status || snapshot?.eventStatus)], { styles: [9, 3, 4] }),
+    sheetRow(3, ['', 'Sales Rep:', clean(meta.salesRep || snapshot?.salesRep)], { styles: [9, 4, 4] }),
     sheetRow(4, ['EVENT:', 'Week day:', weekDay(event?.date)], { styles: [4, 3, 4] }),
     sheetRow(5, ['', 'Event date:', excelDate(event?.date)], { styles: [2, 3, 5], numeric: [2] }),
     sheetRow(6, ['', 'Client name:', clean(event?.title)], { styles: [2, 3, 4] }),
-    sheetRow(7, ['', 'Event type:', clean(meta.eventType || meta.category)], { styles: [2, 4, 4] }),
+    sheetRow(7, ['', 'Event type:', clean(meta.eventType || meta.category || snapshot?.eventType)], { styles: [2, 4, 4] }),
     sheetRow(8, ['', 'Guests:', Number.isFinite(guestCount) && guestCount > 0 ? guestCount : ''], { styles: [2, 4, 4], numeric: [2] }),
     sheetRow(9, ['', 'Staff Arrival Time:', excelTime(meta.staffArrivalTime || firstStart)], { styles: [2, 3, 6], numeric: [2] }),
     sheetRow(10, ['', 'Event time:', clean(meta.eventTime)], { styles: [2, 4, 4] }),

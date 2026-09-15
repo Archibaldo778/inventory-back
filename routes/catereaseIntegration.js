@@ -329,9 +329,26 @@ const normalizedEventTitle = (value) => String(value || '')
   .toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
   .replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, ' ');
 
-export const resolveCatereaseOperationalEventId = async (eventId, eventDate = '', eventTitle = '') => {
+const CATEREASE_OPERATIONAL_EVENT_FIELDS = [
+  'EvtNum',
+  'EventNum',
+  'PartyName',
+  'Client',
+  'EvtDate',
+  'ActGuests',
+  'GtdGuests',
+  'PlnGuests',
+  'AGuest',
+  'GGuest',
+  'PGuest',
+  'SalesRep',
+  'Status',
+  'Category',
+].join(',');
+
+const resolveCatereaseOperationalEvent = async (eventId, eventDate = '', eventTitle = '') => {
   const requestedNumber = normalizedPrintedEventNumber(eventId);
-  if (!eventDate) return eventId;
+  if (!eventDate) return { eventId, eventRow: null };
   const rows = [];
   let cursor = '';
   let pages = 0;
@@ -339,7 +356,7 @@ export const resolveCatereaseOperationalEventId = async (eventId, eventDate = ''
     const page = await listCatereaseEvents({
       cursor,
       limit: 200,
-      fields: 'EvtNum,EventNum,PartyName,Client,EvtDate',
+      fields: CATEREASE_OPERATIONAL_EVENT_FIELDS,
       dateFrom: eventDate,
       dateTo: eventDate,
     });
@@ -353,15 +370,24 @@ export const resolveCatereaseOperationalEventId = async (eventId, eventDate = ''
     requestedNumber
     && [row?.EventNum, row?.EvtNum].some((value) => normalizedPrintedEventNumber(value) === requestedNumber)
   ));
-  if (numberMatches.length === 1 && String(numberMatches[0]?.EvtNum || '').trim()) return String(numberMatches[0].EvtNum).trim();
+  if (numberMatches.length === 1 && String(numberMatches[0]?.EvtNum || '').trim()) {
+    return { eventId: String(numberMatches[0].EvtNum).trim(), eventRow: numberMatches[0] };
+  }
   const title = normalizedEventTitle(eventTitle);
   const titleMatches = rows.filter((row) => title && normalizedEventTitle(row?.PartyName) === title);
-  if (titleMatches.length === 1 && String(titleMatches[0]?.EvtNum || '').trim()) return String(titleMatches[0].EvtNum).trim();
-  return eventId;
+  if (titleMatches.length === 1 && String(titleMatches[0]?.EvtNum || '').trim()) {
+    return { eventId: String(titleMatches[0].EvtNum).trim(), eventRow: titleMatches[0] };
+  }
+  return { eventId, eventRow: null };
 };
 
+export const resolveCatereaseOperationalEventId = async (eventId, eventDate = '', eventTitle = '') => (
+  (await resolveCatereaseOperationalEvent(eventId, eventDate, eventTitle)).eventId
+);
+
 export const fetchCatereaseOperationalSnapshot = async (eventId, eventDate = '', eventTitle = '') => {
-  const resolvedEventId = await resolveCatereaseOperationalEventId(eventId, eventDate, eventTitle);
+  const resolvedEvent = await resolveCatereaseOperationalEvent(eventId, eventDate, eventTitle);
+  const resolvedEventId = resolvedEvent.eventId;
   const sourceErrors = [];
   const captureRows = async (source, request) => {
     try {
@@ -411,6 +437,7 @@ export const fetchCatereaseOperationalSnapshot = async (eventId, eventDate = '',
   }
   return buildCatereaseOperationalSnapshot({
     eventId: resolvedEventId,
+    eventRow: resolvedEvent.eventRow,
     packOutRows,
     kitchenPackOutRows,
     kitchenMenuRows: packOutRows,

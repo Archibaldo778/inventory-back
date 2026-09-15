@@ -406,6 +406,25 @@ test('operational snapshot uses Caterease guest fields without a Standard Food r
   assert.equal(catereaseOperationalGuestCount(rows), 120);
 });
 
+test('operational snapshot keeps event-level Caterease guests and sales rep', () => {
+  const snapshot = buildCatereaseOperationalSnapshot({
+    eventId: 'E22856',
+    eventRow: {
+      ActGuests: '40        ',
+      GtdGuests: null,
+      PlnGuests: null,
+      SalesRep: 'Olivier Cheng',
+      Status: 'Definite',
+      Category: "Passed HD's",
+    },
+    packOutRows: [{ ItemName: 'Club Soda', Qty: 2 }],
+  });
+  assert.equal(snapshot.guestCount, 40);
+  assert.equal(snapshot.salesRep, 'Olivier Cheng');
+  assert.equal(snapshot.eventStatus, 'Definite');
+  assert.equal(snapshot.eventType, "Passed HD's");
+});
+
 test('Caterease actual guests override planned guests and respect a larger guarantee', () => {
   assert.equal(catereaseOperationalGuestCount([{ PlnGuests: 150, GtdGuests: 120, ActGuests: 130 }]), 130);
   assert.equal(catereaseOperationalGuestCount([{ PlnGuests: 150, GtdGuests: 140, ActGuests: 130 }]), 140);
@@ -498,6 +517,26 @@ test('operational DOCX exports only the requested sub-event', async () => {
   assert.doesNotMatch(xml, />Photo</);
   assert.equal((xml.match(/<w:tbl>/g) || []).length, 2, 'Caterease PO uses one event table and one continuous item table');
   assert.match(xml, /<w:gridSpan w:val="5"\/[^>]*>/);
+});
+
+test('operational DOCX uses event-level Caterease guests and sales rep', async () => {
+  const buffer = await renderCatereaseOperationalDocx({
+    event: { title: 'Cocktail', date: '2026-09-14', externalId: 'E22856', meta: {} },
+    snapshot: {
+      schemaVersion: 18,
+      guestCount: 40,
+      salesRep: 'Olivier Cheng',
+      packOut: [{ itemName: 'Club Soda', quantity: 2 }],
+      kitchenPackOut: [],
+      kitchenMenu: [],
+      staffRequest: [],
+    },
+    type: 'po',
+  });
+  const zip = await JSZip.loadAsync(buffer);
+  const xml = await zip.file('word/document.xml').async('string');
+  assert.match(xml, /Sales Rep: Olivier Cheng/);
+  assert.match(xml, /Guests: 40/);
 });
 
 test('operational DOCX filters shared sub-event rows by their human zone description', async () => {
@@ -641,9 +680,13 @@ test('Staff Request XLSX matches the Caterease staffing sheet fields', async () 
       title: 'Chanel YPO Cocktail',
       date: '2026-09-14',
       externalId: 'E22856 - S62650',
-      meta: { guestCount: 40, eventTime: '6:30 pm - 8:00 pm', salesRep: 'Olivier Cheng' },
+      meta: { eventTime: '6:30 pm - 8:00 pm' },
     },
     snapshot: {
+      guestCount: 40,
+      salesRep: 'Olivier Cheng',
+      eventStatus: 'Definite',
+      eventType: "Passed HD's",
       staffRequest: [
         { subEvent: 'S1', zoneName: 'Staffing', position: 'Captain - Working', required: 1, startTime: '16:30:00', endTime: '21:30:00' },
         { subEvent: 'S1', zoneName: 'Staffing', position: 'Food Passer', required: 1, startTime: '16:30:00', endTime: '21:30:00', uniform: 'Wht BttnDwn Shrt-Blk Tie (OC)' },
@@ -659,6 +702,8 @@ test('Staff Request XLSX matches the Caterease staffing sheet fields', async () 
   assert.match(workbook, /name="Sheet1"/);
   assert.match(sheet, /Chanel YPO Cocktail/);
   assert.match(sheet, /Olivier Cheng/);
+  assert.match(sheet, /Definite/);
+  assert.match(sheet, /Passed HD&apos;s/);
   assert.match(sheet, /6:30 pm - 8:00 pm/);
   assert.match(sheet, /<c r="C9" s="6"><v>0\.6875<\/v><\/c>/);
   assert.match(sheet, /<c r="D31" s="6"><v>0\.8958333333333334<\/v><\/c>/);
@@ -844,7 +889,7 @@ test('operational snapshot checksum is stable when API row order changes', () =>
     packOutRows: [{ ItemName: 'B', Qty: 2 }, { ItemName: 'A', Qty: 1 }],
     syncedAt: new Date('2026-09-11T12:00:00Z'),
   });
-  assert.equal(first.schemaVersion, 17);
+  assert.equal(first.schemaVersion, 18);
   const second = buildCatereaseOperationalSnapshot({
     eventId: 'E22672',
     packOutRows: [{ ItemName: 'A', Qty: 1 }, { ItemName: 'B', Qty: 2 }],

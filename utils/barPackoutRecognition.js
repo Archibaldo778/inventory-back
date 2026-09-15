@@ -40,7 +40,7 @@ export const normalizeOcrCatalogName = (value) => {
 export const classifyRecognizedSection = (value) => {
   const section = cleanText(value, 160);
   if (!section) return 'review';
-  if (/\b(?:staff|kitchen|sanitation|disposable|equipment|rental|linen|decor|trays?|risers?|buckets?|tubs?|coolers?)\b/i.test(section)) {
+  if (/\b(?:staff|kitchen|sanitation|disposable|equipment|rental|linen|decor|trays?|risers?|buckets?|tubs?|coolers?|food|meals?|courses?|hors\s+d[’']?oeuvres?|canap[eé]s?|appetizers?|entr[eé]es?|desserts?|salads?|soups?|breads?|starches?|vegetables?|proteins?|vinaigrettes?|dressings?|sauces?|purees?|marinades?|glazes?)\b/i.test(section)) {
     return 'non_bar';
   }
   if (/\b(?:alcohol|liquor|spirits?|wines?|sparkling|champagne|prosecco|beer|cider|seltzer|vermouth|amaro|bitters|vodka|gin|tequila|mezcal|whisk(?:e)?y|bourbon|scotch|rum|cognac|brandy|sancerre|chablis|chardonnay|sauvignon|cabernet|merlot|pinot|ros[eé])\b/i.test(section)) {

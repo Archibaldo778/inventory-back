@@ -1,7 +1,7 @@
 import { classifyRecognizedSection } from './barPackoutRecognition.js';
 
 const clean = (value) => String(value ?? '').trim();
-export const CATEREASE_OPERATIONAL_BAR_ITEMS_VERSION = 4;
+export const CATEREASE_OPERATIONAL_BAR_ITEMS_VERSION = 5;
 
 const normalizedQuantity = (value) => {
   if (value === null || value === undefined || clean(value) === '') return null;

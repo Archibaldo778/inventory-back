@@ -22,9 +22,11 @@ const hasReasonableBarQuantity = (item = {}) => {
   return Number.isFinite(quantity) && quantity >= 0 && quantity <= MAX_REASONABLE_BAR_ITEM_QUANTITY;
 };
 const FOOD_MENU_SECTION_PATTERN = /^(?:\d+\s+)?(?:(?:first|second|third|fourth)\s+courses?|plated\s+desserts?|proteins?|sides?|salads?|soups?|appetizers?|hors\s+d[’']?oeuvres?|canap[eé]s?|entr[eé]es?|main\s+courses?|desserts?|breads?|starches?|vegetables?|vendor\s+meals?)\s*:?(?:\s*\([^)]*\))?$/i;
+const CULINARY_CONTEXT_PATTERN = /\b(?:food|meals?|courses?|hors\s+d[’']?oeuvres?|canap[eé]s?|appetizers?|entr[eé]es?|desserts?|salads?|soups?|breads?|starches?|vegetables?|proteins?|vinaigrettes?|dressings?|sauces?|purees?|marinades?|glazes?)\b/i;
 export const isFoodMenuItem = (item = {}) => (
   FOOD_MENU_SECTION_PATTERN.test(String(item?.name || '').trim())
   || FOOD_MENU_SECTION_PATTERN.test(String(item?.section || '').trim())
+  || CULINARY_CONTEXT_PATTERN.test(String(item?.section || '').trim())
 );
 const isPreparedBeverageSupportRow = (item = {}) => (
   /\b(?:garnish|ice|water|cups?|glassware|napkins?|straws?|shakers?|skewers?|glitter|mixers?|juices?|sodas?)\b/i

@@ -154,6 +154,27 @@ test('equipment containing wine champagne or rose words is excluded from captain
   assert.deepEqual(result.items.map((item) => item.name), ['Bitters']);
 });
 
+test('culinary sections containing alcohol words do not send food ingredients to Bar Operations', () => {
+  assert.equal(classifyRecognizedSection('CHAMPAGNE VINAIGRETTE'), 'non_bar');
+
+  const result = parseRecognizedPackout({
+    tables: [{
+      headerRows: [['Name', 'Qty', 'Notes/Comments', 'Delivered', 'Returned']],
+      bodyRows: [
+        ['CHAMPAGNE VINAIGRETTE', '', '', '', ''],
+        ['Garlic', '1', '', '', ''],
+        ['Thyme', '1', '', '', ''],
+        ['EVOO', '1', '', '', ''],
+        ['VODKA', '', '', '', ''],
+        ['Ketel One', '2', '', '', ''],
+      ],
+    }],
+  });
+
+  assert.deepEqual(result.items.map((item) => item.name), ['Ketel One']);
+  assert.equal(result.items[0].scope, 'alcohol');
+});
+
 test('fallback OCR keeps alcohol rows whose names also look like section headings', () => {
   const result = parseRecognizedPackout({
     text: [

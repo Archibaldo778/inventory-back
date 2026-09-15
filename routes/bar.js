@@ -47,6 +47,7 @@ import {
   isBarAccountingItem,
   requiresBarReturn,
 } from '../utils/barPackoutScope.js';
+import { estimateBarItemUnitCost } from '../utils/barCostEstimates.js';
 
 const router = Router();
 const BAR_MANAGER_ROLES = new Set(['bar admin']);
@@ -157,6 +158,7 @@ const serializeBarEvent = (source, { includeFinancials = false } = {}) => {
     if (!includeFinancials) {
       delete next.unitCostSnapshot;
       delete next.clientChargeSnapshot;
+      delete next.costEstimate;
       if (next.accounting) {
         delete next.accounting.unitCost;
         delete next.accounting.actualCost;
@@ -510,7 +512,7 @@ const resolveCatalog = async (items) => {
       }
     : { name: { $exists: true, $ne: '' }, active: { $ne: false } };
   const catalog = await BeverageItem.find(query)
-    .select('name aliases sku bottleSizeMl caseSize +purchaseCost +caseCost');
+    .select('name aliases sku bottleSizeMl caseSize category subCategory categories tags isAlcohol +purchaseCost +caseCost');
   const byId = new Map();
   const byName = new Map();
   catalog.forEach((item) => {
@@ -544,6 +546,12 @@ export const normalizePackoutItems = async (items, { allowFinancials = false, gu
         : 'review';
       const preparedBeverageType = getPreparedBeverageType(item);
       const preparedRate = getPreparedBeverageRate(item);
+      const hasExplicitUnitCost = item?.unitCostSnapshot !== undefined
+        && item?.unitCostSnapshot !== null
+        && String(item.unitCostSnapshot).trim() !== '';
+      const costFallback = !catalogItem
+        ? estimateBarItemUnitCost(item, catalog)
+        : null;
       const explicitSentQty = item?.sentQty ?? item?.quantity;
       const hasExplicitSentQty = explicitSentQty !== null
         && explicitSentQty !== undefined
@@ -572,11 +580,19 @@ export const normalizePackoutItems = async (items, { allowFinancials = false, gu
         returnedOpenQty: cleanNumber(item?.returnedOpenQty, { fallback: 0 }),
         lostDamagedQty: cleanNumber(item?.lostDamagedQty, { fallback: 0 }),
         returnConfirmed: preparedBeverageType ? true : cleanBoolean(item?.returnConfirmed, false),
-        unitCostSnapshot: preparedRate ?? (allowFinancials
-          ? cleanNumber(item?.unitCostSnapshot, {
-            fallback: catalogUnitCost,
+        unitCostSnapshot: preparedRate ?? (allowFinancials && hasExplicitUnitCost
+          ? cleanNumber(item?.unitCostSnapshot, { fallback: costFallback?.unitCost ?? catalogUnitCost })
+          : (catalogItem ? catalogUnitCost : (costFallback?.unitCost ?? 0))),
+        costEstimate: preparedRate !== null
+          ? (costFallback?.estimate || {
+            estimated: false,
+            kind: preparedBeverageType,
+            basis: `Fixed ${preparedBeverageType} prep rate`,
+            needsPriceCheck: false,
           })
-          : catalogUnitCost),
+          : (catalogItem || (allowFinancials && hasExplicitUnitCost)
+            ? { estimated: false, kind: '', basis: '', needsPriceCheck: false }
+            : (costFallback?.estimate || { estimated: false, kind: '', basis: '', needsPriceCheck: false })),
         bottleSizeMl: cleanNumber(item?.bottleSizeMl, {
           fallback: cleanNumber(catalogItem?.bottleSizeMl, { fallback: null }),
         }),
@@ -1405,7 +1421,15 @@ router.post('/events/:id/items', requireBarOperator, async (req, res) => {
       const requestedCost = canSeeBarFinancials(req.auth)
         ? cleanNumber(req.body?.unitCostSnapshot, { fallback: null })
         : null;
-      const unitCostSnapshot = requestedCost ?? (catalogItem ? resolveCatalogUnitCost(catalogItem) : 0);
+      const fallbackCatalog = !catalogItem && requestedCost === null
+        ? await BeverageItem.find({ active: { $ne: false } })
+          .select('name category subCategory categories tags isAlcohol caseSize +purchaseCost +caseCost')
+          .lean()
+        : [];
+      const costFallback = !catalogItem && requestedCost === null
+        ? estimateBarItemUnitCost({ name: manualName, section: 'Manual Liquor', scope: 'alcohol' }, fallbackCatalog)
+        : null;
+      const unitCostSnapshot = requestedCost ?? (catalogItem ? resolveCatalogUnitCost(catalogItem) : (costFallback?.unitCost ?? 0));
       item = {
         beverageItemId: catalogItem?._id || null,
         name: catalogItem?.name || manualName,
@@ -1418,6 +1442,9 @@ router.post('/events/:id/items', requireBarOperator, async (req, res) => {
         deliveredQty: null,
         returnConfirmed: false,
         unitCostSnapshot,
+        costEstimate: catalogItem || requestedCost !== null
+          ? { estimated: false, kind: '', basis: '', needsPriceCheck: false }
+          : (costFallback?.estimate || { estimated: false, kind: '', basis: '', needsPriceCheck: false }),
         bottleSizeMl: cleanNumber(catalogItem?.bottleSizeMl, { fallback: null }),
         cocktailServingsAuto: false,
         entrySource: 'manual',
@@ -1576,6 +1603,12 @@ router.patch('/events/:id/items/:itemId', requireBarManager, async (req, res) =>
       item.unitCostSnapshot = cleanNumber(req.body?.unitCostSnapshot, {
         fallback: catalogItem ? resolveCatalogUnitCost(catalogItem) : item.unitCostSnapshot,
       });
+      item.costEstimate = {
+        estimated: false,
+        kind: '',
+        basis: '',
+        needsPriceCheck: false,
+      };
     }
     if (req.body?.bottleSizeMl !== undefined || catalogItem) {
       item.bottleSizeMl = cleanNumber(req.body?.bottleSizeMl, {

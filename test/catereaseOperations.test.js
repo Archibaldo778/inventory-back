@@ -30,6 +30,15 @@ import {
   normalizeCatereasePrintTemplates,
 } from '../utils/catereasePackOutTemplates.js';
 
+const docxText = (xml) => [...String(xml || '').matchAll(/<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>/g)]
+  .map((match) => match[1])
+  .join('')
+  .replace(/&amp;/g, '&')
+  .replace(/&lt;/g, '<')
+  .replace(/&gt;/g, '>')
+  .replace(/&quot;/g, '"')
+  .replace(/&apos;/g, "'");
+
 test('Kitchen Pack Out groups retain every ingredient when dish names have no keyword match', () => {
   const salmonStation = 'Ora king salmon crudo, passion fruit, gooseberries, pickled cucumber, jalapeño, lime, squid ink cracker GF, DF, NF';
   const eggplantStation = 'Norwich Farm Roasted Eggplant, burnt eggplant puree, pomegranate, crispy black wild rice (GF, DF, Vegan, NF)';
@@ -872,15 +881,17 @@ test('operational DOCX exports only the requested sub-event', async () => {
   });
   const zip = await JSZip.loadAsync(buffer);
   const xml = await zip.file('word/document.xml').async('string');
+  const text = docxText(xml);
   assert.match(xml, /Green Room Ice/);
   assert.doesNotMatch(xml, /Staff Holding Water/);
   assert.doesNotMatch(xml, />PACK OUT</);
-  assert.match(xml, /Event Timing: 6:00 pm - 8:00 pm/);
-  assert.match(xml, /Delivery Time: 4:00 pm/);
-  assert.match(xml, /Date PO Modified: 9\/10\/2026 \(7:53 pm\)/);
+  assert.match(text, /Event Timing: 6:00 pm - 8:00 pm/);
+  assert.match(text, /Delivery Time: 4:00 pm/);
+  assert.match(text, /Date PO Modified: 9\/10\/2026 \(7:53 pm\)/);
   assert.match(xml, /<w:color w:val="FF0000"\/[^>]*>/);
-  assert.match(xml, /<w:b\/><w:color w:val="FF0000"\/><w:sz w:val="32"\/><w:szCs w:val="32"\/[^>]*><\/w:rPr><w:t xml:space="preserve">Dinner<\/w:t>/);
-  assert.match(xml, /<w:b\/><w:color w:val="FF0000"\/><w:sz w:val="18"\/><w:szCs w:val="18"\/[^>]*><\/w:rPr><w:t xml:space="preserve">Friday, September 11, 2026<\/w:t>/);
+  assert.match(xml, /<w:b\/><w:color w:val="FF0000"\/><w:sz w:val="28"\/><w:szCs w:val="28"\/[^>]*><\/w:rPr><w:t xml:space="preserve">Event: <\/w:t>/);
+  assert.match(xml, /<w:b\/><w:color w:val="FF0000"\/><w:sz w:val="28"\/><w:szCs w:val="28"\/[^>]*><\/w:rPr><w:t xml:space="preserve">Dinner<\/w:t>/);
+  assert.match(xml, /<w:b\/><w:color w:val="FF0000"\/><w:sz w:val="20"\/><w:szCs w:val="20"\/[^>]*><\/w:rPr><w:t xml:space="preserve">Friday, September 11, 2026<\/w:t>/);
   assert.doesNotMatch(xml, /<w:color w:val="FF0000"\/>.*?<w:t xml:space="preserve">PACK OUT<\/w:t>/s);
   assert.doesNotMatch(xml, />Photo</);
   assert.equal((xml.match(/<w:tbl>/g) || []).length, 2, 'Caterease PO uses one event table and one continuous item table');
@@ -903,8 +914,9 @@ test('operational DOCX uses event-level Caterease guests and sales rep', async (
   });
   const zip = await JSZip.loadAsync(buffer);
   const xml = await zip.file('word/document.xml').async('string');
-  assert.match(xml, /Sales Rep: Olivier Cheng/);
-  assert.match(xml, /Guests: 40/);
+  const text = docxText(xml);
+  assert.match(text, /Sales Rep: Olivier Cheng/);
+  assert.match(text, /Guests: 40/);
 });
 
 test('operational DOCX filters shared sub-event rows by their human zone description', async () => {
@@ -1395,7 +1407,7 @@ test('Kitchen Menu keeps Caterease comments in the standard four-column table', 
   const zip = await JSZip.loadAsync(buffer);
   const xml = await zip.file('word/document.xml').async('string');
   assert.match(xml, />KITCHEN MENU</);
-  assert.match(xml, /<w:b\/><w:color w:val="FF0000"\/><w:sz w:val="32"\/><w:szCs w:val="32"\/[^>]*><\/w:rPr><w:t xml:space="preserve">Dinner<\/w:t>/);
+  assert.match(xml, /<w:b\/><w:color w:val="FF0000"\/><w:sz w:val="28"\/><w:szCs w:val="28"\/[^>]*><\/w:rPr><w:t xml:space="preserve">Dinner<\/w:t>/);
   assert.match(xml, />Qty</);
   assert.match(xml, />Item</);
   assert.match(xml, />Comment</);

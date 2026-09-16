@@ -421,8 +421,8 @@ const escapeXml = (value) => String(value ?? '')
   .replace(/"/g, '&quot;')
   .replace(/'/g, '&apos;');
 
-const textRun = (value, { bold = false, size = 20, color = '' } = {}) => (
-  `<w:r><w:rPr>${bold ? '<w:b/>' : ''}${color ? `<w:color w:val="${escapeXml(color)}"/>` : ''}<w:sz w:val="${size}"/><w:szCs w:val="${size}"/></w:rPr><w:t xml:space="preserve">${escapeXml(value)}</w:t></w:r>`
+const textRun = (value, { bold = false, size = 20, color = '', font = 'Avenir Medium' } = {}) => (
+  `<w:r><w:rPr><w:rFonts w:ascii="${escapeXml(font)}" w:hAnsi="${escapeXml(font)}" w:cs="${escapeXml(font)}"/>${bold ? '<w:b/>' : ''}${color ? `<w:color w:val="${escapeXml(color)}"/>` : ''}<w:sz w:val="${size}"/><w:szCs w:val="${size}"/></w:rPr><w:t xml:space="preserve">${escapeXml(value)}</w:t></w:r>`
 );
 
 const paragraph = (value, options = {}) => {
@@ -437,15 +437,22 @@ const richParagraph = (runs, options = {}) => {
 
 const eventNameCell = (label, value) => ({
   runs: [
-    { value: label, size: 18 },
-    { value: value || 'Event', bold: true, size: 32, color: 'FF0000' },
+    { value: label, bold: true, size: 28, color: 'FF0000' },
+    { value: value || 'Event', bold: true, size: 28, color: 'FF0000' },
   ],
 });
 
-const highlightedValueCell = (label, value, { valueSize = 18 } = {}) => ({
+const highlightedValueCell = (label, value, { valueSize = 20 } = {}) => ({
   runs: [
-    { value: label, bold: true, size: 18 },
+    { value: label, bold: true, size: 20 },
     { value: value || '', bold: true, size: valueSize, color: 'FF0000' },
+  ],
+});
+
+const labeledValueCell = (label, value, { valueBold = false } = {}) => ({
+  runs: [
+    { value: label, bold: true, size: 20 },
+    { value: value || '', bold: valueBold, size: 20 },
   ],
 });
 
@@ -462,7 +469,7 @@ const cell = (value, { bold = false, width = 0, shading = '', align = '' } = {})
   const contents = (values.length ? values : [''])
     .map((entry) => (Array.isArray(entry?.runs)
       ? richParagraph(entry.runs, { after: 0, align })
-      : paragraph(entry, { bold, size: 18, after: 0, align })))
+      : paragraph(entry, { bold, size: 20, after: 0, align })))
     .join('');
   return `<w:tc><w:tcPr>${width ? `<w:tcW w:w="${width}" w:type="dxa"/>` : ''}${shading ? `<w:shd w:val="clear" w:fill="${shading}"/>` : ''}<w:vAlign w:val="top"/></w:tcPr>${contents}</w:tc>`;
 };
@@ -607,7 +614,7 @@ export const packOutRenderedItemNames = (rows = [], includeTemplate = true) => [
 const catereasePackOutTable = (groups, decorImages = []) => {
   const includePhotos = decorImages.length > 0;
   const imageByName = new Map(decorImages.map((image) => [itemKey(image.itemName), image]));
-  const widths = includePhotos ? [2900, 700, 2800, 1000, 1000, 1700] : [3700, 700, 3500, 1100, 1100];
+  const widths = includePhotos ? [2900, 700, 2800, 1000, 1000, 1700] : [2945, 1021, 3079, 1667, 2073];
   const headers = ['Name', 'Qty', 'Notes/Comments', 'Delivered', 'Returned', ...(includePhotos ? ['Photo'] : [])];
   const header = `<w:tr>${headers.map((value, index) => cell(value, {
     bold: true,
@@ -985,10 +992,10 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
     : '';
   const eventDetailsTable = table([], [
     [eventNameCell('Event: ', event?.title), highlightedValueCell('Event Date: ', longDate(event?.date))],
-    [`Sales Rep: ${salesRep}`, `Event Timing: ${packOutEventTiming}`],
-    [`Guests: ${guestCount}`, `Delivery Time: ${deliveryTime}`],
-    [`Event Number: ${displayedEventNumber(event?.externalId || snapshot?.eventId || '')}`, `Date PO Modified: ${catereaseModifiedDateTime(snapshot?.eventRevised)}`],
-  ], [5300, 5300]);
+    [labeledValueCell('Sales Rep: ', salesRep), labeledValueCell('Event Timing: ', packOutEventTiming, { valueBold: true })],
+    [labeledValueCell('Guests: ', guestCount), labeledValueCell('Delivery Time: ', deliveryTime)],
+    [labeledValueCell('Event Number: ', displayedEventNumber(event?.externalId || snapshot?.eventId || '')), labeledValueCell('Date PO Modified: ', catereaseModifiedDateTime(snapshot?.eventRevised))],
+  ], [5327, 5328]);
   const staffMealRow = rows.find((row) => /^option\s+[a-z0-9]+\s*:/i.test(clean(row?.station, 300)));
   const staffMealQuantity = formatQuantity(staffMealRow?.quantity);
   const staffMeal = [staffMealQuantity, clean(staffMealRow?.station, 300)].filter(Boolean).join(' - ');
@@ -1023,7 +1030,7 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
     ? `${zoneHeading}${kitchenPackOutDetailsTable}`
     : isStaffRequest
     ? `${paragraph(title, { bold: true, size: 36, align: 'center', after: 120 })}${zoneHeading}${eventDetailsTable}`
-    : `${paragraph('Revision', { bold: true, size: 28, align: 'left', after: 80 })}${eventDetailsTable}`;
+    : `${paragraph('Revision', { bold: true, size: 32, align: 'left', after: 80 })}${eventDetailsTable}`;
   const templateTopNotes = clean(catereaseRichTextToPlain(template?.topNotes), 12000);
   const templateBottomNotes = clean(catereaseRichTextToPlain(template?.bottomNotes), 12000);
   const documentFooterSections = isKitchenMenu ? kitchenStaffingSection(event, snapshot) : '';

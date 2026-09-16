@@ -24,10 +24,59 @@ import {
 import { runImportedBarItemMergePipeline } from '../utils/barManualItems.js';
 import {
   buildCatereasePackOutTemplateSummaries,
+  catereaseKitchenPackOutDocumentGroups,
   catereaseOperationalTemplateRows,
   catereasePackOutTemplateRows,
   normalizeCatereasePrintTemplates,
 } from '../utils/catereasePackOutTemplates.js';
+
+test('Kitchen Pack Out groups retain every ingredient when dish names have no keyword match', () => {
+  const salmonStation = 'Ora king salmon crudo, passion fruit, gooseberries, pickled cucumber, jalapeño, lime, squid ink cracker GF, DF, NF';
+  const eggplantStation = 'Norwich Farm Roasted Eggplant, burnt eggplant puree, pomegranate, crispy black wild rice (GF, DF, Vegan, NF)';
+  const salmonIngredients = [
+    'Alyssum flowers', 'Cucumber rolls', 'FDS', 'Fennel Fronds', 'Gooseberries',
+    'Medium sized Nasturtium Leaves', 'Ora king salmon', 'Passionfruit vinaigrette',
+    'Pickled cucumber', 'Pickled jalapeno', 'Purple daikon or watermelon radish',
+    'Squid ink cracker', 'Yellow Viola flowers',
+  ];
+  const eggplantIngredients = [
+    'Nasturtium leaves', 'Chinese broccoli', 'Puffed black rice', 'Pickled apricot',
+    'Pomegranate seeds', 'Charred eggplant puree', 'Miso roasted eggplant',
+  ];
+  const rows = [
+    ...salmonIngredients.map((itemName, index) => ({
+      sourceId: `salmon-${index}`,
+      foodServiceId: 'FS-SALMON',
+      itemName,
+      station: salmonStation,
+      category: 'Pack Out',
+    })),
+    ...eggplantIngredients.map((itemName, index) => ({
+      sourceId: `eggplant-${index}`,
+      foodServiceId: 'FS-EGGPLANT',
+      itemName,
+      station: eggplantStation,
+      category: 'Pack Out',
+    })),
+  ];
+  const groups = catereaseKitchenPackOutDocumentGroups({
+    foodService: [
+      { sourceId: 'heading', itemName: "PASSED HORS D'OEUVRES", subEvent: 'S-MENU' },
+      { sourceId: 'dish-salmon', foodServiceId: 'FS-SALMON', itemName: salmonStation, subEvent: 'S-MENU' },
+    ],
+  }, rows);
+  const groupedRows = groups.flatMap((group) => group.rows);
+  assert.equal(groupedRows.length, rows.length);
+  assert.equal(new Set(groupedRows.map((row) => row.sourceId)).size, rows.length);
+  assert.deepEqual(
+    groups.find((group) => group.key === 'passed-hds')?.rows.map((row) => row.itemName),
+    salmonIngredients,
+  );
+  assert.deepEqual(
+    groups.find((group) => group.key === 'additional-items')?.rows.map((row) => row.itemName),
+    eggplantIngredients,
+  );
+});
 
 test('Caterease exposes only the two real operational Pack Out document types', () => {
   const rows = normalizeCatereaseKitchenPackOutRows([

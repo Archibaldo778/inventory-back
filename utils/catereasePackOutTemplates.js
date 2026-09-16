@@ -80,6 +80,7 @@ const KITCHEN_PACK_OUT_DOCUMENT_GROUPS = Object.freeze([
   Object.freeze({ key: 'late-night', label: 'Late Night' }),
   Object.freeze({ key: 'passed-sweets', label: 'Passed Sweets' }),
   Object.freeze({ key: 'raw-bar-station', label: 'Raw Bar Station' }),
+  Object.freeze({ key: 'additional-items', label: 'Additional Items' }),
 ]);
 
 const normalizedMenuText = (value) => clean(value, 500).toLowerCase()
@@ -119,7 +120,8 @@ const isUppercaseMenuHeading = (value) => {
 };
 
 const kitchenPackOutStationGroups = (snapshot = {}) => {
-  const groups = new Map();
+  const byName = new Map();
+  const byFoodServiceId = new Map();
   const activeBySubEvent = new Map();
   (Array.isArray(snapshot?.foodService) ? snapshot.foodService : snapshot?.packOut || [])
     .filter((row) => !/\binvoice\b|\bpack\s*out\b/i.test(clean(row?.zoneName, 200)))
@@ -137,14 +139,18 @@ const kitchenPackOutStationGroups = (snapshot = {}) => {
       }
       const group = kitchenPackOutDishOverride(row, activeBySubEvent.get(streamKey) || '');
       const name = normalizedMenuText(row?.itemName);
-      if (name && group && !groups.has(name)) groups.set(name, group);
+      const foodServiceId = clean(row?.foodServiceId || row?.sourceId, 120).toLowerCase();
+      if (name && group && !byName.has(name)) byName.set(name, group);
+      if (foodServiceId && group && !byFoodServiceId.has(foodServiceId)) byFoodServiceId.set(foodServiceId, group);
     });
-  return groups;
+  return { byName, byFoodServiceId };
 };
 
 const kitchenPackOutFallbackGroup = (row, stationGroups) => {
   const station = clean(row?.station, 300);
-  const mapped = stationGroups.get(normalizedMenuText(station || row?.itemName));
+  const foodServiceId = clean(row?.foodServiceId, 120).toLowerCase();
+  const mapped = stationGroups.byFoodServiceId.get(foodServiceId)
+    || stationGroups.byName.get(normalizedMenuText(station || row?.itemName));
   if (mapped) return mapped;
   const context = normalizedMenuText([
     station,
@@ -160,7 +166,8 @@ const kitchenPackOutFallbackGroup = (row, stationGroups) => {
     || kitchenPackOutHeadingGroup(row?.itemName);
   if (explicitHeading) return explicitHeading;
   if (/\btofu\b/.test(context) && /\b(?:heirloom|zucchini|squash|pangrattato)\b/.test(context)) return 'dinner';
-  return kitchenPackOutDishOverride({ ...row, itemName: station || row?.itemName }, '');
+  return kitchenPackOutDishOverride({ ...row, itemName: station || row?.itemName }, '')
+    || 'additional-items';
 };
 
 export const catereaseKitchenPackOutDocumentGroups = (snapshot = {}, rows = []) => {

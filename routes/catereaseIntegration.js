@@ -983,6 +983,17 @@ router.post('/financials/sync/:barEventId', ...requireCatereaseAdmin, syncRateLi
         syncedAt,
         syncedBy,
       };
+      if (summary.billedBeverageLineItems > 0) {
+        barEvent.clientCharge = summary.billedBeverageTotal;
+        barEvent.clientChargeDetails = {
+          beverageSubtotal: summary.billedBeverageTotal,
+          liquorSubtotal: null,
+          source: 'caterease',
+          sourceFileName: 'Caterease live billing',
+          importedAt: syncedAt,
+          importedBy: syncedBy,
+        };
+      }
       barEvent.revision += 1;
       barEvent.audit.push({
         action: 'caterease_client_pricing_synced',
@@ -998,7 +1009,14 @@ router.post('/financials/sync/:barEventId', ...requireCatereaseAdmin, syncRateLi
       await barEvent.save();
       clearApiCacheGroups('bar');
     }
-    return res.json({ ok: true, catereaseEventId, summary });
+    return res.json({
+      ok: true,
+      catereaseEventId,
+      summary: {
+        ...summary,
+        appliedClientCharge: summary.billedBeverageLineItems > 0 ? summary.billedBeverageTotal : null,
+      },
+    });
   } catch (error) {
     return sendApiError(res, error, { context: 'Caterease client pricing sync failed', fallbackMessage: 'Failed to load client pricing from Caterease' });
   }

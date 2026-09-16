@@ -995,9 +995,10 @@ test('Kitchen Pack Out uses the Caterease feedback table layout', async () => {
       Address1: '1000 Third Avenue', City: 'New York', StProv: 'NY', Postal: '10022',
     },
     packOutRows: [{
-      ItemName: 'Option A: 5 hours or less', Qty: 0, Notes: 'Peanut butter & jelly sandwiches',
+      ItemName: 'Option A: 5 hours or less', Qty: 0, Notes: 'Peanut butter & jelly sandwiches', FSType: 'Food', FdSvNum: 'FS-STAFF',
     }],
     kitchenPackOutRows: [
+      { ItemName: 'Bread', Qty: 2, Unit: 'Loaf', FSName: 'Option A: 5 hours or less', FSType: 'Food', FdSvNum: 'FS-STAFF' },
       { ItemName: 'Sheet Pan', Qty: 3, Unit: 'Each', FSName: 'Hot Line', FSPrepArea: 'Kitchen' },
     ],
   });
@@ -1013,8 +1014,11 @@ test('Kitchen Pack Out uses the Caterease feedback table layout', async () => {
   assert.match(xml, />Guest Count: </);
   assert.match(xml, /Address: 1000 Third Avenue New York, NY 10022/);
   assert.match(xml, /Event Date: 09\/11\/2026/);
-  assert.match(xml, /Staff Meal: Option A: 5 hours or less — Peanut butter &amp; jelly sandwiches/);
+  assert.match(xml, /Staff Meal: Option A: 5 hours or less/);
   assert.doesNotMatch(xml, /Staff Meal: 0/);
+  assert.match(xml, />Staff Meal</);
+  assert.match(xml, />Option A: 5 hours or less - Peanut butter &amp; jelly sandwiches</);
+  assert.ok(xml.indexOf('>Staff Meal<') > xml.indexOf('>Hot Line<'));
   assert.doesNotMatch(xml, />Revision</);
   assert.match(xml, />Quantity</);
   assert.match(xml, />Not Enough</);

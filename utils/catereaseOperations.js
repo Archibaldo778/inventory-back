@@ -668,7 +668,29 @@ const expandKitchenPackOutRecipeGroups = (groups, recipes = []) => {
   }));
 };
 
-const catereaseKitchenPackOutTable = (groups, recipes = []) => {
+const STAFF_MEAL_OPTION_PATTERN = /^option\s+[a-z0-9]+\s*:/i;
+
+const kitchenPackOutStaffMeal = (snapshot, rows) => {
+  const requiredRow = (Array.isArray(rows) ? rows : []).find((row) => (
+    STAFF_MEAL_OPTION_PATTERN.test(clean(row?.station || row?.itemName, 300))
+  ));
+  const foodServiceRow = (snapshot?.foodService || snapshot?.packOut || []).find((row) => (
+    STAFF_MEAL_OPTION_PATTERN.test(clean(row?.itemName || row?.station, 300))
+  ));
+  const name = clean(
+    requiredRow?.station || requiredRow?.itemName || foodServiceRow?.itemName || foodServiceRow?.station,
+    300
+  );
+  // Required-item quantities describe each ingredient, not the number of staff meals.
+  const quantityValue = Number(foodServiceRow?.quantity);
+  return {
+    name,
+    quantity: Number.isFinite(quantityValue) && quantityValue > 0 ? formatQuantity(quantityValue) : '',
+    notes: withoutRepeatedItemPrefix(foodServiceRow?.notes || requiredRow?.notes, name),
+  };
+};
+
+const catereaseKitchenPackOutTable = (groups, recipes = [], staffMeal = {}) => {
   const expandedGroups = expandKitchenPackOutRecipeGroups(groups, recipes);
   const widths = [5300, 1400, 1600, 1600, 1500];
   const headers = ['', 'Quantity', 'Not Enough', 'Just Enough', 'Too Much'];
@@ -679,10 +701,23 @@ const catereaseKitchenPackOutTable = (groups, recipes = []) => {
     align: 'center',
   })).join('')}</w:tr>`;
   const sectionRow = (name) => `<w:tr><w:tc><w:tcPr><w:gridSpan w:val="${widths.length}"/><w:tcW w:w="${widths.reduce((total, width) => total + width, 0)}" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr>${paragraph(name, { bold: true, size: 20, after: 0 })}</w:tc></w:tr>`;
-  const body = [...expandedGroups.entries()].map(([group, values]) => `${sectionRow(group)}${values.filter((row) => !row.topLevelFoodService).map((row) => `<w:tr>${[
-    row.manual && row.notes ? `${row.itemName} — ${row.notes}` : row.itemName,
-    row.manual ? [formatQuantity(row.quantity), row.unit].filter(Boolean).join(' ') : '', '', '', '',
-  ].map((value, index) => cell(value, { width: widths[index], align: index ? 'center' : '' })).join('')}</w:tr>`).join('')}`).join('');
+  const detailRow = (name) => `<w:tr><w:tc><w:tcPr><w:gridSpan w:val="${widths.length}"/><w:tcW w:w="${widths.reduce((total, width) => total + width, 0)}" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr>${paragraph(name, { size: 20, after: 0 })}</w:tc></w:tr>`;
+  const orderedGroups = [...expandedGroups.entries()].sort(([left], [right]) => (
+    Number(STAFF_MEAL_OPTION_PATTERN.test(clean(left, 300)))
+      - Number(STAFF_MEAL_OPTION_PATTERN.test(clean(right, 300)))
+  ));
+  const body = orderedGroups.map(([group, values]) => {
+    const isStaffMeal = STAFF_MEAL_OPTION_PATTERN.test(clean(group, 300));
+    const groupHeading = isStaffMeal ? 'Staff Meal' : group;
+    const staffMealDetail = isStaffMeal
+      ? [staffMeal.name || clean(group, 300), staffMeal.notes].filter(Boolean).join(' - ')
+      : '';
+    const rowsXml = values.filter((row) => !row.topLevelFoodService).map((row) => `<w:tr>${[
+      row.manual && row.notes ? `${row.itemName} — ${row.notes}` : row.itemName,
+      row.manual ? [formatQuantity(row.quantity), row.unit].filter(Boolean).join(' ') : '', '', '', '',
+    ].map((value, index) => cell(value, { width: widths[index], align: index ? 'center' : '' })).join('')}</w:tr>`).join('');
+    return `${sectionRow(groupHeading)}${staffMealDetail ? detailRow(staffMealDetail) : ''}${rowsXml}`;
+  }).join('');
   return `<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/><w:tblLayout w:type="fixed"/>${tableBorders}</w:tblPr><w:tblGrid>${widths.map((width) => `<w:gridCol w:w="${width}"/>`).join('')}</w:tblGrid>${header}${body}</w:tbl>`;
 };
 
@@ -947,6 +982,7 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
     Object.prototype.hasOwnProperty.call(row || {}, 'sourceSection')
     || foodServiceSourceIds.has(clean(row?.sourceId, 120))
   ));
+  const staffMeal = isKitchenPackOut ? kitchenPackOutStaffMeal(snapshot, rows) : {};
   const staffTotal = rows.reduce((total, row) => total + (Number(row?.required) || 0), 0);
   const sections = isKitchenMenu ? kitchenMenuSections(rows, recipes, isAnnotatedKitchenMenu) : isStaffRequest
     ? table(['#', 'Position', 'Start', 'End', 'Hours', 'Uniform', 'Admin Notes', 'Comments'], [
@@ -962,7 +998,7 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
       ]),
       [formatQuantity(staffTotal), 'TOTAL STAFF NEEDED', '', '', '', '', '', ''],
     ], [550, 1900, 1000, 1000, 700, 2100, 1500, 1850])
-    : isKitchenPackOut ? catereaseKitchenPackOutTable(groups, recipes)
+    : isKitchenPackOut ? catereaseKitchenPackOutTable(groups, recipes, staffMeal)
     : usesFoodServicePackOut ? packOutTable(rows, decorImages, false)
     : template ? catereasePackOutTable(new Map([...groups.entries()].map(([group, values]) => [
       group,
@@ -1009,27 +1045,7 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
     [labeledValueCell('Guests: ', guestCount), labeledValueCell('Delivery Time: ', deliveryTime)],
     [labeledValueCell('Event Number: ', displayedEventNumber(event?.externalId || snapshot?.eventId || '')), labeledValueCell('Date PO Modified: ', catereaseModifiedDateTime(snapshot?.eventRevised))],
   ], [5327, 5328]);
-  const staffMealPattern = /^option\s+[a-z0-9]+\s*:/i;
-  const staffMealRow = rows.find((row) => staffMealPattern.test(clean(row?.station || row?.itemName, 300)));
-  const staffMealFoodServiceRow = (snapshot?.foodService || snapshot?.packOut || []).find((row) => (
-    staffMealPattern.test(clean(row?.itemName || row?.station, 300))
-  ));
-  const staffMealName = clean(
-    staffMealRow?.station || staffMealRow?.itemName || staffMealFoodServiceRow?.itemName || staffMealFoodServiceRow?.station,
-    300
-  );
-  const staffMealQuantityValue = Number(staffMealRow?.quantity ?? staffMealFoodServiceRow?.quantity);
-  const staffMealQuantity = Number.isFinite(staffMealQuantityValue) && staffMealQuantityValue > 0
-    ? formatQuantity(staffMealQuantityValue)
-    : '';
-  const staffMealNotes = withoutRepeatedItemPrefix(
-    staffMealFoodServiceRow?.notes || staffMealRow?.notes,
-    staffMealName
-  );
-  const staffMeal = [
-    [staffMealQuantity, staffMealName].filter(Boolean).join(' - '),
-    staffMealNotes,
-  ].filter(Boolean).join(' — ');
+  const staffMealHeader = [staffMeal.quantity, staffMeal.name].filter(Boolean).join(' - ');
   const kitchenPackOutTitle = template?.label || 'Kitchen Pack Out';
   const kitchenPackOutDetailsTable = table([], [[
     [
@@ -1045,7 +1061,7 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
       `Event Date: ${shortDate(event?.date)}`,
       `Delivery: ${deliveryTime}`,
       `Tape: ${event?.meta?.tape || ''}`,
-      `Staff Meal: ${staffMeal}`,
+      `Staff Meal: ${staffMealHeader}`,
     ],
   ]], [5300, 5300]);
   const documentHeader = isKitchenMenu ? `${paragraph(title, { bold: true, size: 36, align: 'center', after: 120 })}${zoneHeading}${table([], [

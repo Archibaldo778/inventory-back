@@ -45,6 +45,49 @@ test('a full Caterease operational sync leaves manual additions untouched', asyn
   assert.equal(event.saved, true);
 });
 
+test('operational primary mode sends the refreshed snapshot to Bar Operations', async () => {
+  const previousSource = process.env.EVENT_DOCUMENT_SOURCE;
+  const previousOperational = process.env.CATEREASE_OPERATIONAL_SYNC_ENABLED;
+  const previousApiKey = process.env.CATEREASE_API_KEY;
+  process.env.EVENT_DOCUMENT_SOURCE = 'caterease';
+  process.env.CATEREASE_OPERATIONAL_SYNC_ENABLED = 'true';
+  process.env.CATEREASE_API_KEY = 'test-key';
+  const snapshot = {
+    checksum: 'bar-guests',
+    guestCount: 180,
+    packOut: [],
+    kitchenPackOut: [],
+    kitchenMenu: [],
+    staffRequest: [],
+  };
+  let syncedSnapshot = null;
+  const event = {
+    externalId: 'E22856',
+    date: '2026-09-14',
+    title: 'Chanel YPO Cocktail',
+    catereaseOperations: null,
+    markModified() {},
+    async save() {},
+  };
+  try {
+    await syncOperationalEvent(event, {
+      fetchSnapshot: async () => snapshot,
+      syncBarItems: async (_event, nextSnapshot) => {
+        syncedSnapshot = nextSnapshot;
+        return { synced: true, items: 0 };
+      },
+    });
+  } finally {
+    if (previousSource === undefined) delete process.env.EVENT_DOCUMENT_SOURCE;
+    else process.env.EVENT_DOCUMENT_SOURCE = previousSource;
+    if (previousOperational === undefined) delete process.env.CATEREASE_OPERATIONAL_SYNC_ENABLED;
+    else process.env.CATEREASE_OPERATIONAL_SYNC_ENABLED = previousOperational;
+    if (previousApiKey === undefined) delete process.env.CATEREASE_API_KEY;
+    else process.env.CATEREASE_API_KEY = previousApiKey;
+  }
+  assert.equal(syncedSnapshot, snapshot);
+});
+
 test('editing and deleting a manual addition targets only the matching subdocument id', () => {
   const event = new Event({
     title: 'Manual additions',

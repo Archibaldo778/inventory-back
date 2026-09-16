@@ -19,6 +19,7 @@ import {
   CATEREASE_OPERATIONAL_BAR_ITEMS_VERSION,
   catereaseOperationalPackOutToBarItems,
   hasAppliedCatereaseOperationalChecksum,
+  shouldUpdateCatereaseOperationalGuestCount,
 } from '../utils/catereaseOperationalBarItems.js';
 import { runImportedBarItemMergePipeline } from '../utils/barManualItems.js';
 import {
@@ -523,6 +524,21 @@ test('unchanged Caterease operational snapshots are applied only once to a BarEv
   assert.equal(hasAppliedCatereaseOperationalChecksum({
     audit: [{ action: 'caterease_operations_synced', details: { checksum: 'checksum-b' } }],
   }, 'checksum-b'), false);
+});
+
+test('an unchanged operational snapshot still repairs a missing Bar Operations guest count', () => {
+  assert.equal(shouldUpdateCatereaseOperationalGuestCount({
+    guestCount: null,
+    guestCountSource: 'dashboard',
+  }, 180, 'packout'), true);
+  assert.equal(shouldUpdateCatereaseOperationalGuestCount({
+    guestCount: 180,
+    guestCountSource: 'packout',
+  }, 180, 'packout'), false);
+  assert.equal(shouldUpdateCatereaseOperationalGuestCount({
+    guestCount: 120,
+    guestCountSource: 'manual',
+  }, 180, 'packout'), false);
 });
 
 test('Caterease Pack Out rows preserve operational grouping', () => {

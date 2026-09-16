@@ -42,3 +42,10 @@ export const hasAppliedCatereaseOperationalChecksum = (barEvent, checksum) => {
   }
   return false;
 };
+
+export const shouldUpdateCatereaseOperationalGuestCount = (barEvent, guestCount, source) => {
+  if (guestCount === null || guestCount === undefined || !Number.isFinite(Number(guestCount))) return false;
+  if (clean(barEvent?.guestCountSource).toLowerCase() === 'manual') return false;
+  return Number(barEvent?.guestCount) !== Number(guestCount)
+    || clean(barEvent?.guestCountSource).toLowerCase() !== clean(source).toLowerCase();
+};

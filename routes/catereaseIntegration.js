@@ -27,6 +27,7 @@ import {
   CATEREASE_OPERATIONAL_BAR_ITEMS_VERSION,
   catereaseOperationalPackOutToBarItems,
   hasAppliedCatereaseOperationalChecksum,
+  shouldUpdateCatereaseOperationalGuestCount,
 } from '../utils/catereaseOperationalBarItems.js';
 import { canViewEvent, normalizePackoutItems } from './bar.js';
 import {
@@ -188,17 +189,19 @@ const syncCatereaseBarItems = async (event) => {
 
 const syncCatereaseOperationalBarItems = async (event, snapshot) => {
   let barEvent = await BarEvent.findOne({ linkedEventId: event._id });
-  if (hasAppliedCatereaseOperationalChecksum(barEvent, snapshot?.checksum)) {
+  const dashboardGuestCount = dashboardEventGuestCount(event);
+  const snapshotGuestCount = Number(snapshot?.guestCount);
+  const hasSnapshotGuestCount = Number.isFinite(snapshotGuestCount) && snapshotGuestCount > 0;
+  const guestCount = hasSnapshotGuestCount ? snapshotGuestCount : dashboardGuestCount;
+  const guestCountSource = hasSnapshotGuestCount ? 'packout' : 'dashboard';
+  if (hasAppliedCatereaseOperationalChecksum(barEvent, snapshot?.checksum)
+    && !shouldUpdateCatereaseOperationalGuestCount(barEvent, guestCount, guestCountSource)) {
     return { synced: false, items: 0, reason: 'unchanged' };
   }
   const operationalPackOutRows = Array.isArray(snapshot?.packOut) && snapshot.packOut.length
     ? snapshot.packOut
     : snapshot?.requiredItems;
   const rawItems = catereaseOperationalPackOutToBarItems(operationalPackOutRows);
-  const dashboardGuestCount = dashboardEventGuestCount(event);
-  const snapshotGuestCount = Number(snapshot?.guestCount);
-  const hasSnapshotGuestCount = Number.isFinite(snapshotGuestCount) && snapshotGuestCount > 0;
-  const guestCount = hasSnapshotGuestCount ? snapshotGuestCount : dashboardGuestCount;
   const normalizedItems = await normalizePackoutItems(rawItems, { allowFinancials: false, guestCount });
   if (!barEvent && !rawItems.length) return { synced: false, items: 0 };
   if (!barEvent) {
@@ -210,12 +213,12 @@ const syncCatereaseOperationalBarItems = async (event, snapshot) => {
       client: String(event.client || ''),
       salesRep: String(event.managerId || ''),
       guestCount,
-      guestCountSource: hasSnapshotGuestCount ? 'packout' : 'dashboard',
+      guestCountSource,
       status: 'draft',
     });
   } else if (guestCount !== null && String(barEvent.guestCountSource || '') !== 'manual') {
     barEvent.guestCount = guestCount;
-    barEvent.guestCountSource = hasSnapshotGuestCount ? 'packout' : 'dashboard';
+    barEvent.guestCountSource = guestCountSource;
   }
   const existingItems = Array.isArray(barEvent.items) ? barEvent.items : [];
   const merged = runImportedBarItemMergePipeline({
@@ -449,7 +452,10 @@ export const fetchCatereaseOperationalSnapshot = async (eventId, eventDate = '',
 export const syncOperationalEvent = async (event, {
   fetchSnapshot = fetchCatereaseOperationalSnapshot,
   syncBarItems = syncCatereaseOperationalBarItems,
-  primaryFiles = getCatereaseConfig().primaryFiles,
+  primaryFiles = (() => {
+    const config = getCatereaseConfig();
+    return config.primaryFiles || config.operationalSyncEnabled;
+  })(),
 } = {}) => {
   const eventId = normalizeCatereaseEventId(event?.externalId);
   if (!eventId) return { status: 'skipped', reason: 'missing_event_id' };

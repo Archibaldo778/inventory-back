@@ -41,6 +41,12 @@ const isPackOutSectionHeading = (row) => {
   return Boolean(letters) && letters === letters.toUpperCase() && !clean(row?.notes, 1000);
 };
 
+const isKnownPackOutSectionHeading = (row) => {
+  const itemName = normalized(row?.itemName);
+  const quantityIsEmpty = !Number.isFinite(Number(row?.quantity)) || Number(row.quantity) === 0;
+  return Boolean(itemName) && quantityIsEmpty && PACK_OUT_SECTION_HEADINGS.has(itemName);
+};
+
 const foodServiceGroupKey = (row) => clean(row?.subEvent, 120).toLowerCase()
   || clean(row?.zoneName, 200).toLowerCase();
 
@@ -342,7 +348,7 @@ export const catereaseOperationalTemplateRows = (snapshot = {}, templateKey, tem
   if (template.documentType !== 'po') return requiredMatches;
 
   const manualPackOutGroups = new Set(foodServiceRows
-    .filter((row) => isPackOutSectionHeading(row) || /\bpack\s*out\b/i.test(clean(row?.zoneName, 200)))
+    .filter((row) => isKnownPackOutSectionHeading(row) || /\bpack\s*out\b/i.test(clean(row?.zoneName, 200)))
     .map(foodServiceGroupKey)
     .filter(Boolean));
   const manualPackOutRows = foodServiceRows.filter((row) => (

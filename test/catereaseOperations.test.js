@@ -305,6 +305,24 @@ test('a manual Pack Out keeps its whole sub-event and excludes headings and invo
   assert.deepEqual(rows.map((row) => row.itemName), ['Chef apron', 'Panna']);
 });
 
+test('uppercase menu headings do not turn a Menu sub-event into a Pack Out', () => {
+  const templates = normalizeCatereasePrintTemplates([
+    { UID: 36, PrintKind: 'EvtReq', Title: 'Pack Out', Condition1: "(FSType = 'Equipment')" },
+  ]);
+  const rows = catereaseOperationalTemplateRows({
+    requiredItems: [
+      { itemName: 'Chef apron', quantity: 5, fsType: 'Equipment', station: 'UNASSIGNED' },
+    ],
+    foodService: [
+      { itemName: 'PASSED HORS D’OEUVRES', quantity: 0, subEvent: 'S-MENU', zoneName: 'Menu' },
+      { itemName: 'ARM IN ARM', quantity: 0, subEvent: 'S-MENU', zoneName: 'Menu' },
+      { itemName: 'STAFF MEAL', quantity: 0, subEvent: 'S-MENU', zoneName: 'Menu' },
+      { itemName: 'Spicy hamachi taco', quantity: 0, fsType: 'Food', subEvent: 'S-MENU', zoneName: 'Menu' },
+    ],
+  }, 'print-36', templates);
+  assert.deepEqual(rows.map((row) => row.itemName), ['Chef apron']);
+});
+
 test('Caterease print templates use PrintKind, all condition slots, and stored grouping rules', () => {
   const templates = normalizeCatereasePrintTemplates([
     { UID: 10, PrintKind: 'MenuPrep', Title: 'Not a Pack Out' },

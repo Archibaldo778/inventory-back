@@ -63,6 +63,62 @@ const withPackOutSourceSections = (rows = []) => {
   });
 };
 
+const specialtyCocktailRows = (rows = [], foodServiceRows = []) => {
+  const values = Array.isArray(rows) ? rows : [];
+  const specialtyLabel = values
+    .map((row) => clean(row?.sourceSection, 300))
+    .find((section) => /(?:specialty|spceialty)\s+cocktail/i.test(section));
+  if (!specialtyLabel) return values;
+
+  const recipes = (Array.isArray(foodServiceRows) ? foodServiceRows : [])
+    .filter((row) => !/\bpack\s*out\b|\binvoice\b/i.test(clean(row?.zoneName, 200)))
+    .filter((row) => /\bgarnish\s*:/i.test(clean(row?.notes, 1000)))
+    .filter((row) => normalized(row?.fsType) === 'liquor' || /\bglass\s*:/i.test(clean(row?.notes, 1000)))
+    .map((row) => {
+      const garnishes = [...clean(row?.notes, 1000).matchAll(/\bgarnish\s*:\s*([^:]+?)(?=\s+\b(?:garnish|glass)\s*:|$)/gi)]
+        .map((match) => normalized(match[1]))
+        .filter(Boolean);
+      return { name: normalized(row?.itemName), garnishes };
+    })
+    .filter((recipe) => recipe.name);
+  if (!recipes.length) return values;
+
+  const claimed = new Set();
+  const ordered = [];
+  recipes.forEach((recipe) => {
+    const cocktailIndex = values.findIndex((row, index) => (
+      !claimed.has(index) && normalized(row?.itemName) === recipe.name && Number(row?.quantity) > 0
+    ));
+    if (cocktailIndex < 0) return;
+    claimed.add(cocktailIndex);
+    ordered.push({ ...values[cocktailIndex], sourceSection: specialtyLabel });
+    recipe.garnishes.forEach((garnish) => {
+      const garnishIndex = values.findIndex((row, index) => {
+        if (claimed.has(index)) return false;
+        const name = normalized(row?.itemName).replace(/^garnish\s*:\s*/, '');
+        return Boolean(name) && (name === garnish || name.includes(garnish) || garnish.includes(name));
+      });
+      if (garnishIndex >= 0) {
+        claimed.add(garnishIndex);
+        ordered.push({ ...values[garnishIndex], sourceSection: specialtyLabel });
+      }
+    });
+  });
+  if (!ordered.length) return values;
+  const insertionIndex = values.findIndex((row, index) => (
+    claimed.has(index) || clean(row?.sourceSection, 300) === specialtyLabel
+  ));
+  const remainder = values.filter((row, index) => (
+    !claimed.has(index) && clean(row?.sourceSection, 300) !== specialtyLabel
+  ));
+  const specialtyRemainder = values.filter((row, index) => (
+    !claimed.has(index) && clean(row?.sourceSection, 300) === specialtyLabel
+  ));
+  const targetIndex = Math.max(0, Math.min(insertionIndex, remainder.length));
+  remainder.splice(targetIndex, 0, ...ordered, ...specialtyRemainder);
+  return remainder;
+};
+
 const foodServiceDishKey = (row, name = row?.itemName) => [
   clean(row?.subEvent, 120).toLowerCase(),
   normalized(name),
@@ -354,18 +410,20 @@ export const catereaseOperationalTemplateRows = (snapshot = {}, templateKey, tem
   const manualPackOutRows = foodServiceRows.filter((row) => (
     manualPackOutGroups.has(foodServiceGroupKey(row)) && !isPackOutSectionHeading(row)
   ));
-  if (manualPackOutRows.length) return manualPackOutRows;
+  if (manualPackOutRows.length) return specialtyCocktailRows(manualPackOutRows, foodServiceRows);
 
   const foodServiceMatches = catereasePackOutTemplateRows(foodServiceRows, templateKey, templates)
     .filter((row) => !isPackOutSectionHeading(row));
-  if (foodServiceMatches.length) return foodServiceMatches;
+  if (foodServiceMatches.length) return specialtyCocktailRows(foodServiceMatches, foodServiceRows);
 
   // Manually entered event Pack Out lines can have no Type/FSType. Their
   // sub-event description is still preserved by /v1/foodserv.
   const explicitPackOutRows = foodServiceRows.filter((row) => (
     /\bpack\s*out\b/i.test(clean(row?.zoneName, 200)) && !isPackOutSectionHeading(row)
   ));
-  return explicitPackOutRows.length ? explicitPackOutRows : requiredMatches;
+  return explicitPackOutRows.length
+    ? specialtyCocktailRows(explicitPackOutRows, foodServiceRows)
+    : requiredMatches;
 };
 
 export const buildCatereasePackOutTemplateSummaries = (rows = [], printTemplateRows, foodServiceRows = [], kitchenMenuRows = []) => {

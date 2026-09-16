@@ -487,6 +487,11 @@ const matchesAny = (value, patterns) => patterns.some((pattern) => pattern.test(
 const packOutSection = (row) => {
   const sourceSection = clean(row?.sourceSection, 160);
   if (sourceSection) return sourceSection.toUpperCase();
+  // Rows that have passed through withPackOutSourceSections belong to the
+  // authored Caterease stream even when they precede its first heading (for
+  // example an event-level NOTE row).  Do not replace that intentional blank
+  // section with the row's database category.
+  if (Object.prototype.hasOwnProperty.call(row || {}, 'sourceSection')) return '';
   const name = itemKey(row?.itemName);
   const category = clean(row?.category, 160);
   const menuGroup = clean(row?.menuGroup, 160);
@@ -581,13 +586,16 @@ const catereasePackOutTable = (groups, decorImages = []) => {
     align: 'center',
   })).join('')}</w:tr>`;
   const sectionRow = (name) => `<w:tr><w:tc><w:tcPr><w:gridSpan w:val="${widths.length}"/><w:tcW w:w="${widths.reduce((total, width) => total + width, 0)}" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr>${paragraph(name, { bold: true, size: 20, align: 'center', after: 0 })}</w:tc></w:tr>`;
-  const body = [...groups.entries()].map(([group, values]) => `${sectionRow(group.toUpperCase())}${values.map((row) => `<w:tr>${[
+  const body = [...groups.entries()].map(([group, values]) => {
+    const displayGroup = clean(String(group).split('\u0000')[0], 160);
+    return `${displayGroup ? sectionRow(displayGroup.toUpperCase()) : ''}${values.map((row) => `<w:tr>${[
     { value: row.itemName, align: 'center' },
     { value: Number(row.quantity) === 0 ? '' : formatQuantity(row.quantity), align: 'center' },
     { value: row.manual ? [row.notes, row.unit].filter(Boolean).join(' · ') : row.notes || '', align: '' },
     { value: '', align: '' },
     { value: '', align: '' },
-  ].map(({ value, align }, index) => cell(value, { width: widths[index], align })).join('')}${includePhotos ? imageCell(imageByName.get(itemKey(row.itemName)), widths[5]) : ''}</w:tr>`).join('')}`).join('');
+  ].map(({ value, align }, index) => cell(value, { width: widths[index], align })).join('')}${includePhotos ? imageCell(imageByName.get(itemKey(row.itemName)), widths[5]) : ''}</w:tr>`).join('')}`;
+  }).join('');
   return `<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/><w:tblLayout w:type="fixed"/>${tableBorders}</w:tblPr><w:tblGrid>${widths.map((width) => `<w:gridCol w:w="${width}"/>`).join('')}</w:tblGrid>${header}${body}</w:tbl>`;
 };
 
@@ -629,15 +637,26 @@ const catereaseKitchenPackOutTable = (groups, recipes = []) => {
 };
 
 const packOutTable = (rows, decorImages = [], includeTemplate = true) => {
-  const groups = templatedPackOutGroups(
-    rows.filter((row) => clean(row?.menuGroup, 160).toLowerCase() !== 'standard'),
-    includeTemplate
-  );
-  const orderedGroups = [...groups.entries()].sort(([left], [right]) => {
-    const leftIndex = PACK_OUT_SECTION_ORDER.indexOf(left);
-    const rightIndex = PACK_OUT_SECTION_ORDER.indexOf(right);
-    return (leftIndex < 0 ? 999 : leftIndex) - (rightIndex < 0 ? 999 : rightIndex) || left.localeCompare(right);
-  });
+  const filteredRows = rows.filter((row) => clean(row?.menuGroup, 160).toLowerCase() !== 'standard');
+  const hasSourceSections = !includeTemplate && filteredRows.some((row) => (
+    Object.prototype.hasOwnProperty.call(row || {}, 'sourceSection')
+  ));
+  const orderedGroups = hasSourceSections
+    ? filteredRows.reduce((entries, row) => {
+      const section = packOutSection(row);
+      const previous = entries.at(-1);
+      if (!previous || previous[0].split('\u0000')[0] !== section) {
+        entries.push([`${section}\u0000${entries.length}`, [row]]);
+      } else {
+        previous[1].push(row);
+      }
+      return entries;
+    }, [])
+    : [...templatedPackOutGroups(filteredRows, includeTemplate).entries()].sort(([left], [right]) => {
+      const leftIndex = PACK_OUT_SECTION_ORDER.indexOf(left);
+      const rightIndex = PACK_OUT_SECTION_ORDER.indexOf(right);
+      return (leftIndex < 0 ? 999 : leftIndex) - (rightIndex < 0 ? 999 : rightIndex) || left.localeCompare(right);
+    });
   return catereasePackOutTable(new Map(orderedGroups), decorImages);
 };
 
@@ -871,8 +890,13 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
           ? row.station || row.prepArea
       : row.menuGroup || row.category || row.prepArea
   ));
-  const usesFoodServicePackOut = type === 'po'
-    && rows.some((row) => (snapshot?.foodService || snapshot?.packOut || []).includes(row));
+  const foodServiceSourceIds = new Set((snapshot?.foodService || snapshot?.packOut || [])
+    .map((row) => clean(row?.sourceId, 120))
+    .filter(Boolean));
+  const usesFoodServicePackOut = type === 'po' && rows.some((row) => (
+    Object.prototype.hasOwnProperty.call(row || {}, 'sourceSection')
+    || foodServiceSourceIds.has(clean(row?.sourceId, 120))
+  ));
   const staffTotal = rows.reduce((total, row) => total + (Number(row?.required) || 0), 0);
   const sections = isKitchenMenu ? kitchenMenuSections(rows, recipes, isAnnotatedKitchenMenu) : isStaffRequest
     ? table(['#', 'Position', 'Start', 'End', 'Hours', 'Uniform', 'Admin Notes', 'Comments'], [

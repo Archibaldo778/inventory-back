@@ -145,6 +145,80 @@ test('Pack Out rows preserve sequential Caterease sections and discard the headi
   );
 });
 
+test('Pack Out DOCX renders authored food-service sections instead of database categories', async () => {
+  const snapshot = {
+    schemaVersion: 19,
+    guestCount: 75,
+    foodService: [
+      { sourceId: 'note', itemName: 'NOTE: Client providing CHAMPAGNE', quantity: 0, category: 'Beverage Disregard', subEvent: 'S-PO', zoneName: 'Pack Out' },
+      { sourceId: 'water-heading', itemName: 'WATER', quantity: 0, subEvent: 'S-PO', zoneName: 'Pack Out' },
+      { sourceId: 'water', itemName: 'Panna', quantity: 16, category: 'Beverage Item Name', subEvent: 'S-PO', zoneName: 'Pack Out' },
+      { sourceId: 'disposable-heading-1', itemName: 'DISPOSABLE ITEMS', quantity: 0, subEvent: 'S-PO', zoneName: 'Pack Out' },
+      { sourceId: 'napkins', itemName: 'Cocktail napkins', quantity: 200, category: 'Disposable', subEvent: 'S-PO', zoneName: 'Pack Out' },
+      { sourceId: 'staff-heading', itemName: 'STAFF ITEMS', quantity: 0, subEvent: 'S-PO', zoneName: 'Pack Out' },
+      { sourceId: 'staff-water', itemName: 'Staff water', quantity: 15, category: 'Staff', subEvent: 'S-PO', zoneName: 'Pack Out' },
+      { sourceId: 'kitchen-heading', itemName: 'KITCHEN EQUIPMENT', quantity: 0, subEvent: 'S-PO', zoneName: 'Pack Out' },
+      { sourceId: 'apron', itemName: 'Chef apron', quantity: 5, subEvent: 'S-PO', zoneName: 'Pack Out' },
+      { sourceId: 'sanitation-heading', itemName: 'SANITATION KIT', quantity: 0, subEvent: 'S-PO', zoneName: 'Pack Out' },
+      { sourceId: 'soap', itemName: 'Dish soap', quantity: 1, subEvent: 'S-PO', zoneName: 'Pack Out' },
+      { sourceId: 'disposable-heading-2', itemName: 'DISPOSABLE ITEMS', quantity: 0, subEvent: 'S-PO', zoneName: 'Pack Out' },
+      { sourceId: 'foil', itemName: 'Foil', quantity: 1, category: 'Disposable', subEvent: 'S-PO', zoneName: 'Pack Out' },
+    ],
+    packOutTemplates: [{ key: 'print-36', label: 'Pack Out', documentType: 'po', operationalVisible: true, groupBy: ['station'], conditions: [] }],
+  };
+  const buffer = await renderCatereaseOperationalDocx({
+    event: { title: "Bloomingdale's VIP Cocktail", date: '2026-09-16', externalId: 'E22842', meta: {} },
+    snapshot,
+    type: 'po',
+    templateKey: 'print-36',
+  });
+  const zip = await JSZip.loadAsync(buffer);
+  const xml = await zip.file('word/document.xml').async('string');
+
+  assert.doesNotMatch(xml, />BEVERAGE ITEM NAME</);
+  assert.doesNotMatch(xml, />BEVERAGE DISREGARD</);
+  assert.equal((xml.match(/>DISPOSABLE ITEMS</g) || []).length, 2);
+  const orderedText = ['NOTE: Client providing CHAMPAGNE', 'WATER', 'Panna', 'DISPOSABLE ITEMS', 'Cocktail napkins', 'STAFF ITEMS', 'Staff water', 'KITCHEN EQUIPMENT', 'Chef apron', 'SANITATION KIT', 'Dish soap'];
+  let priorIndex = -1;
+  orderedText.forEach((value) => {
+    const index = xml.indexOf(`>${value}<`);
+    assert.ok(index > priorIndex, `${value} should retain its Caterease section order`);
+    priorIndex = index;
+  });
+});
+
+test('Pack Out uses menu cocktail garnish structure when Caterease returns cocktail rows before their heading', () => {
+  const snapshot = {
+    schemaVersion: 19,
+    foodService: [
+      { sourceId: 'garnish-heading', itemName: 'GARNISH', quantity: 0, subEvent: 'S-PO', zoneName: 'Pack Out' },
+      { sourceId: 'lime', itemName: 'Lime Wheels', quantity: 50, subEvent: 'S-PO', zoneName: 'Pack Out' },
+      { sourceId: 'basil', itemName: 'Garnish: Basil sprig', quantity: 50, subEvent: 'S-PO', zoneName: 'Pack Out' },
+      { sourceId: 'tray-heading', itemName: 'TRAY', quantity: 0, subEvent: 'S-PO', zoneName: 'Pack Out' },
+      { sourceId: 'tray', itemName: 'Round Taco Insert', quantity: 2, subEvent: 'S-PO', zoneName: 'Pack Out' },
+      { sourceId: 'flower', itemName: 'Garnish: Edible Flower', quantity: 50, subEvent: 'S-PO', zoneName: 'Pack Out' },
+      { sourceId: 'arm', itemName: 'ARM IN ARM', quantity: 50, subEvent: 'S-PO', zoneName: 'Pack Out' },
+      { sourceId: 'cocktail-heading', itemName: 'SPCEIALTY COCKTAIL', quantity: 0, subEvent: 'S-PO', zoneName: 'Pack Out' },
+      { sourceId: 'gin', itemName: 'GIN BASIL SMASH', quantity: 50, subEvent: 'S-PO', zoneName: 'Pack Out' },
+      { sourceId: 'menu-arm', itemName: 'ARM IN ARM', quantity: 0, notes: 'Vodka GLASS: Nick and Nora GARNISH: Edible Flower', subEvent: 'S-MENU', zoneName: 'Menu' },
+      { sourceId: 'menu-gin', itemName: 'GIN BASIL SMASH', quantity: 0, notes: 'Gin GLASS: Rocks GARNISH: Basil Sprig', subEvent: 'S-MENU', zoneName: 'Menu' },
+    ],
+    packOutTemplates: [{ key: 'print-36', label: 'Pack Out', documentType: 'po', operationalVisible: true, conditions: [] }],
+  };
+
+  assert.deepEqual(
+    operationalRows(snapshot, 'po', '', 'print-36').map(({ itemName, sourceSection }) => [itemName, sourceSection]),
+    [
+      ['Lime Wheels', 'GARNISH'],
+      ['ARM IN ARM', 'SPCEIALTY COCKTAIL'],
+      ['Garnish: Edible Flower', 'SPCEIALTY COCKTAIL'],
+      ['GIN BASIL SMASH', 'SPCEIALTY COCKTAIL'],
+      ['Garnish: Basil sprig', 'SPCEIALTY COCKTAIL'],
+      ['Round Taco Insert', 'TRAY'],
+    ],
+  );
+});
+
 test('Kitchen Pack Out section exports select only the requested operational menu group', () => {
   const foodService = [
     ['PASSED HORS D’OEUVRES', '', ''],

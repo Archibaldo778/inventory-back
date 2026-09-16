@@ -9,7 +9,12 @@ import KitchenIngredient from '../models/KitchenIngredient.js';
 import KitchenIngredientUnit from '../models/KitchenIngredientUnit.js';
 import KitchenRecipe from '../models/KitchenRecipe.js';
 import OutlookIntegration from '../models/OutlookIntegration.js';
-import { requireAdmin, requireAuth } from '../middleware/auth.js';
+import {
+  canSeeBarFinancials,
+  requireAdmin,
+  requireAuth,
+  requireWorkspaceAccess,
+} from '../middleware/auth.js';
 import { createMemoryRateLimiter } from '../middleware/rateLimit.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import { clearApiCacheGroups } from '../utils/apiCache.js';
@@ -50,6 +55,10 @@ import {
 import { renderCatereaseStaffRequestXlsx } from '../utils/catereaseStaffRequestXlsx.js';
 import { catereasePackOutTemplate } from '../utils/catereasePackOutTemplates.js';
 import { applyCatereaseAlcoholClientChargesFromBundle } from '../utils/catereaseBarFinancials.js';
+import {
+  createCatereaseViewSyncDeduper,
+  isRecentCatereaseSync,
+} from '../utils/catereaseViewSync.js';
 import { createEmlDraft } from '../utils/emlDraft.js';
 import { createOperationalShareArchive } from '../utils/operationalShareArchive.js';
 import {
@@ -73,6 +82,7 @@ import {
 const router = Router();
 const requireCatereaseAdmin = [requireAuth, requireAdmin];
 const syncRateLimit = createMemoryRateLimiter({ windowMs: 10 * 60 * 1000, max: 8, message: 'Too many Caterease sync requests' });
+const viewSyncRateLimit = createMemoryRateLimiter({ windowMs: 10 * 60 * 1000, max: 60, message: 'Too many Caterease view refresh requests' });
 const downloadRateLimit = createMemoryRateLimiter({ windowMs: 60 * 1000, max: 120, message: 'Too many Caterease file downloads' });
 const outlookDraftRateLimit = createMemoryRateLimiter({ windowMs: 10 * 60 * 1000, max: 20, message: 'Too many Outlook draft requests' });
 const emailDraftRateLimit = createMemoryRateLimiter({ windowMs: 10 * 60 * 1000, max: 20, message: 'Too many email draft requests' });
@@ -85,10 +95,11 @@ let operationalSyncPromise = null;
 let operationalSyncProgress = null;
 let printTemplatePromise = null;
 let printTemplateCache = { locationId: '', expiresAt: 0, rows: null };
+const dedupeViewSync = createCatereaseViewSyncDeduper();
 
 export const loadAuthorizedOperationalEvent = async (req, res, { mutable = false } = {}) => {
   const query = Event.findById(req.params.id)
-    .select('externalId title date client meta catereaseOperations catereaseManualAdditions updatedAt');
+    .select('externalId title date client managerId meta catereaseOperations catereaseManualAdditions updatedAt');
   const event = mutable ? await query : await query.lean();
   if (!event) {
     res.status(404).json({ error: 'Event not found' });
@@ -959,64 +970,82 @@ router.get('/financial-preview/:eventId', ...requireCatereaseAdmin, async (req, 
   }
 });
 
-router.post('/financials/sync/:barEventId', ...requireCatereaseAdmin, syncRateLimit, async (req, res) => {
+router.post('/financials/sync/:barEventId', requireAuth, viewSyncRateLimit, async (req, res) => {
   try {
     if (!/^[a-f\d]{24}$/i.test(String(req.params.barEventId || ''))) {
       return res.status(400).json({ error: 'A valid bar event id is required' });
     }
     const barEvent = await BarEvent.findById(req.params.barEventId);
     if (!barEvent) return res.status(404).json({ error: 'Bar event not found' });
+    if (!canViewEvent(barEvent, req.auth) || !canSeeBarFinancials(req.auth)) {
+      return res.status(403).json({ error: 'Bar financial access required' });
+    }
     if (!barEvent.linkedEventId) return res.status(409).json({ error: 'Bar event is not linked to a dashboard event' });
-    const event = await Event.findById(barEvent.linkedEventId).select('externalId title date').lean();
-    if (!event) return res.status(409).json({ error: 'Linked dashboard event was not found' });
-    const requestedEventId = String(event.externalId || barEvent.eventNumber || '').trim();
-    const catereaseEventId = await resolveCatereaseOperationalEventId(requestedEventId, String(event.date || '').slice(0, 10), event.title);
-    const bundle = await getCatereaseEventBundle(catereaseEventId);
-    const summary = applyCatereaseAlcoholClientChargesFromBundle(barEvent.items, bundle);
-    if (summary.matchedItems > 0 || summary.billedBeverageLineItems > 0) {
-      const { billedBeverageCharges, ...auditSummary } = summary;
-      const syncedAt = new Date();
-      const syncedBy = String(req.auth?.username || req.auth?.email || '');
-      barEvent.catereaseClientChargeSnapshot = {
-        beverageTotal: summary.billedBeverageTotal,
-        lineItems: billedBeverageCharges,
-        syncedAt,
-        syncedBy,
-      };
-      if (summary.billedBeverageLineItems > 0) {
-        barEvent.clientCharge = summary.billedBeverageTotal;
-        barEvent.clientChargeDetails = {
-          beverageSubtotal: summary.billedBeverageTotal,
-          liquorSubtotal: null,
-          source: 'caterease',
-          sourceFileName: 'Caterease live billing',
-          importedAt: syncedAt,
-          importedBy: syncedBy,
-        };
-      }
-      barEvent.revision += 1;
-      barEvent.audit.push({
-        action: 'caterease_client_pricing_synced',
-        userId: String(req.auth?.userId || ''),
-        username: syncedBy,
-        at: syncedAt,
-        details: {
-          catereaseEventId,
-          ...auditSummary,
+    if (isRecentCatereaseSync(barEvent.catereaseClientChargeSnapshot?.syncedAt)) {
+      const lines = barEvent.catereaseClientChargeSnapshot?.lineItems || [];
+      return res.json({
+        ok: true,
+        cached: true,
+        summary: {
+          billedBeverageLineItems: lines.length,
+          billedBeverageTotal: Number(barEvent.catereaseClientChargeSnapshot?.beverageTotal) || 0,
+          appliedClientCharge: Number(barEvent.catereaseClientChargeSnapshot?.beverageTotal) || null,
         },
       });
-      barEvent.audit = barEvent.audit.slice(-200);
-      await barEvent.save();
-      clearApiCacheGroups('bar');
     }
-    return res.json({
-      ok: true,
-      catereaseEventId,
-      summary: {
-        ...summary,
-        appliedClientCharge: summary.billedBeverageLineItems > 0 ? summary.billedBeverageTotal : null,
-      },
+    const response = await dedupeViewSync(`financial:${barEvent.id}`, async () => {
+      const event = await Event.findById(barEvent.linkedEventId).select('externalId title date').lean();
+      if (!event) throw Object.assign(new Error('Linked dashboard event was not found'), { statusCode: 409 });
+      const requestedEventId = String(event.externalId || barEvent.eventNumber || '').trim();
+      const catereaseEventId = await resolveCatereaseOperationalEventId(requestedEventId, String(event.date || '').slice(0, 10), event.title);
+      const bundle = await getCatereaseEventBundle(catereaseEventId);
+      const summary = applyCatereaseAlcoholClientChargesFromBundle(barEvent.items, bundle);
+      if (summary.matchedItems > 0 || summary.billedBeverageLineItems > 0) {
+        const { billedBeverageCharges, ...auditSummary } = summary;
+        const syncedAt = new Date();
+        const syncedBy = String(req.auth?.username || req.auth?.email || '');
+        if (summary.billedBeverageLineItems > 0) {
+          barEvent.catereaseClientChargeSnapshot = {
+            beverageTotal: summary.billedBeverageTotal,
+            lineItems: billedBeverageCharges,
+            syncedAt,
+            syncedBy,
+          };
+          barEvent.clientCharge = summary.billedBeverageTotal;
+          barEvent.clientChargeDetails = {
+            beverageSubtotal: summary.billedBeverageTotal,
+            liquorSubtotal: null,
+            source: 'caterease',
+            sourceFileName: 'Caterease live billing',
+            importedAt: syncedAt,
+            importedBy: syncedBy,
+          };
+        }
+        barEvent.revision += 1;
+        barEvent.audit.push({
+          action: 'caterease_client_pricing_synced',
+          userId: String(req.auth?.userId || ''),
+          username: syncedBy,
+          at: syncedAt,
+          details: {
+            catereaseEventId,
+            ...auditSummary,
+          },
+        });
+        barEvent.audit = barEvent.audit.slice(-200);
+        await barEvent.save();
+        clearApiCacheGroups('bar');
+      }
+      return {
+        ok: true,
+        catereaseEventId,
+        summary: {
+          ...summary,
+          appliedClientCharge: summary.billedBeverageLineItems > 0 ? summary.billedBeverageTotal : null,
+        },
+      };
     });
+    return res.json(response);
   } catch (error) {
     return sendApiError(res, error, { context: 'Caterease client pricing sync failed', fallbackMessage: 'Failed to load client pricing from Caterease' });
   }
@@ -1032,14 +1061,19 @@ router.get('/operations/preview/:eventId', ...requireCatereaseAdmin, async (req,
   }
 });
 
-router.post('/operations/sync/:id', ...requireCatereaseAdmin, syncRateLimit, async (req, res) => {
+router.post('/operations/sync/:id', requireAuth, requireWorkspaceAccess, viewSyncRateLimit, async (req, res) => {
   try {
-    const event = await Event.findById(req.params.id)
-      .select('externalId title date client managerId meta catereaseOperations');
-    if (!event) return res.status(404).json({ error: 'Event not found' });
-    const result = await syncOperationalEvent(event);
-    clearApiCacheGroups('events', 'bar');
-    return res.json({ ok: true, result, snapshot: event.catereaseOperations });
+    const event = await loadAuthorizedOperationalEvent(req, res, { mutable: true });
+    if (!event) return undefined;
+    if (isRecentCatereaseSync(event.catereaseOperations?.syncedAt)) {
+      return res.json({ ok: true, cached: true, result: { status: 'fresh' }, snapshot: event.catereaseOperations });
+    }
+    const response = await dedupeViewSync(`operations:${event.id}`, async () => {
+      const result = await syncOperationalEvent(event);
+      clearApiCacheGroups('events', 'bar');
+      return { ok: true, result, snapshot: event.catereaseOperations };
+    });
+    return res.json(response);
   } catch (error) {
     return sendApiError(res, error, { context: 'Caterease event operational sync failed', fallbackMessage: 'Failed to sync Caterease operational data' });
   }

@@ -328,6 +328,11 @@ export const buildCatereaseOperationalSnapshot = ({
   );
   const salesRep = clean(first(eventRow, ['SalesRep', 'SalesRepresentative', 'SalesPerson']), 200);
   const client = clean(first(eventRow, ['Client', 'Organization']), 300);
+  const eventAddress = [
+    clean(first(eventRow, ['Address1', 'Address']), 300),
+    [clean(first(eventRow, ['City']), 120), clean(first(eventRow, ['StProv', 'State']), 80)].filter(Boolean).join(', '),
+    clean(first(eventRow, ['Postal', 'PostalCode', 'Zip']), 40),
+  ].filter(Boolean).join(' ').replace(/,\s+([^,]+)\s+(\S+)$/, ', $1 $2');
   const eventStatus = clean(first(eventRow, ['Status']), 120);
   const eventType = clean(first(eventRow, ['Category', 'EventType']), 200);
   const serviceStartTime = clean(first(eventRow, ['Extra13']), 80);
@@ -372,6 +377,7 @@ export const buildCatereaseOperationalSnapshot = ({
     guestCount,
     salesRep,
     client,
+    eventAddress,
     eventStatus,
     eventType,
     serviceStartTime,
@@ -387,13 +393,14 @@ export const buildCatereaseOperationalSnapshot = ({
     packOutTemplates,
   })).digest('hex');
   return {
-    schemaVersion: 20,
+    schemaVersion: 21,
     eventId: clean(eventId, 120),
     syncedAt,
     checksum,
     guestCount,
     salesRep,
     client,
+    eventAddress,
     eventStatus,
     eventType,
     serviceStartTime,
@@ -499,6 +506,12 @@ const longDate = (value) => {
   return new Intl.DateTimeFormat('en-US', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC',
   }).format(date);
+};
+
+const shortDate = (value) => {
+  const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return clean(value, 80);
+  return `${match[2]}/${match[3]}/${match[1]}`;
 };
 
 const displayedEventNumber = (value) => {
@@ -996,21 +1009,40 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
     [labeledValueCell('Guests: ', guestCount), labeledValueCell('Delivery Time: ', deliveryTime)],
     [labeledValueCell('Event Number: ', displayedEventNumber(event?.externalId || snapshot?.eventId || '')), labeledValueCell('Date PO Modified: ', catereaseModifiedDateTime(snapshot?.eventRevised))],
   ], [5327, 5328]);
-  const staffMealRow = rows.find((row) => /^option\s+[a-z0-9]+\s*:/i.test(clean(row?.station, 300)));
-  const staffMealQuantity = formatQuantity(staffMealRow?.quantity);
-  const staffMeal = [staffMealQuantity, clean(staffMealRow?.station, 300)].filter(Boolean).join(' - ');
+  const staffMealPattern = /^option\s+[a-z0-9]+\s*:/i;
+  const staffMealRow = rows.find((row) => staffMealPattern.test(clean(row?.station || row?.itemName, 300)));
+  const staffMealFoodServiceRow = (snapshot?.foodService || snapshot?.packOut || []).find((row) => (
+    staffMealPattern.test(clean(row?.itemName || row?.station, 300))
+  ));
+  const staffMealName = clean(
+    staffMealRow?.station || staffMealRow?.itemName || staffMealFoodServiceRow?.itemName || staffMealFoodServiceRow?.station,
+    300
+  );
+  const staffMealQuantityValue = Number(staffMealRow?.quantity ?? staffMealFoodServiceRow?.quantity);
+  const staffMealQuantity = Number.isFinite(staffMealQuantityValue) && staffMealQuantityValue > 0
+    ? formatQuantity(staffMealQuantityValue)
+    : '';
+  const staffMealNotes = withoutRepeatedItemPrefix(
+    staffMealFoodServiceRow?.notes || staffMealRow?.notes,
+    staffMealName
+  );
+  const staffMeal = [
+    [staffMealQuantity, staffMealName].filter(Boolean).join(' - '),
+    staffMealNotes,
+  ].filter(Boolean).join(' — ');
+  const kitchenPackOutTitle = template?.label || 'Kitchen Pack Out';
   const kitchenPackOutDetailsTable = table([], [[
     [
       eventNameCell('Event Name: ', event?.title),
       `Date: ${longDate(event?.date)}`,
       `Guest Count: ${guestCount}`,
       `Client: ${event?.client || snapshot?.client || ''}`,
-      `Location: ${event?.meta?.venue || event?.meta?.nowsta?.venue || ''}`,
-      `Address: ${event?.meta?.address || event?.meta?.nowsta?.address || ''}`,
+      `Location: ${event?.meta?.venue || event?.meta?.nowsta?.venue || snapshot?.eventVenue || ''}`,
+      `Address: ${event?.meta?.address || event?.meta?.nowsta?.address || snapshot?.eventAddress || ''}`,
     ],
     [
-      { runs: [{ value: title, bold: true, size: 32 }] },
-      `Event Date: ${longDate(event?.date)}`,
+      { runs: [{ value: kitchenPackOutTitle, bold: true, size: 32 }] },
+      `Event Date: ${shortDate(event?.date)}`,
       `Delivery: ${deliveryTime}`,
       `Tape: ${event?.meta?.tape || ''}`,
       `Staff Meal: ${staffMeal}`,

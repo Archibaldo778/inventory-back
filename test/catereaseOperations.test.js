@@ -94,7 +94,7 @@ test('Caterease exposes only the two real operational Pack Out document types', 
   ]);
   const summaries = buildCatereasePackOutTemplateSummaries(rows);
   assert.deepEqual(summaries.map(({ key, rowCount }) => [key, rowCount]), [
-    ['kitchen_pack_out', 2],
+    ['kitchen_pack_out', 1],
     ['pack_out', 1],
   ]);
   assert.deepEqual(catereasePackOutTemplateRows(rows, 'pack_out').map((row) => row.itemName), ['Chafing Dish']);
@@ -533,6 +533,31 @@ test('Kitchen Pack Out includes an unexpanded dish but excludes menu headings, s
   }]);
 });
 
+test('Kitchen Pack Out excludes non-food Pack Out rows and mocktails when its live template has no condition', () => {
+  const templates = normalizeCatereasePrintTemplates([
+    { UID: 6, PrintKind: 'EvtReq', Title: 'Kitchen Pack Out' },
+  ]);
+  const rows = catereaseOperationalTemplateRows({
+    requiredItems: [
+      { sourceId: 'food', foodServiceId: 'FS-FOOD', itemName: 'Taro taco shell', station: 'Hamachi taco', subEvent: 'S-MENU', zoneName: 'Menu', fsType: 'Food' },
+      { sourceId: 'ice', foodServiceId: 'FS-ICE', itemName: '09 - ICE', station: 'ICE', subEvent: 'S-PO', zoneName: 'Pack Out', fsType: 'Other' },
+    ],
+    foodService: [
+      { sourceId: 'food-dish', foodServiceId: 'FS-FOOD', itemName: 'Hamachi taco', subEvent: 'S-MENU', zoneName: 'Menu', fsType: 'Food' },
+      { sourceId: 'shrimp', foodServiceId: 'FS-SHRIMP', itemName: 'Shrimp cocktail', subEvent: 'S-MENU', zoneName: 'Menu', fsType: 'Food' },
+      { sourceId: 'mocktail', foodServiceId: 'FS-MOCKTAIL', itemName: 'ARM IN ARM', subEvent: 'S-MENU', zoneName: 'Menu', fsType: 'Liquor' },
+    ],
+    kitchenMenu: [
+      { itemName: 'Hamachi taco', subEvent: 'S-MENU', menuGroup: "PASSED HORS D'OEUVRES", fsType: 'Food' },
+      { itemName: 'Shrimp cocktail', subEvent: 'S-MENU', menuGroup: "PASSED HORS D'OEUVRES", fsType: 'Food' },
+      { itemName: 'ARM IN ARM', subEvent: 'S-MENU', menuGroup: 'MOCKTAIL:', fsType: 'Liquor' },
+    ],
+  }, 'print-6', templates);
+
+  assert.deepEqual(rows.map((row) => row.itemName), ['Taro taco shell', 'Shrimp cocktail']);
+  assert.deepEqual([...new Set(rows.map((row) => row.zoneName))], ['Menu']);
+});
+
 test('sub-event descriptions become human document names across operational data', () => {
   const snapshot = buildCatereaseOperationalSnapshot({
     eventId: 'E20244',
@@ -966,6 +991,12 @@ test('operational DOCX separates different sub-events with the same human descri
 test('Kitchen Pack Out uses the Caterease feedback table layout', async () => {
   const snapshot = buildCatereaseOperationalSnapshot({
     eventId: 'E22672',
+    eventRow: {
+      Address1: '1000 Third Avenue', City: 'New York', StProv: 'NY', Postal: '10022',
+    },
+    packOutRows: [{
+      ItemName: 'Option A: 5 hours or less', Qty: 0, Notes: 'Peanut butter & jelly sandwiches',
+    }],
     kitchenPackOutRows: [
       { ItemName: 'Sheet Pan', Qty: 3, Unit: 'Each', FSName: 'Hot Line', FSPrepArea: 'Kitchen' },
     ],
@@ -977,10 +1008,13 @@ test('Kitchen Pack Out uses the Caterease feedback table layout', async () => {
   });
   const zip = await JSZip.loadAsync(buffer);
   const xml = await zip.file('word/document.xml').async('string');
-  assert.match(xml, />KITCHEN PACK OUT</);
+  assert.match(xml, />Kitchen Pack Out</);
   assert.match(xml, />Event Name: </);
   assert.match(xml, />Guest Count: </);
-  assert.match(xml, />Staff Meal: </);
+  assert.match(xml, /Address: 1000 Third Avenue New York, NY 10022/);
+  assert.match(xml, /Event Date: 09\/11\/2026/);
+  assert.match(xml, /Staff Meal: Option A: 5 hours or less — Peanut butter &amp; jelly sandwiches/);
+  assert.doesNotMatch(xml, /Staff Meal: 0/);
   assert.doesNotMatch(xml, />Revision</);
   assert.match(xml, />Quantity</);
   assert.match(xml, />Not Enough</);
@@ -1282,7 +1316,7 @@ test('operational snapshot checksum is stable when API row order changes', () =>
     packOutRows: [{ ItemName: 'B', Qty: 2 }, { ItemName: 'A', Qty: 1 }],
     syncedAt: new Date('2026-09-11T12:00:00Z'),
   });
-  assert.equal(first.schemaVersion, 20);
+  assert.equal(first.schemaVersion, 21);
   const second = buildCatereaseOperationalSnapshot({
     eventId: 'E22672',
     packOutRows: [{ ItemName: 'A', Qty: 1 }, { ItemName: 'B', Qty: 2 }],
@@ -1499,7 +1533,7 @@ test('operational documents prefer the event-facing time over the Caterease oper
   const zip = await JSZip.loadAsync(buffer);
   const xml = await zip.file('word/document.xml').async('string');
   assert.match(xml, /Client: Studio Sully Event Production &amp; Design/);
-  assert.match(xml, /Event Date: Saturday, September 12, 2026/);
+  assert.match(xml, /Event Date: 09\/12\/2026/);
 
   const menuBuffer = await renderCatereaseOperationalDocx({
     event: { title: 'Wedding', date: '2026-09-12', externalId: 'E20244', meta: { eventTime: '12:00 PM – 3:00 AM' } },

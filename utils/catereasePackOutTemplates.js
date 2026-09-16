@@ -124,11 +124,20 @@ const foodServiceDishKey = (row, name = row?.itemName) => [
   normalized(name),
 ].join('|');
 
-const isKitchenPackOutMenuDish = (row) => !/\b(?:staff\s*meal|bar|beverages?|cocktails?|wine|beer|liquor)\b/i.test([
-  row?.menuGroup,
-  row?.category,
-  row?.prepArea,
-].filter(Boolean).join(' '));
+const isKitchenPackOutMenuDish = (row) => {
+  const fsType = normalized(row?.fsType);
+  if (fsType && fsType !== 'food') return false;
+  return !/\b(?:staff\s*meal|bar|beverages?|mocktails?|cocktails?|wine|beer|liquor)\b/i.test([
+    row?.menuGroup,
+    row?.category,
+    row?.prepArea,
+  ].filter(Boolean).join(' '));
+};
+
+const isKitchenPackOutRequiredItem = (row) => {
+  const fsType = normalized(row?.fsType);
+  return !fsType || fsType === 'food';
+};
 
 const isGenericZeroQuantityHeading = (row) => {
   if (Number(row?.quantity) !== 0 || clean(row?.notes, 1000)) return false;
@@ -366,7 +375,10 @@ export const catereaseOperationalTemplateRows = (snapshot = {}, templateKey, tem
   const template = catereasePackOutTemplate(templateKey, templates);
   if (!template) return [];
   const requiredRows = snapshot?.requiredItems || snapshot?.kitchenPackOut || [];
-  const requiredMatches = catereasePackOutTemplateRows(requiredRows, templateKey, templates);
+  const templateRequiredMatches = catereasePackOutTemplateRows(requiredRows, templateKey, templates);
+  const requiredMatches = template.documentType === 'kitchen_packout'
+    ? templateRequiredMatches.filter(isKitchenPackOutRequiredItem)
+    : templateRequiredMatches;
   const foodServiceRows = withPackOutSourceSections(
     (snapshot?.foodService || snapshot?.packOut || [])
       .filter((row) => !/\binvoice\b/i.test(clean(row?.zoneName, 200)))
@@ -374,10 +386,10 @@ export const catereaseOperationalTemplateRows = (snapshot = {}, templateKey, tem
   if (template.documentType === 'kitchen_packout') {
     const kitchenMenuRows = Array.isArray(snapshot?.kitchenMenu) ? snapshot.kitchenMenu : [];
     const kitchenMenuByDish = new Map(kitchenMenuRows.map((row) => [foodServiceDishKey(row), row]));
-    const representedFoodServiceIds = new Set(requiredRows
+    const representedFoodServiceIds = new Set(requiredMatches
       .map((row) => clean(row?.foodServiceId, 120).toLowerCase())
       .filter(Boolean));
-    const representedDishes = new Set(requiredRows
+    const representedDishes = new Set(requiredMatches
       .map((row) => foodServiceDishKey(row, row?.station))
       .filter((key) => key !== '|'));
     const missingDishRows = catereasePackOutTemplateRows(foodServiceRows, templateKey, templates)

@@ -216,7 +216,7 @@ const syncCatereaseOperationalBarItems = async (event, snapshot) => {
       guestCountSource,
       status: 'draft',
     });
-  } else if (guestCount !== null && String(barEvent.guestCountSource || '') !== 'manual') {
+  } else if (shouldUpdateCatereaseOperationalGuestCount(barEvent, guestCount, guestCountSource)) {
     barEvent.guestCount = guestCount;
     barEvent.guestCountSource = guestCountSource;
   }

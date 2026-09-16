@@ -539,6 +539,10 @@ test('an unchanged operational snapshot still repairs a missing Bar Operations g
     guestCount: 120,
     guestCountSource: 'manual',
   }, 180, 'packout'), false);
+  assert.equal(shouldUpdateCatereaseOperationalGuestCount({
+    guestCount: 0,
+    guestCountSource: 'manual',
+  }, 180, 'packout'), true);
 });
 
 test('Caterease Pack Out rows preserve operational grouping', () => {

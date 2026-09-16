@@ -330,6 +330,10 @@ export const buildCatereaseOperationalSnapshot = ({
   const client = clean(first(eventRow, ['Client', 'Organization']), 300);
   const eventStatus = clean(first(eventRow, ['Status']), 120);
   const eventType = clean(first(eventRow, ['Category', 'EventType']), 200);
+  const serviceStartTime = clean(first(eventRow, ['Extra13']), 80);
+  const serviceEndTime = clean(first(eventRow, ['Extra14']), 80);
+  const deliveryTime = clean(first(eventRow, ['Extra10', 'Extra11']), 80);
+  const eventRevised = clean(first(eventRow, ['Revised']), 80);
   const subEvents = normalizeCatereaseSubEventRows(subEventRows);
   const timedEvent = subEvents.find((row) => /\binvoice\b/i.test(row.description))
     || subEvents.find((row) => !/\b(?:staff(?:ing)?|menu|pack\s*out)\b/i.test(row.description));
@@ -370,6 +374,10 @@ export const buildCatereaseOperationalSnapshot = ({
     client,
     eventStatus,
     eventType,
+    serviceStartTime,
+    serviceEndTime,
+    deliveryTime,
+    eventRevised,
     eventStartTime,
     eventEndTime,
     packOut: stableRows(packOut),
@@ -379,7 +387,7 @@ export const buildCatereaseOperationalSnapshot = ({
     packOutTemplates,
   })).digest('hex');
   return {
-    schemaVersion: 19,
+    schemaVersion: 20,
     eventId: clean(eventId, 120),
     syncedAt,
     checksum,
@@ -388,6 +396,10 @@ export const buildCatereaseOperationalSnapshot = ({
     client,
     eventStatus,
     eventType,
+    serviceStartTime,
+    serviceEndTime,
+    deliveryTime,
+    eventRevised,
     eventStartTime,
     eventEndTime,
     packOut,
@@ -427,6 +439,13 @@ const eventNameCell = (label, value) => ({
   runs: [
     { value: label, size: 18 },
     { value: value || 'Event', bold: true, size: 32, color: 'FF0000' },
+  ],
+});
+
+const highlightedValueCell = (label, value, { valueSize = 18 } = {}) => ({
+  runs: [
+    { value: label, bold: true, size: 18 },
+    { value: value || '', bold: true, size: valueSize, color: 'FF0000' },
   ],
 });
 
@@ -479,6 +498,17 @@ const displayedEventNumber = (value) => {
   const text = clean(value, 120);
   const match = text.match(/\bE\d+\b/i);
   return match ? match[0].toUpperCase() : text;
+};
+
+const catereaseModifiedDateTime = (value) => {
+  const raw = clean(value, 80);
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+  if (!match) return raw;
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const displayHour = hour % 12 || 12;
+  const suffix = hour >= 12 ? 'pm' : 'am';
+  return `${Number(match[2])}/${Number(match[3])}/${match[1]} (${displayHour}:${String(minute).padStart(2, '0')} ${suffix})`;
 };
 
 const itemKey = (value) => clean(value, 300).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
@@ -932,9 +962,16 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
     formatOperationalTime(snapshot?.eventStartTime),
     formatOperationalTime(snapshot?.eventEndTime),
   ].filter(Boolean).join(' – ');
-  const eventTiming = snapshotEventTiming || event?.meta?.eventTime || '';
+  const eventTiming = event?.meta?.eventTime || snapshotEventTiming;
+  const packOutEventTiming = [
+    formatOperationalTime(snapshot?.serviceStartTime),
+    formatOperationalTime(snapshot?.serviceEndTime),
+  ].filter(Boolean).join(' - ') || eventTiming;
   const salesRep = event?.meta?.salesRep || snapshot?.salesRep || '';
-  const deliveryTime = event?.meta?.deliveryTime || '';
+  const deliveryTime = event?.meta?.deliveryTime
+    || formatOperationalTime(snapshot?.deliveryTime)
+    || formatOperationalTime(snapshot?.eventStartTime)
+    || '';
   const staffingRows = Array.isArray(snapshot?.staffRequest) && snapshot.staffRequest.length
     ? snapshot.staffRequest
     : Array.isArray(event?.meta?.nowsta?.shifts) ? event.meta.nowsta.shifts : [];
@@ -947,10 +984,10 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
     ? paragraph(printableZoneName, { bold: true, size: 36, color: 'FF0000', align: 'center', after: 120 })
     : '';
   const eventDetailsTable = table([], [
-    [eventNameCell('Event: ', event?.title), `Event Date: ${longDate(event?.date)}`],
-    [`Sales Rep: ${salesRep}`, `Event Timing: ${eventTiming}`],
+    [eventNameCell('Event: ', event?.title), highlightedValueCell('Event Date: ', longDate(event?.date))],
+    [`Sales Rep: ${salesRep}`, `Event Timing: ${packOutEventTiming}`],
     [`Guests: ${guestCount}`, `Delivery Time: ${deliveryTime}`],
-    [`Event Number: ${displayedEventNumber(event?.externalId || snapshot?.eventId || '')}`, `Date PO Modified: ${new Intl.DateTimeFormat('en-US').format(new Date())}`],
+    [`Event Number: ${displayedEventNumber(event?.externalId || snapshot?.eventId || '')}`, `Date PO Modified: ${catereaseModifiedDateTime(snapshot?.eventRevised)}`],
   ], [5300, 5300]);
   const staffMealRow = rows.find((row) => /^option\s+[a-z0-9]+\s*:/i.test(clean(row?.station, 300)));
   const staffMealQuantity = formatQuantity(staffMealRow?.quantity);
@@ -986,7 +1023,7 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
     ? `${zoneHeading}${kitchenPackOutDetailsTable}`
     : isStaffRequest
     ? `${paragraph(title, { bold: true, size: 36, align: 'center', after: 120 })}${zoneHeading}${eventDetailsTable}`
-    : `${paragraph('Revision', { bold: true, size: 28, align: 'right', after: 80 })}${paragraph(title, { bold: true, size: 36, align: 'center', after: 120 })}${zoneHeading}${eventDetailsTable}`;
+    : `${paragraph('Revision', { bold: true, size: 28, align: 'left', after: 80 })}${eventDetailsTable}`;
   const templateTopNotes = clean(catereaseRichTextToPlain(template?.topNotes), 12000);
   const templateBottomNotes = clean(catereaseRichTextToPlain(template?.bottomNotes), 12000);
   const documentFooterSections = isKitchenMenu ? kitchenStaffingSection(event, snapshot) : '';

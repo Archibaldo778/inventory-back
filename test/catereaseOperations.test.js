@@ -851,13 +851,19 @@ test('Caterease shifts become Staff Request rows', () => {
 test('operational DOCX exports only the requested sub-event', async () => {
   const snapshot = buildCatereaseOperationalSnapshot({
     eventId: 'E22672',
+    eventRow: {
+      Extra10: '04:00 PM',
+      Extra13: '06:00 PM',
+      Extra14: '08:00 PM',
+      Revised: '2026-09-10T19:53:38.57',
+    },
     packOutRows: [
       { ItemName: 'Green Room Ice', Qty: 2, SubEvtNum: 'S1', SEDescription: 'Green Room' },
       { ItemName: 'Staff Holding Water', Qty: 4, SubEvtNum: 'S2', SEDescription: 'Staff Holding' },
     ],
   });
   const buffer = await renderCatereaseOperationalDocx({
-    event: { title: 'Dinner', date: '2026-09-11', externalId: 'E22672', meta: {} },
+    event: { title: 'Dinner', date: '2026-09-11', externalId: 'E22672', meta: { eventTime: '4:00 pm – 9:00 pm' } },
     snapshot,
     type: 'po',
     zoneKey: 's1|green room',
@@ -868,11 +874,13 @@ test('operational DOCX exports only the requested sub-event', async () => {
   const xml = await zip.file('word/document.xml').async('string');
   assert.match(xml, /Green Room Ice/);
   assert.doesNotMatch(xml, /Staff Holding Water/);
-  assert.match(xml, />PACK OUT</);
-  assert.match(xml, />Green Room</);
+  assert.doesNotMatch(xml, />PACK OUT</);
+  assert.match(xml, /Event Timing: 6:00 pm - 8:00 pm/);
+  assert.match(xml, /Delivery Time: 4:00 pm/);
+  assert.match(xml, /Date PO Modified: 9\/10\/2026 \(7:53 pm\)/);
   assert.match(xml, /<w:color w:val="FF0000"\/[^>]*>/);
-  assert.match(xml, /<w:sz w:val="36"\/[^>]*>/);
   assert.match(xml, /<w:b\/><w:color w:val="FF0000"\/><w:sz w:val="32"\/><w:szCs w:val="32"\/[^>]*><\/w:rPr><w:t xml:space="preserve">Dinner<\/w:t>/);
+  assert.match(xml, /<w:b\/><w:color w:val="FF0000"\/><w:sz w:val="18"\/><w:szCs w:val="18"\/[^>]*><\/w:rPr><w:t xml:space="preserve">Friday, September 11, 2026<\/w:t>/);
   assert.doesNotMatch(xml, /<w:color w:val="FF0000"\/>.*?<w:t xml:space="preserve">PACK OUT<\/w:t>/s);
   assert.doesNotMatch(xml, />Photo</);
   assert.equal((xml.match(/<w:tbl>/g) || []).length, 2, 'Caterease PO uses one event table and one continuous item table');
@@ -1007,7 +1015,7 @@ test('operational DOCX applies a selected Caterease Pack Out template', async ()
   });
   const zip = await JSZip.loadAsync(buffer);
   const xml = await zip.file('word/document.xml').async('string');
-  assert.match(xml, />PACK OUT</);
+  assert.doesNotMatch(xml, />PACK OUT</);
   assert.match(xml, />BUFFET</);
   assert.match(xml, /Chafing Dish/);
   assert.doesNotMatch(xml, />Bread</);
@@ -1262,7 +1270,7 @@ test('operational snapshot checksum is stable when API row order changes', () =>
     packOutRows: [{ ItemName: 'B', Qty: 2 }, { ItemName: 'A', Qty: 1 }],
     syncedAt: new Date('2026-09-11T12:00:00Z'),
   });
-  assert.equal(first.schemaVersion, 19);
+  assert.equal(first.schemaVersion, 20);
   const second = buildCatereaseOperationalSnapshot({
     eventId: 'E22672',
     packOutRows: [{ ItemName: 'A', Qty: 1 }, { ItemName: 'B', Qty: 2 }],
@@ -1458,7 +1466,7 @@ test('Kitchen Menu does not confuse Caterease staff call times with event timing
   assert.doesNotMatch(xml, />End:/);
 });
 
-test('operational documents prefer Caterease service timing and client over staffing-window metadata', async () => {
+test('operational documents prefer the event-facing time over the Caterease operational window', async () => {
   const buffer = await renderCatereaseOperationalDocx({
     event: {
       title: 'Wedding',
@@ -1494,8 +1502,8 @@ test('operational documents prefer Caterease service timing and client over staf
   });
   const menuZip = await JSZip.loadAsync(menuBuffer);
   const menuXml = await menuZip.file('word/document.xml').async('string');
-  assert.match(menuXml, /Event Timing: 4:00 pm – 2:00 am/);
-  assert.doesNotMatch(menuXml, /Event Timing: 12:00 PM/);
+  assert.match(menuXml, /Event Timing: 12:00 PM – 3:00 AM/);
+  assert.doesNotMatch(menuXml, /Event Timing: 4:00 pm – 2:00 am/);
 });
 
 test('Kitchen Menu prints a non-main zone name below its title', async () => {
@@ -1546,7 +1554,7 @@ test('generated operational DOCX is a valid Word package and escapes upstream te
   const embeddedPhoto = await zip.file('word/media/decor-1.jpg').async('nodebuffer');
   assert.deepEqual(embeddedLogo, logoSvg);
   assert.deepEqual(embeddedPhoto, decorPhoto);
-  assert.match(xml, />PACK OUT</);
+  assert.doesNotMatch(xml, />PACK OUT</);
   assert.match(xml, /r:embed="rId2"/);
   assert.match(xml, /r:embed="rId3"/);
   assert.match(xml, /Photo/);
@@ -1566,7 +1574,7 @@ test('decor Pack Out uses the shared layout without unrelated blank template row
   });
   const zip = await JSZip.loadAsync(buffer);
   const xml = await zip.file('word/document.xml').async('string');
-  assert.match(xml, />PACK OUT</);
+  assert.doesNotMatch(xml, />PACK OUT</);
   assert.match(xml, /Gold Candelabra/);
   assert.match(xml, /OCC00440/);
   assert.doesNotMatch(xml, /Paper plates/);

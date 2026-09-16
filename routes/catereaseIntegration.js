@@ -345,6 +345,11 @@ const CATEREASE_OPERATIONAL_EVENT_FIELDS = [
   'SalesRep',
   'Status',
   'Category',
+  'Extra10',
+  'Extra11',
+  'Extra13',
+  'Extra14',
+  'Revised',
 ].join(',');
 
 const resolveCatereaseOperationalEvent = async (eventId, eventDate = '', eventTitle = '') => {

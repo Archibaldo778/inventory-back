@@ -973,14 +973,26 @@ router.post('/financials/sync/:barEventId', ...requireCatereaseAdmin, syncRateLi
     const catereaseEventId = await resolveCatereaseOperationalEventId(requestedEventId, String(event.date || '').slice(0, 10), event.title);
     const bundle = await getCatereaseEventBundle(catereaseEventId);
     const summary = applyCatereaseAlcoholClientChargesFromBundle(barEvent.items, bundle);
-    if (summary.matchedItems > 0) {
+    if (summary.matchedItems > 0 || summary.billedBeverageLineItems > 0) {
+      const { billedBeverageCharges, ...auditSummary } = summary;
+      const syncedAt = new Date();
+      const syncedBy = String(req.auth?.username || req.auth?.email || '');
+      barEvent.catereaseClientChargeSnapshot = {
+        beverageTotal: summary.billedBeverageTotal,
+        lineItems: billedBeverageCharges,
+        syncedAt,
+        syncedBy,
+      };
       barEvent.revision += 1;
       barEvent.audit.push({
         action: 'caterease_client_pricing_synced',
         userId: String(req.auth?.userId || ''),
-        username: String(req.auth?.username || req.auth?.email || ''),
-        at: new Date(),
-        details: { catereaseEventId, ...summary },
+        username: syncedBy,
+        at: syncedAt,
+        details: {
+          catereaseEventId,
+          ...auditSummary,
+        },
       });
       barEvent.audit = barEvent.audit.slice(-200);
       await barEvent.save();

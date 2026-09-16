@@ -79,6 +79,19 @@ const barAuditEntrySchema = new mongoose.Schema(
   { _id: false }
 );
 
+const catereaseClientChargeLineSchema = new mongoose.Schema(
+  {
+    source: { type: String, default: '', trim: true },
+    name: { type: String, default: '', trim: true },
+    category: { type: String, default: '', trim: true },
+    type: { type: String, default: '', trim: true },
+    quantity: { type: Number, default: null, min: 0 },
+    unitPrice: { type: Number, default: null, min: 0 },
+    lineTotal: { type: Number, required: true, min: 0 },
+  },
+  { _id: false }
+);
+
 const barEventSchema = new mongoose.Schema(
   {
     linkedEventId: {
@@ -123,6 +136,12 @@ const barEventSchema = new mongoose.Schema(
       sourceFileName: { type: String, default: '', trim: true },
       importedAt: { type: Date, default: null },
       importedBy: { type: String, default: '', trim: true },
+    },
+    catereaseClientChargeSnapshot: {
+      beverageTotal: { type: Number, default: null, min: 0 },
+      lineItems: { type: [catereaseClientChargeLineSchema], default: [] },
+      syncedAt: { type: Date, default: null },
+      syncedBy: { type: String, default: '', trim: true },
     },
     currency: { type: String, default: 'USD', trim: true },
     packout: {

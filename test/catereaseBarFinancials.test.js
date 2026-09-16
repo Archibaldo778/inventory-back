@@ -26,6 +26,17 @@ test('Caterease client pricing maps by normalized name only onto alcohol-scoped 
     matchedLineItems: 1,
     unmatchedAlcoholLineItems: 0,
     lineItemChargeTotal: 170,
+    billedBeverageLineItems: 1,
+    billedBeverageTotal: 170,
+    billedBeverageCharges: [{
+      source: 'line-gin',
+      name: 'Hendricks Gin',
+      category: '',
+      type: '',
+      quantity: null,
+      unitPrice: 85,
+      lineTotal: 170,
+    }],
   });
 });
 
@@ -51,4 +62,29 @@ test('non-zero line item pricing is imported even when bundle financial totals a
   });
   assert.deepEqual(items[0].clientChargeSnapshot, { unitPrice: 125, lineTotal: 500, source: 'line-champagne' });
   assert.equal(summary.lineItemChargeTotal, 500);
+  assert.equal(summary.billedBeverageTotal, 500);
+});
+
+test('aggregate Caterease beverage billing is preserved without inventing per-bottle allocation', () => {
+  const items = [
+    { name: 'Don Julio 1942', scope: 'alcohol' },
+    { name: 'Yamazaki 12 year japanese whisky', scope: 'alcohol' },
+  ];
+  const summary = applyCatereaseAlcoholClientCharges(items, [
+    { id: 'beverage-package', name: 'Beverage', category: 'Beverage', type: 'Beverage', quantity: 200, unitPrice: 110, lineTotal: 22000 },
+    { id: 'wine-estimate', name: 'Dinner Wines ESTIMATE: Red and White at $70 per bottle', category: 'Beverage', type: 'Beverage', quantity: 1, unitPrice: 12180, lineTotal: 12180 },
+    { id: 'premium-spirits', name: '1942 & Yamazaki', category: 'Beverage', type: 'Beverage', quantity: 1, unitPrice: 5100, lineTotal: 5100 },
+    { id: 'food-with-alcohol-name', name: 'Champagne vinaigrette', category: 'Food', type: 'Food', quantity: 1, unitPrice: 25, lineTotal: 25 },
+    { id: 'zero-detail', name: 'Yamazaki 12 year japanese whisky', category: 'Liquor', type: 'Liquor', quantity: 12, unitPrice: 0, lineTotal: 0 },
+  ]);
+
+  assert.equal(summary.billedBeverageLineItems, 3);
+  assert.equal(summary.billedBeverageTotal, 39280);
+  assert.deepEqual(summary.billedBeverageCharges.map((line) => line.source), [
+    'beverage-package',
+    'wine-estimate',
+    'premium-spirits',
+  ]);
+  assert.deepEqual(items[0].clientChargeSnapshot, { unitPrice: null, lineTotal: null, source: '' });
+  assert.deepEqual(items[1].clientChargeSnapshot, { unitPrice: 0, lineTotal: 0, source: 'zero-detail' });
 });

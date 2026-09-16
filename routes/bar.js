@@ -174,6 +174,7 @@ const serializeBarEvent = (source, { includeFinancials = false } = {}) => {
       : {};
     delete event.clientCharge;
     delete event.clientChargeDetails;
+    delete event.catereaseClientChargeSnapshot;
     delete event.currency;
     delete event.audit;
     event.progress = {

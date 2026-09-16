@@ -110,6 +110,15 @@ export const calculateBarPackageCharge = (event = {}) => {
   };
 };
 
+export const resolveBarClientCharge = (event = {}) => {
+  const storedCharge = toNonNegativeNumber(event?.clientCharge);
+  if (storedCharge > 0) return round(storedCharge, 2);
+  const catereaseCharge = toOptionalNonNegativeNumber(
+    event?.catereaseClientChargeSnapshot?.beverageTotal
+  );
+  return round(catereaseCharge ?? storedCharge, 2);
+};
+
 export const calculateBarEventAccounting = (event = {}) => {
   const sourceItems = (Array.isArray(event.items) ? event.items : []).filter(isBarAccountingItem);
   const lines = sourceItems.map((item) => ({
@@ -127,7 +136,7 @@ export const calculateBarEventAccounting = (event = {}) => {
     includedLines.reduce((sum, line) => sum + line.accounting.actualCost, 0),
     2
   );
-  const clientCharge = round(toNonNegativeNumber(event.clientCharge), 2);
+  const clientCharge = resolveBarClientCharge(event);
   const grossProfit = round(clientCharge - inventoryCost, 2);
   const marginPercent = clientCharge > 0
     ? round((grossProfit / clientCharge) * 100, 2)

@@ -199,6 +199,23 @@ test('bar event accounting uses included items and final client charge', () => {
   });
 });
 
+test('bar event accounting falls back to an imported Caterease beverage charge', () => {
+  const totals = calculateBarEventAccounting({
+    clientCharge: 0,
+    catereaseClientChargeSnapshot: { beverageTotal: 39280 },
+    items: [{
+      included: true,
+      scope: 'alcohol',
+      sentQty: 2,
+      unitCostSnapshot: 100,
+    }],
+  });
+
+  assert.equal(totals.clientCharge, 39280);
+  assert.equal(totals.inventoryCost, 200);
+  assert.equal(totals.grossProfit, 39080);
+});
+
 test('old non-bar rows do not affect event totals', () => {
   const totals = calculateBarEventAccounting({
     clientCharge: 100,

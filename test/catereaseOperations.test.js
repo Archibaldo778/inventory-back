@@ -572,11 +572,15 @@ test('Kitchen Pack Out excludes non-food Pack Out rows and mocktails when its li
       { sourceId: 'food-dish', foodServiceId: 'FS-FOOD', itemName: 'Hamachi taco', subEvent: 'S-MENU', zoneName: 'Menu', fsType: 'Food' },
       { sourceId: 'shrimp', foodServiceId: 'FS-SHRIMP', itemName: 'Shrimp cocktail', subEvent: 'S-MENU', zoneName: 'Menu', fsType: 'Food' },
       { sourceId: 'mocktail', foodServiceId: 'FS-MOCKTAIL', itemName: 'ARM IN ARM', subEvent: 'S-MENU', zoneName: 'Menu', fsType: 'Liquor' },
+      { sourceId: 'staff-heading', foodServiceId: 'FS-STAFF', itemName: 'STAFF MEALS', quantity: 8, subEvent: 'S-MENU', zoneName: 'Menu', fsType: 'Food' },
+      { sourceId: 'cocktail', foodServiceId: 'FS-COCKTAIL', itemName: 'AGAVE SPICE', subEvent: 'S-MENU', zoneName: 'Menu', fsType: 'Liquor' },
     ],
     kitchenMenu: [
       { itemName: 'Hamachi taco', subEvent: 'S-MENU', menuGroup: "PASSED HORS D'OEUVRES", fsType: 'Food' },
       { itemName: 'Shrimp cocktail', subEvent: 'S-MENU', menuGroup: "PASSED HORS D'OEUVRES", fsType: 'Food' },
       { itemName: 'ARM IN ARM', subEvent: 'S-MENU', menuGroup: 'MOCKTAIL:', fsType: 'Liquor' },
+      { itemName: 'STAFF MEALS', subEvent: 'S-MENU', menuGroup: 'PLACED' },
+      { itemName: 'AGAVE SPICE', subEvent: 'S-MENU', menuGroup: 'PLACED' },
     ],
   }, 'print-6', templates);
 
@@ -1024,7 +1028,9 @@ test('Kitchen Pack Out uses the Caterease feedback table layout', async () => {
       Address1: '1000 Third Avenue', City: 'New York', StProv: 'NY', Postal: '10022',
     },
     packOutRows: [{
-      ItemName: 'Option A: 5 hours or less', Qty: 0, Notes: 'Peanut butter & jelly sandwiches', FSType: 'Food', FdSvNum: 'FS-STAFF',
+      ItemName: 'STAFF MEALS', Qty: 8, FSType: 'Food', FdSvNum: 'FS-STAFF-TOTAL', SubEvtNum: 'S-MENU',
+    }, {
+      ItemName: 'Option A: 5 hours or less', Qty: 0, Notes: 'Peanut butter & jelly sandwiches', FSType: 'Food', FdSvNum: 'FS-STAFF', SubEvtNum: 'S-MENU',
     }],
     kitchenPackOutRows: [
       { ItemName: 'Bread', Qty: 2, Unit: 'Loaf', FSName: 'Option A: 5 hours or less', FSType: 'Food', FdSvNum: 'FS-STAFF' },
@@ -1043,7 +1049,7 @@ test('Kitchen Pack Out uses the Caterease feedback table layout', async () => {
   assert.match(xml, />Guest Count: </);
   assert.match(xml, /Address: 1000 Third Avenue New York, NY 10022/);
   assert.match(xml, /Event Date: 09\/11\/2026/);
-  assert.match(xml, /Staff Meal: Option A: 5 hours or less/);
+  assert.match(xml, /Staff Meal: 8 - Option A: 5 hours or less/);
   assert.doesNotMatch(xml, /Staff Meal: 0/);
   assert.match(xml, />Staff Meal</);
   assert.match(xml, />Option A: 5 hours or less - Peanut butter &amp; jelly sandwiches</);

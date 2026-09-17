@@ -168,6 +168,7 @@ const foodServiceDishKey = (row, name = row?.itemName) => [
 const isKitchenPackOutMenuDish = (row) => {
   const fsType = normalized(row?.fsType);
   if (fsType && fsType !== 'food') return false;
+  if (/\bstaff\s*meals?\b/i.test(clean(row?.itemName, 300))) return false;
   return !/\b(?:staff\s*meal|bar|beverages?|mocktails?|cocktails?|wine|beer|liquor)\b/i.test([
     row?.menuGroup,
     row?.category,
@@ -445,7 +446,11 @@ export const catereaseOperationalTemplateRows = (snapshot = {}, templateKey, tem
       })
       .filter((row) => {
         const kitchenMenuRow = kitchenMenuByDish.get(foodServiceDishKey(row));
-        if (kitchenMenuRows.length) return Boolean(kitchenMenuRow) && isKitchenPackOutMenuDish(kitchenMenuRow);
+        if (kitchenMenuRows.length) {
+          return Boolean(kitchenMenuRow)
+            && isKitchenPackOutMenuDish(row)
+            && isKitchenPackOutMenuDish(kitchenMenuRow);
+        }
         return Boolean(clean(row?.category, 160))
           && isKitchenPackOutMenuDish(row)
           && !isGenericZeroQuantityHeading(row);

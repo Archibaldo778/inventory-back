@@ -684,18 +684,28 @@ const expandKitchenPackOutRecipeGroups = (groups, recipes = []) => {
 const STAFF_MEAL_OPTION_PATTERN = /^option\s+[a-z0-9]+\s*:/i;
 
 const kitchenPackOutStaffMeal = (snapshot, rows) => {
+  const foodServiceRows = snapshot?.foodService || snapshot?.packOut || [];
   const requiredRow = (Array.isArray(rows) ? rows : []).find((row) => (
     STAFF_MEAL_OPTION_PATTERN.test(clean(row?.station || row?.itemName, 300))
   ));
-  const foodServiceRow = (snapshot?.foodService || snapshot?.packOut || []).find((row) => (
+  const foodServiceIndex = foodServiceRows.findIndex((row) => (
     STAFF_MEAL_OPTION_PATTERN.test(clean(row?.itemName || row?.station, 300))
   ));
+  const foodServiceRow = foodServiceIndex >= 0 ? foodServiceRows[foodServiceIndex] : null;
   const name = clean(
     requiredRow?.station || requiredRow?.itemName || foodServiceRow?.itemName || foodServiceRow?.station,
     300
   );
   // Required-item quantities describe each ingredient, not the number of staff meals.
-  const quantityValue = Number(foodServiceRow?.quantity);
+  const directQuantity = Number(foodServiceRow?.quantity);
+  const staffMealParent = foodServiceIndex > 0
+    ? foodServiceRows.slice(0, foodServiceIndex).reverse().find((row) => (
+      clean(row?.subEvent, 120) === clean(foodServiceRow?.subEvent, 120)
+      && /^staff\s*meals?$/i.test(clean(row?.itemName, 300))
+      && Number(row?.quantity) > 0
+    ))
+    : null;
+  const quantityValue = directQuantity > 0 ? directQuantity : Number(staffMealParent?.quantity);
   return {
     name,
     quantity: Number.isFinite(quantityValue) && quantityValue > 0 ? formatQuantity(quantityValue) : '',

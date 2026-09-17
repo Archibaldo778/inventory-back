@@ -340,6 +340,8 @@ const CATEREASE_OPERATIONAL_EVENT_FIELDS = [
   'StProv',
   'Postal',
   'EvtDate',
+  'EvtFrom',
+  'EvtTo',
   'ActGuests',
   'GtdGuests',
   'PlnGuests',

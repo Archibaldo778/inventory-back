@@ -30,6 +30,12 @@ const first = (row, keys) => {
   }
   return '';
 };
+const catereaseTimeValue = (value) => {
+  const normalized = clean(value, 80);
+  if (!normalized || /^\s*:\s*M\s*$/i.test(normalized)) return '';
+  const dateTime = normalized.match(/T(\d{1,2}:\d{2}(?::\d{2})?)/i);
+  return dateTime ? dateTime[1] : normalized;
+};
 const fallbackSourceId = (row) => `row-${crypto.createHash('sha1').update(JSON.stringify(row || {})).digest('hex').slice(0, 16)}`;
 const operationalZoneIdentity = (row) => [
   clean(row?.subEvent, 120).toLowerCase(),
@@ -347,10 +353,17 @@ export const buildCatereaseOperationalSnapshot = ({
   const deliveryTime = clean(first(eventRow, ['Extra10', 'Extra11']), 80);
   const eventRevised = clean(first(eventRow, ['Revised']), 80);
   const subEvents = normalizeCatereaseSubEventRows(subEventRows);
-  const timedEvent = subEvents.find((row) => /\binvoice\b/i.test(row.description))
-    || subEvents.find((row) => !/\b(?:staff(?:ing)?|menu|pack\s*out)\b/i.test(row.description));
-  const eventStartTime = clean(timedEvent?.startTime, 80);
-  const eventEndTime = clean(timedEvent?.endTime, 80);
+  const timedSubEvents = subEvents.filter((row) => row.startTime || row.endTime);
+  const timedEvent = timedSubEvents.find((row) => /\binvoice\b/i.test(row.description))
+    || timedSubEvents.find((row) => !/\b(?:staff(?:ing)?|menu|pack\s*out)\b/i.test(row.description))
+    // Some Caterease events only expose a Staffing or Pack Out sub-event. Its time is
+    // still better than silently showing no event time, and EvtFrom/EvtTo remain the
+    // final event-level fallback when there are no timed sub-events at all.
+    || timedSubEvents[0];
+  const eventStartTime = catereaseTimeValue(timedEvent?.startTime)
+    || catereaseTimeValue(first(eventRow, ['EvtFrom', 'EventStartTime', 'StartTime']));
+  const eventEndTime = catereaseTimeValue(timedEvent?.endTime)
+    || catereaseTimeValue(first(eventRow, ['EvtTo', 'EventEndTime', 'EndTime']));
   const zoneNameBySubEvent = new Map(subEvents.map((row) => [
     clean(row.subEvent, 120).toLowerCase(),
     row.description || row.room,

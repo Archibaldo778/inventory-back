@@ -851,6 +851,39 @@ test('operational snapshot keeps event-level Caterease details and service timin
   assert.equal(snapshot.eventEndTime, '02:00:00');
 });
 
+test('Caterease event time falls back to a timed Pack Out sub-event', () => {
+  const snapshot = buildCatereaseOperationalSnapshot({
+    eventId: 'E22642',
+    eventRow: {
+      EvtFrom: '2026-09-17T19:30:00',
+      EvtTo: '2026-09-17T22:00:00',
+    },
+    subEventRows: [{
+      SubEvtNum: 'S-PACK-OUT',
+      Description: 'Pack Out_Kitchen',
+      StartTime: '19:30:00',
+      EndTime: '22:00:00',
+    }],
+  });
+
+  assert.equal(snapshot.eventStartTime, '19:30:00');
+  assert.equal(snapshot.eventEndTime, '22:00:00');
+});
+
+test('Caterease event time falls back to EvtFrom and EvtTo when sub-events have no time', () => {
+  const snapshot = buildCatereaseOperationalSnapshot({
+    eventId: 'E22922',
+    eventRow: {
+      EvtFrom: '2026-09-17T12:00:00',
+      EvtTo: '2026-09-17T15:30:00',
+    },
+    subEventRows: [],
+  });
+
+  assert.equal(snapshot.eventStartTime, '12:00:00');
+  assert.equal(snapshot.eventEndTime, '15:30:00');
+});
+
 test('Caterease actual guests override planned guests and respect a larger guarantee', () => {
   assert.equal(catereaseOperationalGuestCount([{ PlnGuests: 150, GtdGuests: 120, ActGuests: 130 }]), 130);
   assert.equal(catereaseOperationalGuestCount([{ PlnGuests: 150, GtdGuests: 140, ActGuests: 130 }]), 140);

@@ -40,14 +40,21 @@ import {
   nyToday,
   shouldReplaceDropboxEventDocument,
 } from '../utils/dropboxDocuments.js';
+import {
+  matchTransportationToEvents,
+  parseTransportationWorkbook,
+  transportationFileName,
+} from '../utils/dropboxTransportation.js';
 
 const DROPBOX_CONTENT_PARSER_VERSION = 4;
 
 const router = Router();
 const syncRateLimit = createMemoryRateLimiter({ windowMs: 10 * 60 * 1000, max: 8, message: 'Too many Dropbox sync requests' });
 const downloadRateLimit = createMemoryRateLimiter({ windowMs: 60 * 1000, max: 60, message: 'Too many Dropbox document downloads' });
+const transportationRateLimit = createMemoryRateLimiter({ windowMs: 5 * 60 * 1000, max: 30, message: 'Too many transportation sync requests' });
 let syncPromise = null;
 let syncProgress = null;
+const transportationSyncPromises = new Map();
 
 const requireDropboxAdmin = [requireAuth, requireAdmin];
 
@@ -483,6 +490,123 @@ const joinDropboxPath = (...parts) => `/${parts
   .filter(Boolean)
   .join('/')}`;
 
+const listAllDropboxEntries = async (accessToken, path, namespaceId) => {
+  const entries = [];
+  let cursor = '';
+  do {
+    const page = await listDropboxFolder(accessToken, { path, cursor, namespaceId });
+    entries.push(...(Array.isArray(page?.entries) ? page.entries : []));
+    cursor = page?.has_more ? String(page?.cursor || '') : '';
+  } while (cursor);
+  return entries;
+};
+
+const resolveTransportationFile = async (accessToken, account, date) => {
+  const year = String(date || '').slice(0, 4);
+  const namespaceId = String(account?.root_info?.root_namespace_id || '');
+  const homePath = String(account?.root_info?.home_path || '');
+  const configured = String(process.env.DROPBOX_TRANSPORTATION_ROOT_PATH || '').trim()
+    .replaceAll('{year}', year);
+  const root = configured || `/OCC ${year}`;
+  const candidates = [...new Set([
+    root,
+    homePath ? joinDropboxPath(homePath, root) : '',
+  ].filter(Boolean))];
+  const expectedName = transportationFileName(date).toLowerCase();
+  const matches = [];
+  let lastError = null;
+  for (const path of candidates) {
+    try {
+      const entries = await listAllDropboxEntries(accessToken, path, namespaceId);
+      entries.forEach((entry) => {
+        if (entry?.['.tag'] !== 'file' || String(entry?.name || '').trim().toLowerCase() !== expectedName) return;
+        matches.push(entry);
+      });
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  const selected = matches.sort((left, right) => (
+    new Date(right?.server_modified || 0) - new Date(left?.server_modified || 0)
+  ))[0];
+  if (!selected) {
+    throw Object.assign(new Error(`${transportationFileName(date)} was not found in ${root}${lastError?.message ? ` (${lastError.message})` : ''}`), { statusCode: 404 });
+  }
+  return { entry: selected, namespaceId, root };
+};
+
+const runDropboxTransportationSync = async (date) => {
+  if (transportationSyncPromises.has(date)) return transportationSyncPromises.get(date);
+  const promise = (async () => {
+    const integration = await loadIntegrationWithSecrets();
+    if (!integration?.enabled || !integration?.refreshToken?.ciphertext) {
+      throw Object.assign(new Error('Dropbox is not connected'), { statusCode: 409 });
+    }
+    const accessToken = await refreshDropboxAccessToken(decryptDropboxSecret(integration.refreshToken));
+    const account = await getDropboxCurrentAccount(accessToken);
+    const source = await resolveTransportationFile(accessToken, account, date);
+    const buffer = await downloadDropboxFile(
+      accessToken,
+      source.entry.id || source.entry.path_lower || source.entry.path_display,
+      { namespaceId: source.namespaceId }
+    );
+    const transportationRows = await parseTransportationWorkbook(buffer);
+    const events = await Event.find({
+      date,
+      status: { $not: /^deleted$/i },
+      'meta.nowsta.excluded': { $ne: true },
+    }).select('_id title date meta').lean();
+    const result = matchTransportationToEvents(transportationRows, events);
+    const matchedById = new Map(result.matches.map((match) => [String(match.event?._id), match]));
+    const syncedAt = new Date();
+    if (events.length) {
+      await Event.bulkWrite(events.map((event) => {
+        const match = matchedById.get(String(event._id));
+        return {
+          updateOne: {
+            filter: { _id: event._id },
+            update: {
+              $set: {
+                'meta.transportation': match?.drivers || [],
+                'meta.transportationSync': {
+                  sourceName: String(source.entry.name || ''),
+                  sourcePath: String(source.entry.path_display || source.entry.path_lower || ''),
+                  sourceModifiedAt: source.entry.server_modified || null,
+                  sourceEventName: match?.sourceEventName || '',
+                  syncedAt,
+                },
+              },
+            },
+          },
+        };
+      }));
+      clearApiCacheGroups('events');
+    }
+    return {
+      date,
+      sourceName: source.entry.name,
+      matched: result.matches.length,
+      unmatched: result.unmatched,
+      events: events.map((event) => {
+        const match = matchedById.get(String(event._id));
+        return {
+          eventId: String(event._id),
+          transportation: match?.drivers || [],
+          transportationSync: {
+            sourceName: String(source.entry.name || ''),
+            sourcePath: String(source.entry.path_display || source.entry.path_lower || ''),
+            sourceModifiedAt: source.entry.server_modified || null,
+            sourceEventName: match?.sourceEventName || '',
+            syncedAt,
+          },
+        };
+      }),
+    };
+  })();
+  transportationSyncPromises.set(date, promise);
+  try { return await promise; } finally { transportationSyncPromises.delete(date); }
+};
+
 const resolveDropboxTeamRoot = async (accessToken, account, configuredRootPath) => {
   const namespaceId = String(account?.root_info?.root_namespace_id || '');
   const homeNamespaceId = String(account?.root_info?.home_namespace_id || '');
@@ -829,6 +953,21 @@ router.get('/status', ...requireDropboxAdmin, async (_req, res) => {
     });
   } catch (error) {
     return sendApiError(res, error, { context: 'Dropbox status failed', fallbackMessage: 'Failed to load Dropbox status' });
+  }
+});
+
+router.post('/transportation/sync', requireAuth, transportationRateLimit, async (req, res) => {
+  try {
+    const date = String(req.body?.date || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({ error: 'A valid transportation date is required' });
+    }
+    return res.json(await runDropboxTransportationSync(date));
+  } catch (error) {
+    return sendApiError(res, error, {
+      context: 'Dropbox transportation sync failed',
+      fallbackMessage: 'Failed to sync transportation schedule',
+    });
   }
 });
 

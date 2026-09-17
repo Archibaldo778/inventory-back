@@ -1091,7 +1091,7 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
     ? `${zoneHeading}${kitchenPackOutDetailsTable}`
     : isStaffRequest
     ? `${paragraph(title, { bold: true, size: 36, align: 'center', after: 120 })}${zoneHeading}${eventDetailsTable}`
-    : `${paragraph('Revision', { bold: true, size: 32, align: 'left', after: 80 })}${eventDetailsTable}`;
+    : `${paragraph('Revision', { bold: true, size: 32, align: 'right', after: 80 })}${eventDetailsTable}`;
   const templateTopNotes = clean(catereaseRichTextToPlain(template?.topNotes), 12000);
   const templateBottomNotes = clean(catereaseRichTextToPlain(template?.bottomNotes), 12000);
   const documentFooterSections = isKitchenMenu ? kitchenStaffingSection(event, snapshot) : '';

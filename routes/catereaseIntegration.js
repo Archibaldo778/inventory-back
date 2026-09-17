@@ -76,6 +76,11 @@ import {
 } from '../utils/outlookApi.js';
 import { normalizeKitchenRecipeName, syncKitchenRecipeMatches } from '../utils/kitchenRecipeMatching.js';
 import {
+  CATEREASE_CALENDAR_EVENT_FIELDS,
+  catereaseCalendarAvailability,
+  normalizeCatereaseCalendarEvent,
+} from '../utils/catereaseCalendar.js';
+import {
   loadBrandLogoSvg,
   loadCloudinaryWordImages,
 } from '../utils/operationalDocumentAssets.js';
@@ -97,6 +102,48 @@ let operationalSyncProgress = null;
 let printTemplatePromise = null;
 let printTemplateCache = { locationId: '', expiresAt: 0, rows: null };
 const dedupeViewSync = createCatereaseViewSyncDeduper();
+
+const listAllCatereaseCalendarEvents = async (from, to) => {
+  const rows = [];
+  let cursor = '';
+  let pages = 0;
+  do {
+    const page = await listCatereaseEvents({
+      cursor,
+      limit: 200,
+      fields: CATEREASE_CALENDAR_EVENT_FIELDS,
+      dateFrom: from,
+      dateTo: to,
+    });
+    rows.push(...page.data);
+    if (page.pagination.hasMore && !page.pagination.nextCursor) throw new Error('Caterease calendar pagination cursor is missing');
+    cursor = page.pagination.hasMore ? page.pagination.nextCursor : '';
+    pages += 1;
+    if (pages > 100) throw new Error('Caterease calendar pagination did not finish');
+  } while (cursor);
+  return rows;
+};
+
+const listCalendarResourceForEvents = async (resource, eventIds, fields) => {
+  const rows = [];
+  // The Hub accepts up to 200 IDs, but a composite Caterease EvtNum is long
+  // enough for that request to exceed the upstream/proxy URL limit.
+  const batchSize = 40;
+  for (let offset = 0; offset < eventIds.length; offset += batchSize) {
+    const eventId = eventIds.slice(offset, offset + batchSize).join(',');
+    let cursor = '';
+    let pages = 0;
+    do {
+      const page = await listCatereaseOperationalResource(resource, eventId, { cursor, limit: 200, fields });
+      rows.push(...page.data);
+      if (page.pagination.hasMore && !page.pagination.nextCursor) throw new Error(`Caterease ${resource} pagination cursor is missing`);
+      cursor = page.pagination.hasMore ? page.pagination.nextCursor : '';
+      pages += 1;
+      if (pages > 200) throw new Error(`Caterease ${resource} pagination did not finish`);
+    } while (cursor);
+  }
+  return rows;
+};
 
 export const loadAuthorizedOperationalEvent = async (req, res, { mutable = false } = {}) => {
   const query = Event.findById(req.params.id)
@@ -1075,6 +1122,51 @@ router.get('/operations/preview/:eventId', ...requireCatereaseAdmin, async (req,
     return res.json(await fetchCatereaseOperationalSnapshot(eventId, String(req.query.date || '')));
   } catch (error) {
     return sendApiError(res, error, { context: 'Caterease operational preview failed', fallbackMessage: 'Failed to load Caterease operational data' });
+  }
+});
+
+router.get('/calendar', requireAuth, requireWorkspaceAccess, viewSyncRateLimit, async (req, res) => {
+  try {
+    const from = String(req.query?.from || '').trim();
+    const to = String(req.query?.to || '').trim();
+    const validDate = /^\d{4}-\d{2}-\d{2}$/;
+    if (!validDate.test(from) || !validDate.test(to) || from > to) {
+      return res.status(400).json({ error: 'Valid calendar from and to dates are required' });
+    }
+    const start = new Date(`${from}T12:00:00Z`);
+    const end = new Date(`${to}T12:00:00Z`);
+    if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || end - start > 370 * 86_400_000) {
+      return res.status(400).json({ error: 'Caterease calendar range cannot exceed 370 days' });
+    }
+
+    const sourceEvents = await listAllCatereaseCalendarEvents(from, to);
+    const eventIds = [...new Set(sourceEvents.map((row) => String(row?.EvtNum || '').trim()).filter(Boolean))];
+    const [requiredItems, foodService, shifts] = eventIds.length ? await Promise.all([
+      listCalendarResourceForEvents('eventrequireditem', eventIds, 'EvtNum,UID'),
+      listCalendarResourceForEvents('foodservusage', eventIds, 'EvtNum,ItemName'),
+      listCalendarResourceForEvents('shift', eventIds, 'EvtNum,ShiftNum'),
+    ]) : [[], [], []];
+    const availability = catereaseCalendarAvailability({ requiredItems, foodService, shifts });
+    const items = sourceEvents
+      .map((row) => normalizeCatereaseCalendarEvent(row, availability.get(String(row?.EvtNum || '').trim())))
+      .filter((event) => event.date && event.title)
+      .sort((left, right) => left.date.localeCompare(right.date) || left.title.localeCompare(right.title));
+    return res.json({
+      source: 'caterease',
+      items,
+      range: { from, to },
+      counts: {
+        events: items.length,
+        withStaffRequest: items.filter((event) => event.meta.calendarReport.sr).length,
+        withKitchenMenu: items.filter((event) => event.meta.calendarReport.km).length,
+        withPackOut: items.filter((event) => event.meta.calendarReport.po).length,
+      },
+    });
+  } catch (error) {
+    return sendApiError(res, error, {
+      context: 'Caterease calendar report failed',
+      fallbackMessage: 'Failed to load the Caterease event calendar',
+    });
   }
 });
 

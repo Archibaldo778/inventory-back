@@ -1307,26 +1307,12 @@ router.post('/import', requireAdmin, async (req, res) => {
 // List (optionally by manager)
 router.get('/', cacheWithGroup('5 minutes', CACHE_GROUP), async (req, res) => {
   try {
-    const isCalendarReport = String(req.query.calendar || '') === '1';
     const q = {
       status: { $not: /^deleted$/i },
+      'meta.nowsta.excluded': { $ne: true },
     };
-    if (isCalendarReport) {
-      // An archived Nowsta event with a real Caterease event number represents
-      // a cancelled/lost event in the operations calendar. Keep those in the
-      // report, while continuing to hide recurring and operational schedules.
-      q.$or = [
-        { 'meta.nowsta.excluded': { $ne: true } },
-        {
-          'meta.nowsta.exclusionReason': 'archived',
-          externalId: { $regex: /^E\s*\d/i },
-        },
-      ];
-    } else {
-      q['meta.nowsta.excluded'] = { $ne: true };
-    }
     if (req.query.managerId) q.managerId = req.query.managerId;
-    if (isCalendarReport) {
+    if (String(req.query.calendar || '') === '1') {
       const from = trimImportValue(req.query.from, 10);
       const to = trimImportValue(req.query.to, 10);
       const validDate = /^\d{4}-\d{2}-\d{2}$/;

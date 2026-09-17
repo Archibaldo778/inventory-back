@@ -1227,6 +1227,7 @@ test('Caterease food service rows preserve Kitchen Menu dish details', () => {
     subEvent: '',
     zoneName: '',
     category: 'Dessert',
+    fsType: '',
     menuGroup: '',
     description: '',
     notes: 'Plate cold.',
@@ -1355,7 +1356,7 @@ test('operational snapshot checksum is stable when API row order changes', () =>
     packOutRows: [{ ItemName: 'B', Qty: 2 }, { ItemName: 'A', Qty: 1 }],
     syncedAt: new Date('2026-09-11T12:00:00Z'),
   });
-  assert.equal(first.schemaVersion, 21);
+  assert.equal(first.schemaVersion, 22);
   const second = buildCatereaseOperationalSnapshot({
     eventId: 'E22672',
     packOutRows: [{ ItemName: 'A', Qty: 1 }, { ItemName: 'B', Qty: 2 }],
@@ -1557,6 +1558,63 @@ test('Kitchen Menu renders plural beverage sections, hides zero quantities, and 
   assert.match(xml, />Sancerre</);
   assert.doesNotMatch(xml, />BONFIRE NIGHTS Mezcal/);
   assert.doesNotMatch(xml, /<w:t xml:space="preserve">0<\/w:t>/);
+});
+
+test('Kitchen Menu keeps liquor and its garnish in a separate Beverage section', async () => {
+  const snapshot = buildCatereaseOperationalSnapshot({
+    eventId: 'E22646',
+    eventRow: { Revised: '2026-09-16T15:58:46' },
+    subEventRows: [{ SubEvtNum: 'S-MENU', Description: 'Menu' }],
+    packOutRows: [
+      { FdSvNum: 'food', SubEvtNum: 'S-MENU', ItemName: 'Spiced almonds', FSType: 'Food' },
+      { FdSvNum: 'drink', SubEvtNum: 'S-MENU', ItemName: 'AGAVE SPICE', FSType: 'Liquor', Description: 'Tequila, lime and agave' },
+      { FdSvNum: 'garnish', SubEvtNum: 'S-MENU', ItemName: 'GARNISH: Jalapeno', Comment: 'Half without', FSType: 'Food' },
+    ],
+    kitchenMenuRows: [
+      { FdSvNum: 'food', SubEvtNum: 'S-MENU', ItemName: 'Spiced almonds', FSType: 'Food' },
+      { FdSvNum: 'drink', SubEvtNum: 'S-MENU', ItemName: 'AGAVE SPICE', FSType: 'Liquor', Description: 'Tequila, lime and agave' },
+      { FdSvNum: 'garnish', SubEvtNum: 'S-MENU', ItemName: 'GARNISH: Jalapeno', Comment: 'Half without', FSType: 'Food' },
+    ],
+  });
+  const buffer = await renderCatereaseOperationalDocx({
+    event: {
+      title: 'Cocktail',
+      date: '2026-09-17',
+      externalId: 'E22646',
+      meta: { eventNotes: 'Keep the open kitchen clean.' },
+    },
+    snapshot,
+    recipes: [],
+    type: 'kitchen_menu',
+  });
+  const zip = await JSZip.loadAsync(buffer);
+  const xml = await zip.file('word/document.xml').async('string');
+  const beverageOffset = xml.indexOf('>BEVERAGE<');
+  const cocktailOffset = xml.indexOf('>AGAVE SPICE<');
+  assert.ok(beverageOffset > 0 && cocktailOffset > beverageOffset);
+  assert.match(xml, />Tequila, lime and agave</);
+  assert.match(xml, />GARNISH: Jalapeno</);
+  assert.match(xml, />Half without</);
+  assert.equal((xml.match(/>GARNISH: Jalapeno</g) || []).length, 1);
+  assert.match(xml, /Last Modified: 9\/16\/2026 \(3:58 pm\)/);
+  assert.match(xml, />EVENT NOTES</);
+  assert.match(xml, />Keep the open kitchen clean\.</);
+});
+
+test('Kitchen Menu recovers beverage type from food service for an older saved snapshot', async () => {
+  const buffer = await renderCatereaseOperationalDocx({
+    event: { title: 'Cocktail', date: '2026-09-17', externalId: 'E22646' },
+    snapshot: {
+      schemaVersion: 21,
+      foodService: [{ sourceId: 'drink', foodServiceId: 'drink', itemName: 'AGAVE SPICE', fsType: 'Liquor' }],
+      kitchenMenu: [{ sourceId: 'drink', itemName: 'AGAVE SPICE', menuGroup: 'PLACED' }],
+    },
+    recipes: [],
+    type: 'kitchen_menu',
+  });
+  const zip = await JSZip.loadAsync(buffer);
+  const xml = await zip.file('word/document.xml').async('string');
+  assert.ok(xml.indexOf('>AGAVE SPICE<') > xml.indexOf('>BEVERAGE<'));
 });
 
 test('Kitchen Menu does not confuse Caterease staff call times with event timing', async () => {

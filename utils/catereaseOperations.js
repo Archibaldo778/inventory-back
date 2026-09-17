@@ -198,6 +198,7 @@ export const normalizeCatereaseKitchenMenuDishRows = (rows = []) => {
       subEvent,
       zoneName,
       category: clean(first(row, ['Category', 'FSCategory']), 160),
+      fsType: clean(first(row, ['FSType', 'Type', 'ItemType']), 160),
       menuGroup: currentSectionBySubEvent.get(zoneIdentity)
         || clean(first(row, ['MenuGroup', 'FSCategory', 'GroupName']), 160),
       description,
@@ -399,7 +400,7 @@ export const buildCatereaseOperationalSnapshot = ({
     packOutTemplates,
   })).digest('hex');
   return {
-    schemaVersion: 21,
+    schemaVersion: 22,
     eventId: clean(eventId, 120),
     syncedAt,
     checksum,
@@ -860,6 +861,22 @@ export const operationalRows = (snapshot, type, zoneKey = '', templateKey = '', 
     rows = derivedKitchenMenu.length
       ? mergeKitchenMenuRows(derivedKitchenMenu, snapshot?.kitchenMenu || [])
       : snapshot?.kitchenMenu || [];
+
+    // Older saved Kitchen Menu rows did not retain FSType. Recover it from
+    // the matching food-service row so cocktails are classified correctly
+    // even before an event is refreshed again.
+    const foodServiceById = new Map((snapshot?.foodService || snapshot?.packOut || [])
+      .map((row) => [clean(row?.foodServiceId || row?.sourceId, 120).toLowerCase(), row])
+      .filter(([key]) => key));
+    rows = (Array.isArray(rows) ? rows : []).map((row) => {
+      const source = foodServiceById.get(clean(row?.foodServiceId || row?.sourceId, 120).toLowerCase());
+      if (!source) return row;
+      return {
+        ...row,
+        fsType: row?.fsType || source?.fsType || '',
+        category: row?.category || source?.category || '',
+      };
+    });
   }
   if (['kitchen_menu', 'annotated_kitchen_menu'].includes(type) && version < 3) {
     const legacyKitchenPackOut = (version >= 2 ? snapshot?.kitchenMenu : snapshot?.packOut) || [];
@@ -923,7 +940,7 @@ const kitchenMenuSections = (rows, recipes, includeAnnotations = false) => {
     };
   });
   const isBeverage = (row) => /\b(?:bar|beverages?|cocktails?|mocktails?|wine|beer|liquor|alcohol|spirits?|champagne|sparkling)\b/i.test([
-    row?.menuGroup, row?.category, row?.prepArea,
+    row?.menuGroup, row?.category, row?.prepArea, row?.fsType,
   ].filter(Boolean).join(' '));
   const kitchenMenuQuantity = (value) => Number(value) > 0 ? formatQuantity(value) : '';
   const renderSection = (heading, values) => {
@@ -943,9 +960,38 @@ const kitchenMenuSections = (rows, recipes, includeAnnotations = false) => {
       table(['Qty', 'Item', 'Comment', 'Label (OCC; Rentals)'], bodyRows, [570, 4580, 2825, 3105])
     }`;
   };
-  const menuRows = preparedRows.filter((row) => !isBeverage(row));
-  const beverageRows = preparedRows.filter(isBeverage);
+  const menuRows = [];
+  const beverageRows = [];
+  preparedRows.forEach((row) => {
+    const previousBeverage = beverageRows[beverageRows.length - 1];
+    const cocktailGarnish = /^garnish\s*:/i.test(row.itemName)
+      && previousBeverage
+      && isBeverage(previousBeverage);
+    if (cocktailGarnish) {
+      previousBeverage.comments = [...previousBeverage.comments, row.itemName, ...row.comments]
+        .filter((value, index, values) => value && values.indexOf(value) === index);
+      return;
+    }
+    if (isBeverage(row)) {
+      const beverageGroup = isBeverage({ menuGroup: row.group }) ? row.group : 'Beverage';
+      beverageRows.push({ ...row, group: beverageGroup });
+    }
+    else menuRows.push(row);
+  });
   return `${renderSection('MENU', menuRows)}${beverageRows.length ? renderSection('BEVERAGE', beverageRows) : ''}`;
+};
+
+const kitchenEventNotesSection = (event) => {
+  const notes = clean(
+    event?.meta?.eventNotes
+      || event?.meta?.operationsNotes
+      || event?.meta?.nowsta?.adminNotes,
+    12000
+  );
+  if (!notes) return '';
+  return `${paragraph('EVENT NOTES', { bold: true, size: 28, before: 220, after: 80 })}${
+    table([], [[notes]], [10600])
+  }`;
 };
 
 const kitchenStaffingSection = (event, snapshot) => {
@@ -1092,7 +1138,7 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
     [`Date: ${longDate(event?.date)}`, `Staff Arrival on Site: ${staffArrivalTime}`],
     [`Guest Count: ${guestCount}`, `Sales Rep: ${salesRep}`],
     [`Client: ${event?.client || snapshot?.client || ''}`, `Site Contact: ${event?.meta?.siteContact || ''}`],
-    [`Location: ${event?.meta?.venue || event?.meta?.nowsta?.venue || ''}`, `Last Modified: ${new Intl.DateTimeFormat('en-US').format(new Date(event?.updatedAt || Date.now()))}`],
+    [`Location: ${event?.meta?.venue || event?.meta?.nowsta?.venue || ''}`, `Last Modified: ${catereaseModifiedDateTime(snapshot?.eventRevised || event?.updatedAt)}`],
     [`Address: ${event?.meta?.address || event?.meta?.nowsta?.address || ''}`, `Service Entrance: ${event?.meta?.serviceEntrance || ''}`],
     [`Client Notes: ${event?.meta?.clientNotes || ''}`, `Meeting Point: ${event?.meta?.meetingPoint || ''}`],
     [`Venue Notes: ${event?.meta?.venueNotes || ''}`, `Event Number: ${displayedEventNumber(event?.externalId || snapshot?.eventId || '')}`],
@@ -1104,7 +1150,9 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
     : `${paragraph('Revision', { bold: true, size: 32, align: 'right', after: 80 })}${eventDetailsTable}`;
   const templateTopNotes = clean(catereaseRichTextToPlain(template?.topNotes), 12000);
   const templateBottomNotes = clean(catereaseRichTextToPlain(template?.bottomNotes), 12000);
-  const documentFooterSections = isKitchenMenu ? kitchenStaffingSection(event, snapshot) : '';
+  const documentFooterSections = isKitchenMenu
+    ? `${kitchenStaffingSection(event, snapshot)}${kitchenEventNotesSection(event)}`
+    : '';
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><w:body>
   ${includeBrandLogo ? brandLogoParagraph() : ''}

@@ -1789,18 +1789,6 @@ router.patch('/events/:id/returns', async (req, res) => {
       if (!Number.isFinite(returnedQty) || returnedQty < 0) {
         return res.status(400).json({ message: `${item.name || 'Item'} returned quantity must be zero or greater` });
       }
-      const returnValidation = validateBarReturnQuantities({
-        ...item.toObject(),
-        returnedFullQty: 0,
-        returnedOpenQty: returnedQty,
-        lostDamagedQty: 0,
-      });
-      if (!returnValidation.valid) {
-        return res.status(400).json({
-          message: `${item.name || 'Item'}: ${returnValidation.message}`,
-          accounting: returnValidation.accounting,
-        });
-      }
       updates.push({
         item,
         returnedQty,
@@ -1821,7 +1809,18 @@ router.patch('/events/:id/returns', async (req, res) => {
     });
     if (event.status === 'ready') event.status = 'in_progress';
     event.revision += 1;
-    addAudit(event, req.auth, 'returns_batch_updated', { count: updates.length });
+    const variances = updates.map(({ item, returnedQty }) => {
+      const outboundQty = Number(item?.deliveredQty ?? item?.sentQty ?? 0) || 0;
+      const difference = Math.round((returnedQty - outboundQty) * 10000) / 10000;
+      return difference > 0.0001
+        ? { itemId: String(item?._id || ''), name: item?.name || 'Item', outboundQty, returnedQty, difference }
+        : null;
+    }).filter(Boolean);
+    addAudit(event, req.auth, 'returns_batch_updated', {
+      count: updates.length,
+      varianceCount: variances.length,
+      variances: variances.slice(0, 50),
+    });
     await event.save();
     return res.json(serializeBarEvent(event, { includeFinancials: canSeeBarFinancials(req.auth) }));
   } catch (error) {

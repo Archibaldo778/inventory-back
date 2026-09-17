@@ -27,3 +27,43 @@ export const applyGuestReceivedRows = (items, rows, { at = new Date(), by = '' }
   });
   return { valid: true, message: '', count: updates.length };
 };
+
+export const prepareGuestReturnRows = (items, rows) => {
+  const required = (Array.isArray(items) ? items : []).filter((item) => item?.included !== false && requiresBarReturn(item));
+  const sourceRows = Array.isArray(rows) ? rows : [];
+  if (!required.length) return { valid: false, message: 'This event has no returnable items', updates: [], variances: [] };
+  if (sourceRows.length !== required.length) {
+    return { valid: false, message: 'Enter a returned quantity for every item', updates: [], variances: [] };
+  }
+  const byId = new Map();
+  for (const row of sourceRows) {
+    const itemId = String(row?.itemId || '').trim();
+    if (!itemId || byId.has(itemId)) {
+      return { valid: false, message: 'Every returned item must appear exactly once', updates: [], variances: [] };
+    }
+    byId.set(itemId, row);
+  }
+  const updates = [];
+  const variances = [];
+  for (const item of required) {
+    const itemId = String(item?._id || item?.id || '');
+    const row = byId.get(itemId);
+    const deliveredQty = Number(row?.deliveredQty);
+    const returnedQty = Number(row?.returnedQty);
+    if (!row || !Number.isFinite(deliveredQty) || deliveredQty < 0) {
+      return { valid: false, message: `Enter a valid received quantity for ${item?.name || 'item'}`, updates: [], variances: [] };
+    }
+    if (!Number.isFinite(returnedQty) || returnedQty < 0) {
+      return { valid: false, message: `Enter a valid returned quantity for ${item?.name || 'item'}`, updates: [], variances: [] };
+    }
+    const pendingSentQty = item.sentQtyPending === true
+      ? Math.max(Number(item.sentQty || 0), deliveredQty, returnedQty)
+      : Number(item.sentQty || 0);
+    const difference = Math.round((returnedQty - deliveredQty) * 10000) / 10000;
+    if (difference > 0.0001) {
+      variances.push({ itemId, name: String(item?.name || 'Item'), deliveredQty, returnedQty, difference });
+    }
+    updates.push({ item, deliveredQty, returnedQty, pendingSentQty });
+  }
+  return { valid: true, message: '', updates, variances };
+};

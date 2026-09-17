@@ -7,12 +7,11 @@ import Event from '../models/Event.js';
 import BeverageItem from '../models/BeverageItem.js';
 import { normalizePackoutItems } from './bar.js';
 import { normalizeBarEventDate } from '../utils/barEventDates.js';
-import { validateBarReturnQuantities } from '../utils/barEventAccounting.js';
 import { recognizeDocuments } from '../utils/googleDocumentAi.js';
 import { matchRecognizedItemsToCatalog, parseRecognizedPackout } from '../utils/barPackoutRecognition.js';
 import { isBarAccountingItem, requiresBarReturn } from '../utils/barPackoutScope.js';
 import { sendApiError } from '../utils/apiErrors.js';
-import { applyGuestReceivedRows } from '../utils/barGuestReturns.js';
+import { applyGuestReceivedRows, prepareGuestReturnRows } from '../utils/barGuestReturns.js';
 import { barEventNumbersMatch, normalizeBarEventNumber } from '../utils/barChargeImport.js';
 import {
   INVALID_PACKOUT_UPLOAD_RESPONSE,
@@ -628,32 +627,9 @@ router.patch('/:eventId/returns', async (req, res) => {
     if (rows.length !== required.length || rows.length > MAX_ITEMS) {
       return res.status(400).json({ message: 'Enter a returned quantity for every item' });
     }
-    const byId = new Map(rows.map((row) => [clean(row?.itemId, 80), row]));
-    const updates = [];
-    for (const item of required) {
-      const row = byId.get(String(item._id));
-      const deliveredQty = Number(row?.deliveredQty);
-      const returnedQty = Number(row?.returnedQty);
-      if (!row || !Number.isFinite(deliveredQty) || deliveredQty < 0) {
-        return res.status(400).json({ message: `Enter a valid received quantity for ${item.name}` });
-      }
-      if (!row || !Number.isFinite(returnedQty) || returnedQty < 0) {
-        return res.status(400).json({ message: `Enter a valid returned quantity for ${item.name}` });
-      }
-      const pendingSentQty = item.sentQtyPending === true
-        ? Math.max(Number(item.sentQty || 0), deliveredQty, returnedQty)
-        : Number(item.sentQty || 0);
-      const validation = validateBarReturnQuantities({
-        ...item.toObject(),
-        sentQty: pendingSentQty,
-        deliveredQty,
-        returnedFullQty: 0,
-        returnedOpenQty: returnedQty,
-        lostDamagedQty: 0,
-      });
-      if (!validation.valid) return res.status(400).json({ message: `${item.name}: ${validation.message}` });
-      updates.push({ item, deliveredQty, returnedQty, pendingSentQty });
-    }
+    const prepared = prepareGuestReturnRows(required, rows);
+    if (!prepared.valid) return res.status(400).json({ message: prepared.message });
+    const { updates, variances } = prepared;
     const now = new Date();
     updates.forEach(({ item, deliveredQty, returnedQty, pendingSentQty }) => {
       if (item.sentQtyPending === true) item.sentQty = pendingSentQty;
@@ -667,9 +643,18 @@ router.patch('/:eventId/returns', async (req, res) => {
     event.guestIntake.reporterName = reporterName;
     event.guestIntake.lastSubmittedAt = now;
     event.revision += 1;
-    event.audit.push({ action: 'guest_returns_submitted', username: reporterName, at: now, details: mutationDetails(req.body, { count: updates.length }) });
+    event.audit.push({
+      action: 'guest_returns_submitted',
+      username: reporterName,
+      at: now,
+      details: mutationDetails(req.body, {
+        count: updates.length,
+        varianceCount: variances.length,
+        variances: variances.slice(0, 50),
+      }),
+    });
     await event.save();
-    return res.json({ ok: true, event: publicEvent(event) });
+    return res.json({ ok: true, event: publicEvent(event), varianceCount: variances.length });
   } catch (error) {
     return sendApiError(res, error, { context: 'Guest returns submission failed', fallbackMessage: 'Could not submit returned quantities' });
   }

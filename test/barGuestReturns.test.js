@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { applyGuestReceivedRows, prepareGuestReturnRows } from '../utils/barGuestReturns.js';
+import { applyGuestReceivedRows, applyGuestReturnRows, prepareGuestReturnRows } from '../utils/barGuestReturns.js';
 
 test('captain can save received quantities without confirming final returns', () => {
   const items = [
@@ -54,4 +54,51 @@ test('captain return submission preserves and flags a count above received inste
     returnedQty: 68,
     difference: 4,
   }]);
+});
+
+test('a real bottle under Cocktail Station is required, received, and returned consistently', () => {
+  const bottle = {
+    _id: 'ketel-one',
+    name: 'Ketel One Vodka',
+    section: 'Cocktail Station',
+    scope: 'alcohol',
+    included: true,
+    sentQty: 6,
+    deliveredQty: null,
+    returnConfirmed: false,
+  };
+  const preparedDrink = {
+    _id: 'espresso-martini',
+    name: 'Espresso Martini',
+    section: 'Specialty Cocktails',
+    scope: 'review',
+    included: true,
+    sentQty: 50,
+  };
+
+  const received = applyGuestReceivedRows([bottle, preparedDrink], [
+    { itemId: 'ketel-one', deliveredQty: 6 },
+  ], { by: 'Captain Stephen' });
+  assert.equal(received.valid, true);
+  assert.equal(bottle.deliveredQty, 6);
+
+  const returned = applyGuestReturnRows([bottle, preparedDrink], [
+    { itemId: 'ketel-one', deliveredQty: 6, returnedQty: 2 },
+  ], { by: 'Captain Stephen' });
+  assert.equal(returned.valid, true);
+  assert.equal(returned.updates.length, 1);
+  assert.equal(returned.updates[0].item, bottle);
+  assert.equal(bottle.returnedOpenQty, 2);
+  assert.equal(bottle.returnConfirmed, true);
+  assert.equal(bottle.updatedBy, 'Captain Stephen');
+});
+
+test('missing guest rows name the exact required bottle', () => {
+  const items = [{
+    _id: 'ketel-one', name: 'Ketel One Vodka', section: 'Cocktail Station', scope: 'alcohol', included: true,
+  }];
+  const received = applyGuestReceivedRows(items, []);
+  const returned = prepareGuestReturnRows(items, []);
+  assert.match(received.message, /Missing received quantity for: Ketel One Vodka/);
+  assert.match(returned.message, /Missing returned quantity for: Ketel One Vodka/);
 });

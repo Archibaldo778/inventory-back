@@ -43,6 +43,20 @@ test('captain payload keeps included PO items visible even when they do not requ
   assert.equal(excluded.returnRequired, false);
 });
 
+test('captain payload marks a real spirits bottle under Cocktail Station as returnable', () => {
+  const bottle = serializeGuestBarItem({
+    _id: 'ketel-one',
+    name: 'Ketel One Vodka',
+    section: 'Cocktail Station',
+    scope: 'alcohol',
+    included: true,
+    sentQty: 6,
+  });
+
+  assert.equal(bottle.included, true);
+  assert.equal(bottle.returnRequired, true);
+});
+
 test('guest mutation ids make offline retries idempotent', () => {
   const event = {
     audit: [{ action: 'guest_returns_submitted', details: { clientMutationId: 'device-mutation-1' } }],

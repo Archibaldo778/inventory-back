@@ -1,11 +1,39 @@
 import { requiresBarReturn } from './barPackoutScope.js';
 
+const itemId = (item) => String(item?._id || item?.id || '');
+const itemName = (item) => String(item?.name || 'Unnamed item').trim() || 'Unnamed item';
+
+const indexGuestRows = (required, rows, action) => {
+  const requiredById = new Map(required.map((item) => [itemId(item), item]));
+  const byId = new Map();
+  const duplicates = [];
+  const unexpected = [];
+  for (const row of rows) {
+    const id = String(row?.itemId || '').trim();
+    if (!id || !requiredById.has(id)) {
+      unexpected.push(id || 'unknown item');
+      continue;
+    }
+    if (byId.has(id)) {
+      duplicates.push(itemName(requiredById.get(id)));
+      continue;
+    }
+    byId.set(id, row);
+  }
+  const missing = required.filter((item) => !byId.has(itemId(item))).map(itemName);
+  if (missing.length) return { valid: false, message: `Missing ${action} quantity for: ${missing.join(', ')}`, byId };
+  if (duplicates.length) return { valid: false, message: `Duplicate ${action} item: ${duplicates.join(', ')}`, byId };
+  if (unexpected.length) return { valid: false, message: `Unexpected ${action} item: ${unexpected.join(', ')}`, byId };
+  return { valid: true, message: '', byId };
+};
+
 export const applyGuestReceivedRows = (items, rows, { at = new Date(), by = '' } = {}) => {
   const required = (Array.isArray(items) ? items : []).filter((item) => item?.included !== false && requiresBarReturn(item));
   const sourceRows = Array.isArray(rows) ? rows : [];
   if (!required.length) return { valid: false, message: 'This event has no receivable items', count: 0 };
-  if (sourceRows.length !== required.length) return { valid: false, message: 'Enter a received quantity for every item', count: 0 };
-  const byId = new Map(sourceRows.map((row) => [String(row?.itemId || '').trim(), row]));
+  const indexed = indexGuestRows(required, sourceRows, 'received');
+  if (!indexed.valid) return { valid: false, message: indexed.message, count: 0 };
+  const { byId } = indexed;
   const updates = [];
   for (const item of required) {
     const row = byId.get(String(item?._id || item?.id || ''));
@@ -32,17 +60,9 @@ export const prepareGuestReturnRows = (items, rows) => {
   const required = (Array.isArray(items) ? items : []).filter((item) => item?.included !== false && requiresBarReturn(item));
   const sourceRows = Array.isArray(rows) ? rows : [];
   if (!required.length) return { valid: false, message: 'This event has no returnable items', updates: [], variances: [] };
-  if (sourceRows.length !== required.length) {
-    return { valid: false, message: 'Enter a returned quantity for every item', updates: [], variances: [] };
-  }
-  const byId = new Map();
-  for (const row of sourceRows) {
-    const itemId = String(row?.itemId || '').trim();
-    if (!itemId || byId.has(itemId)) {
-      return { valid: false, message: 'Every returned item must appear exactly once', updates: [], variances: [] };
-    }
-    byId.set(itemId, row);
-  }
+  const indexed = indexGuestRows(required, sourceRows, 'returned');
+  if (!indexed.valid) return { valid: false, message: indexed.message, updates: [], variances: [] };
+  const { byId } = indexed;
   const updates = [];
   const variances = [];
   for (const item of required) {
@@ -66,4 +86,20 @@ export const prepareGuestReturnRows = (items, rows) => {
     updates.push({ item, deliveredQty, returnedQty, pendingSentQty });
   }
   return { valid: true, message: '', updates, variances };
+};
+
+export const applyGuestReturnRows = (items, rows, { at = new Date(), by = '' } = {}) => {
+  const prepared = prepareGuestReturnRows(items, rows);
+  if (!prepared.valid) return prepared;
+  prepared.updates.forEach(({ item, deliveredQty, returnedQty, pendingSentQty }) => {
+    if (item.sentQtyPending === true) item.sentQty = pendingSentQty;
+    item.deliveredQty = deliveredQty;
+    item.returnedFullQty = 0;
+    item.returnedOpenQty = returnedQty;
+    item.lostDamagedQty = 0;
+    item.returnConfirmed = true;
+    item.updatedBy = String(by || '');
+    item.updatedAt = at;
+  });
+  return prepared;
 };

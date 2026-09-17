@@ -11,7 +11,7 @@ import { recognizeDocuments } from '../utils/googleDocumentAi.js';
 import { matchRecognizedItemsToCatalog, parseRecognizedPackout } from '../utils/barPackoutRecognition.js';
 import { isBarAccountingItem, requiresBarReturn } from '../utils/barPackoutScope.js';
 import { sendApiError } from '../utils/apiErrors.js';
-import { applyGuestReceivedRows, prepareGuestReturnRows } from '../utils/barGuestReturns.js';
+import { applyGuestReceivedRows, applyGuestReturnRows } from '../utils/barGuestReturns.js';
 import { barEventNumbersMatch, normalizeBarEventNumber } from '../utils/barChargeImport.js';
 import {
   INVALID_PACKOUT_UPLOAD_RESPONSE,
@@ -593,9 +593,7 @@ router.patch('/:eventId/received', async (req, res) => {
     const required = event.items.filter((item) => item.included !== false && requiresBarReturn(item));
     if (reporterName.length < 2) return res.status(400).json({ message: 'Enter your name' });
     if (!required.length) return res.status(400).json({ message: 'This event has no receivable items' });
-    if (rows.length !== required.length || rows.length > MAX_ITEMS) {
-      return res.status(400).json({ message: 'Enter a received quantity for every item' });
-    }
+    if (rows.length > MAX_ITEMS) return res.status(400).json({ message: 'Too many received items' });
     const now = new Date();
     const receivedResult = applyGuestReceivedRows(required, rows, { at: now, by: reporterName });
     if (!receivedResult.valid) return res.status(400).json({ message: receivedResult.message });
@@ -624,19 +622,11 @@ router.patch('/:eventId/returns', async (req, res) => {
     if (required.some((item) => item.returnConfirmed === true)) {
       return res.status(409).json({ message: 'Returns for this event were already started. Ask a bar admin to review them.' });
     }
-    if (rows.length !== required.length || rows.length > MAX_ITEMS) {
-      return res.status(400).json({ message: 'Enter a returned quantity for every item' });
-    }
-    const prepared = prepareGuestReturnRows(required, rows);
+    if (rows.length > MAX_ITEMS) return res.status(400).json({ message: 'Too many returned items' });
+    const now = new Date();
+    const prepared = applyGuestReturnRows(required, rows, { at: now, by: reporterName });
     if (!prepared.valid) return res.status(400).json({ message: prepared.message });
     const { updates, variances } = prepared;
-    const now = new Date();
-    updates.forEach(({ item, deliveredQty, returnedQty, pendingSentQty }) => {
-      if (item.sentQtyPending === true) item.sentQty = pendingSentQty;
-      item.deliveredQty = deliveredQty;
-      item.returnedFullQty = 0; item.returnedOpenQty = returnedQty; item.lostDamagedQty = 0;
-      item.returnConfirmed = true; item.updatedBy = reporterName; item.updatedAt = now;
-    });
     event.status = 'submitted';
     event.submittedAt = now;
     event.submittedBy = reporterName;

@@ -540,6 +540,7 @@ test('Kitchen Pack Out excludes non-food Pack Out rows and mocktails when its li
   const rows = catereaseOperationalTemplateRows({
     requiredItems: [
       { sourceId: 'food', foodServiceId: 'FS-FOOD', itemName: 'Taro taco shell', station: 'Hamachi taco', subEvent: 'S-MENU', zoneName: 'Menu', fsType: 'Food' },
+      { sourceId: 'test', foodServiceId: 'FS-TEST', itemName: 'Burger Test Item', station: 'Burger', subEvent: 'S-MENU', zoneName: 'Menu', fsType: 'Food', category: 'Pack Out' },
       { sourceId: 'ice', foodServiceId: 'FS-ICE', itemName: '09 - ICE', station: 'ICE', subEvent: 'S-PO', zoneName: 'Pack Out', fsType: 'Other' },
     ],
     foodService: [
@@ -731,6 +732,7 @@ test('Caterease Pack Out rows preserve operational grouping', () => {
     SubEvtNum: '00001-S1',
     Category: 'Paper goods',
     MenuGroup: 'Kitchen Equipment',
+    UseRecipe: false,
   }]);
 
   assert.deepEqual(rows[0], {
@@ -746,6 +748,7 @@ test('Caterease Pack Out rows preserve operational grouping', () => {
     category: 'Paper goods',
     fsType: '',
     menuGroup: 'Kitchen Equipment',
+    useRecipe: false,
     notes: '',
   });
 });
@@ -1431,6 +1434,44 @@ test('Kitchen Pack Out fills an unexpanded food-service dish from its exact Cate
   assert.doesNotMatch(xml, /<w:t xml:space="preserve">1<\/w:t>/);
 });
 
+test('Kitchen Pack Out does not expand a catalog recipe when Caterease disables UseRecipe', async () => {
+  const buffer = await renderCatereaseOperationalDocx({
+    event: { title: 'Cocktail', date: '2026-09-16', externalId: 'E22842' },
+    snapshot: {
+      schemaVersion: 20,
+      packOutTemplates: [{
+        key: 'print-6',
+        label: 'Kitchen Pack Out',
+        documentType: 'kitchen_packout',
+        supported: true,
+        groupBy: ['station'],
+        conditions: [],
+      }],
+      requiredItems: [],
+      foodService: [{
+        itemName: 'Lemon parmesan arancini',
+        fsType: 'Food',
+        category: 'Passed Hors D\u2019oeuvres',
+        useRecipe: false,
+      }],
+      kitchenMenu: [{
+        itemName: 'Lemon parmesan arancini',
+        category: 'Passed Hors D\u2019oeuvres',
+      }],
+    },
+    recipes: [{
+      name: 'Lemon parmesan arancini',
+      ingredients: [{ name: 'Lemons', quantity: 4, unit: 'Each' }],
+    }],
+    type: 'kitchen_packout',
+    templateKey: 'print-6',
+  });
+  const zip = await JSZip.loadAsync(buffer);
+  const xml = await zip.file('word/document.xml').async('string');
+  assert.match(xml, />Lemon parmesan arancini</);
+  assert.doesNotMatch(xml, />Lemons</);
+});
+
 test('Kitchen Menu keeps Caterease comments in the standard four-column table', async () => {
   const buffer = await renderCatereaseOperationalDocx({
     event: { title: 'Dinner', date: '2026-09-11', externalId: 'E22672' },
@@ -1459,13 +1500,17 @@ test('Kitchen Menu renders plural beverage sections, hides zero quantities, and 
     snapshot: {
       schemaVersion: 15,
       kitchenPackOut: [],
-      kitchenMenu: [{
-        itemName: 'BONFIRE NIGHTS',
-        quantity: 0,
-        menuGroup: 'PASSED BEVERAGES',
-        description: 'BONFIRE NIGHTS Mezcal, Tequila, Fresh Grapefruit',
-        notes: 'NO MEZCAL',
-      }],
+      kitchenMenu: [
+        {
+          itemName: 'BONFIRE NIGHTS',
+          quantity: 0,
+          menuGroup: 'PASSED BEVERAGES',
+          description: 'BONFIRE NIGHTS Mezcal, Tequila, Fresh Grapefruit',
+          notes: 'NO MEZCAL',
+        },
+        { itemName: 'ARM IN ARM', quantity: null, menuGroup: 'MOCKTAILS' },
+        { itemName: 'Sancerre', quantity: 0, menuGroup: 'WINE' },
+      ],
     },
     recipes: [],
     type: 'kitchen_menu',
@@ -1476,6 +1521,8 @@ test('Kitchen Menu renders plural beverage sections, hides zero quantities, and 
   assert.match(xml, />PASSED BEVERAGES</);
   assert.match(xml, />Mezcal, Tequila, Fresh Grapefruit</);
   assert.match(xml, />NO MEZCAL</);
+  assert.match(xml, />ARM IN ARM</);
+  assert.match(xml, />Sancerre</);
   assert.doesNotMatch(xml, />BONFIRE NIGHTS Mezcal/);
   assert.doesNotMatch(xml, /<w:t xml:space="preserve">0<\/w:t>/);
 });

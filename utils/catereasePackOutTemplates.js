@@ -136,7 +136,10 @@ const isKitchenPackOutMenuDish = (row) => {
 
 const isKitchenPackOutRequiredItem = (row) => {
   const fsType = normalized(row?.fsType);
-  return !fsType || fsType === 'food';
+  const category = normalized(row?.category);
+  const itemName = normalized(row?.itemName);
+  const explicitTestRow = category === 'pack out' && /\btest(?:\s+item)?\b/i.test(itemName);
+  return (!fsType || fsType === 'food') && !explicitTestRow;
 };
 
 const isGenericZeroQuantityHeading = (row) => {

@@ -21,6 +21,9 @@ const booleanValue = (value) => {
   if (typeof value === 'number') return value !== 0;
   return ['1', 'true', 'yes', 'y', 'on'].includes(clean(value).toLowerCase());
 };
+const nullableBooleanValue = (value) => (
+  value === '' || value === null || value === undefined ? null : booleanValue(value)
+);
 const first = (row, keys) => {
   for (const key of keys) {
     if (row?.[key] !== undefined && row?.[key] !== null && row?.[key] !== '') return row[key];
@@ -49,6 +52,9 @@ export const normalizeCatereasePackOutRows = (rows = []) => {
     category: clean(first(row, ['Category']), 160),
     fsType: clean(first(row, ['FSType', 'Type', 'ItemType']), 160),
     menuGroup: clean(first(row, ['MenuGroup', 'FSCategory', 'GroupName']), 160),
+    ...(first(row, ['UseRecipe']) !== ''
+      ? { useRecipe: nullableBooleanValue(first(row, ['UseRecipe'])) }
+      : {}),
       notes: clean(catereaseRichTextToPlain(first(row, ['Notes', 'Comment', 'Description', 'Instructions'])), 1000),
     }));
   const itemNames = new Set(normalizedRows.map((row) => itemKey(row.itemName)).filter(Boolean));
@@ -654,6 +660,13 @@ const expandKitchenPackOutRecipeGroups = (groups, recipes = []) => {
   return new Map([...groups.entries()].map(([group, values]) => {
     const requiredItems = values.filter((row) => !row?.topLevelFoodService);
     if (requiredItems.length) return [group, requiredItems];
+    const topLevelRows = values.filter((row) => row?.topLevelFoodService);
+    if (topLevelRows.some((row) => row?.useRecipe === false)) {
+      return [group, topLevelRows.map((row) => ({
+        ...row,
+        topLevelFoodService: false,
+      }))];
+    }
     const match = resolveExactRecipeMatch(group, recipeIndex);
     const ingredients = match.status === 'matched' && Array.isArray(match.recipe?.ingredients)
       ? match.recipe.ingredients.filter((ingredient) => clean(ingredient?.name, 300))
@@ -899,7 +912,7 @@ const kitchenMenuSections = (rows, recipes, includeAnnotations = false) => {
       labels: includeAnnotations ? labels : [],
     };
   });
-  const isBeverage = (row) => /\b(?:bar|beverages?|cocktails?|wine|beer|liquor)\b/i.test([
+  const isBeverage = (row) => /\b(?:bar|beverages?|cocktails?|mocktails?|wine|beer|liquor|alcohol|spirits?|champagne|sparkling)\b/i.test([
     row?.menuGroup, row?.category, row?.prepArea,
   ].filter(Boolean).join(' '));
   const kitchenMenuQuantity = (value) => Number(value) > 0 ? formatQuantity(value) : '';

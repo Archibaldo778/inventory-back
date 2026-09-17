@@ -36,7 +36,7 @@ test('Nowsta API rows preserve stable IDs and include assigned workers', () => {
       open_count: 1,
       event_workers: [{ company_user_id: 12, status: 'confirmed' }],
     }],
-    companyUsers: [{ id: 12, first_name: 'Aidan', last_name: 'Collis' }],
+    companyUsers: [{ id: 12, first_name: 'Aidan', last_name: 'Collis', phone_number: '+1 917 555 0100' }],
   });
 
   assert.equal(rows.length, 1);
@@ -44,6 +44,7 @@ test('Nowsta API rows preserve stable IDs and include assigned workers', () => {
   assert.equal(rows[0].date, '2026-09-05');
   assert.equal(rows[0].meta.nowsta.apiEventId, '91');
   assert.equal(rows[0].meta.nowsta.shifts[0].workers[0].name, 'Aidan Collis');
+  assert.equal(rows[0].meta.nowsta.shifts[0].workers[0].phone, '+1 917 555 0100');
   assert.equal(rows[0].meta.nowsta.shifts[0].unfilled, 1);
 });
 

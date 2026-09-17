@@ -417,6 +417,7 @@ const normalizeNowstaWorker = (source) => {
   if (!name) return null;
   return {
     name,
+    phone: trimImportValue(source.phone, 80),
     status: trimImportValue(source.status, 40).toLowerCase(),
     agency: Boolean(source.agency),
   };

@@ -129,6 +129,22 @@ const personName = (person) => clean([
   person?.last_name || person?.user_last_name,
 ].filter(Boolean).join(' '), 240) || clean(person?.nickname, 240) || clean(person?.email || person?.user_email, 240);
 
+const personPhone = (person) => clean(
+  person?.phone_number
+  || person?.phoneNumber
+  || person?.phone
+  || person?.mobile_phone_number
+  || person?.mobile_phone
+  || person?.mobilePhone
+  || person?.mobile_number
+  || person?.cell_phone
+  || person?.telephone
+  || person?.user_phone
+  || person?.user?.phone_number
+  || person?.user?.phone,
+  80
+);
+
 const eventAddress = (event) => clean([
   event?.address1,
   event?.address2,
@@ -216,6 +232,7 @@ export const buildNowstaImportRows = ({ events = [], shifts = [], companyUsers =
         if (!name) return null;
         return {
           name,
+          phone: personPhone(person),
           status: clean(worker?.status, 40).toLowerCase(),
           agency: Boolean(person?.staffing_agency_placeholder),
         };

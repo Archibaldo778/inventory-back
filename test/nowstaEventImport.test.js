@@ -28,7 +28,7 @@ test('Nowsta event import sanitizes operational fields and staffing assignments'
           position: 'Captain - Floor',
           startTime: '3:00 PM',
           endTime: '9:00 PM',
-          workers: [{ name: 'Adrain Palmer', status: 'Confirmed', agency: false }],
+          workers: [{ name: 'Adrain Palmer', phone: '+1 (917) 555-0142', status: 'Confirmed', agency: false }],
           unfilled: 1,
         }],
       },
@@ -40,6 +40,7 @@ test('Nowsta event import sanitizes operational fields and staffing assignments'
   assert.equal(event.importSource, 'nowsta');
   assert.equal(event.meta.guestCount, 150);
   assert.equal(event.meta.nowsta.shifts[0].workers[0].status, 'confirmed');
+  assert.equal(event.meta.nowsta.shifts[0].workers[0].phone, '+1 (917) 555-0142');
   assert.equal(event.meta.nowsta.shifts[0].unfilled, 1);
 });
 

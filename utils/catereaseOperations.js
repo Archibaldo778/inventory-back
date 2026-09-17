@@ -360,9 +360,11 @@ export const buildCatereaseOperationalSnapshot = ({
     // still better than silently showing no event time, and EvtFrom/EvtTo remain the
     // final event-level fallback when there are no timed sub-events at all.
     || timedSubEvents[0];
-  const eventStartTime = catereaseTimeValue(timedEvent?.startTime)
+  const eventStartTime = catereaseTimeValue(serviceStartTime)
+    || catereaseTimeValue(timedEvent?.startTime)
     || catereaseTimeValue(first(eventRow, ['EvtFrom', 'EventStartTime', 'StartTime']));
-  const eventEndTime = catereaseTimeValue(timedEvent?.endTime)
+  const eventEndTime = catereaseTimeValue(serviceEndTime)
+    || catereaseTimeValue(timedEvent?.endTime)
     || catereaseTimeValue(first(eventRow, ['EvtTo', 'EventEndTime', 'EndTime']));
   const zoneNameBySubEvent = new Map(subEvents.map((row) => [
     clean(row.subEvent, 120).toLowerCase(),

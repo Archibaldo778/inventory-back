@@ -870,6 +870,27 @@ test('Caterease event time falls back to a timed Pack Out sub-event', () => {
   assert.equal(snapshot.eventEndTime, '22:00:00');
 });
 
+test('Caterease Event Timing fields override a shorter Invoice sub-event window', () => {
+  const snapshot = buildCatereaseOperationalSnapshot({
+    eventId: 'E22641',
+    eventRow: {
+      Extra13: '06:00 PM',
+      Extra14: '08:00 PM',
+      EvtFrom: '2026-09-17T18:00:00',
+      EvtTo: '2026-09-17T19:00:00',
+    },
+    subEventRows: [{
+      SubEvtNum: 'S-INVOICE',
+      Description: 'Invoice',
+      StartTime: '18:00:00',
+      EndTime: '19:00:00',
+    }],
+  });
+
+  assert.equal(snapshot.eventStartTime, '06:00 PM');
+  assert.equal(snapshot.eventEndTime, '08:00 PM');
+});
+
 test('Caterease event time falls back to EvtFrom and EvtTo when sub-events have no time', () => {
   const snapshot = buildCatereaseOperationalSnapshot({
     eventId: 'E22922',

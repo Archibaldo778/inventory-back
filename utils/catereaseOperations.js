@@ -1106,11 +1106,20 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
   );
   const printableZoneName = clean(zoneName, 200);
   const genericZoneNames = new Set(['main', 'menu', 'pack out', 'staffing']);
+  const isGenericZoneName = genericZoneNames.has(printableZoneName.toLowerCase());
+  const packOutName = !isGenericZoneName
+    ? clean(printableZoneName
+      .replace(/^pack\s*out\s*(?:[-–—:]\s*)?/i, '')
+      .replace(/\s+pack\s*out$/i, ''), 200)
+    : '';
+  const packOutEventName = packOutName
+    ? `${event?.title || 'Event'}_${packOutName.toUpperCase()}`
+    : event?.title;
   const zoneHeading = printableZoneName && !genericZoneNames.has(printableZoneName.toLowerCase())
     ? paragraph(printableZoneName, { bold: true, size: 36, color: 'FF0000', align: 'center', after: 120 })
     : '';
   const eventDetailsTable = table([], [
-    [eventNameCell('Event: ', event?.title), highlightedValueCell('Event Date: ', longDate(event?.date))],
+    [eventNameCell('Event: ', packOutEventName), highlightedValueCell('Event Date: ', longDate(event?.date))],
     [labeledValueCell('Sales Rep: ', salesRep), labeledValueCell('Event Timing: ', packOutEventTiming, { valueBold: true })],
     [labeledValueCell('Guests: ', guestCount), labeledValueCell('Delivery Time: ', deliveryTime)],
     [labeledValueCell('Event Number: ', displayedEventNumber(event?.externalId || snapshot?.eventId || '')), labeledValueCell('Date PO Modified: ', catereaseModifiedDateTime(snapshot?.eventRevised))],

@@ -1166,7 +1166,9 @@ const buildOperationalAttachment = async (event, type, options = {}) => {
       brandLogoSvg: await loadBrandLogoSvg(),
       decorImages: [],
       zoneKey: String(options.zone || ''),
-      zoneName: String(options.zoneName || ''),
+      zoneName: String(type === 'po'
+        ? (options.fileZoneName || options.zoneName || template?.label || '')
+        : (options.zoneName || '')),
       templateKey,
       manualAdditions: event.catereaseManualAdditions || [],
     });

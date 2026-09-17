@@ -947,13 +947,28 @@ test('operational DOCX exports only the requested sub-event', async () => {
   assert.match(text, /Date PO Modified: 9\/10\/2026 \(7:53 pm\)/);
   assert.match(xml, /<w:color w:val="FF0000"\/[^>]*>/);
   assert.match(xml, /<w:b\/><w:color w:val="FF0000"\/><w:sz w:val="28"\/><w:szCs w:val="28"\/[^>]*><\/w:rPr><w:t xml:space="preserve">Event: <\/w:t>/);
-  assert.match(xml, /<w:b\/><w:color w:val="FF0000"\/><w:sz w:val="28"\/><w:szCs w:val="28"\/[^>]*><\/w:rPr><w:t xml:space="preserve">Dinner<\/w:t>/);
+  assert.match(xml, /<w:b\/><w:color w:val="FF0000"\/><w:sz w:val="28"\/><w:szCs w:val="28"\/[^>]*><\/w:rPr><w:t xml:space="preserve">Dinner_GREEN ROOM<\/w:t>/);
   assert.match(xml, /<w:b\/><w:color w:val="FF0000"\/><w:sz w:val="20"\/><w:szCs w:val="20"\/[^>]*><\/w:rPr><w:t xml:space="preserve">Friday, September 11, 2026<\/w:t>/);
   assert.doesNotMatch(xml, /<w:color w:val="FF0000"\/>.*?<w:t xml:space="preserve">PACK OUT<\/w:t>/s);
   assert.match(xml, /<w:jc w:val="right"\/>.*?<w:t xml:space="preserve">Revision<\/w:t>/s);
   assert.doesNotMatch(xml, />Photo</);
   assert.equal((xml.match(/<w:tbl>/g) || []).length, 2, 'Caterease PO uses one event table and one continuous item table');
   assert.match(xml, /<w:gridSpan w:val="5"\/[^>]*>/);
+});
+
+test('Pack Out appends the specific packout name to the red event title', async () => {
+  const buffer = await renderCatereaseOperationalDocx({
+    event: { title: 'David Monn Plans a Dinner - Philadelphia', date: '2026-09-18', externalId: 'E22538' },
+    snapshot: { schemaVersion: 3, packOut: [{ itemName: 'Panna', quantity: 270 }] },
+    type: 'po',
+    zoneName: 'Pack Out - Beverage',
+    includePackOutTemplate: false,
+  });
+  const zip = await JSZip.loadAsync(buffer);
+  const xml = await zip.file('word/document.xml').async('string');
+  const text = docxText(xml);
+  assert.match(text, /Event: David Monn Plans a Dinner - Philadelphia_BEVERAGE/);
+  assert.match(xml, /<w:color w:val="FF0000"\/[^>]*>.*?<w:t xml:space="preserve">David Monn Plans a Dinner - Philadelphia_BEVERAGE<\/w:t>/s);
 });
 
 test('operational DOCX uses event-level Caterease guests and sales rep', async () => {

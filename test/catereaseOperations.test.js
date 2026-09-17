@@ -228,6 +228,31 @@ test('Pack Out uses menu cocktail garnish structure when Caterease returns cockt
   );
 });
 
+test('Pack Out treats a zero-quantity uppercase menu cocktail as an item beneath Specialty Cocktail', () => {
+  const snapshot = {
+    schemaVersion: 19,
+    foodService: [
+      { sourceId: 'garnish-heading', itemName: 'GARNISH', quantity: 0, subEvent: 'S-PO', zoneName: 'Pack Out' },
+      { sourceId: 'lemons', itemName: 'Whole Lemons', quantity: 2, subEvent: 'S-PO', zoneName: 'Pack Out' },
+      { sourceId: 'cocktail-total', itemName: 'SPECIALTY COCKTAIL', quantity: 40, fsType: 'Beverage', subEvent: 'S-PO', zoneName: 'Pack Out' },
+      { sourceId: 'agave-packout', itemName: 'AGAVE SPICE', quantity: 0, fsType: 'Beverage', subEvent: 'S-PO', zoneName: 'Pack Out' },
+      { sourceId: 'equipment-heading', itemName: 'KITCHEN EQUIPMENT', quantity: 0, subEvent: 'S-PO', zoneName: 'Pack Out' },
+      { sourceId: 'tongs', itemName: 'Tongs', quantity: 1, subEvent: 'S-PO', zoneName: 'Pack Out' },
+      { sourceId: 'agave-menu', itemName: 'AGAVE SPICE', quantity: 0, fsType: 'Liquor', notes: 'Tequila GLASS: Rocks GARNISH: Cucumber Slice', subEvent: 'S-MENU', zoneName: 'Menu' },
+    ],
+    packOutTemplates: [{ key: 'print-36', label: 'Pack Out', documentType: 'po', operationalVisible: true, conditions: [] }],
+  };
+
+  assert.deepEqual(
+    operationalRows(snapshot, 'po', '', 'print-36').map(({ itemName, quantity, sourceSection }) => [itemName, quantity, sourceSection]),
+    [
+      ['Whole Lemons', 2, 'GARNISH'],
+      ['AGAVE SPICE', 40, 'SPECIALTY COCKTAIL'],
+      ['Tongs', 1, 'KITCHEN EQUIPMENT'],
+    ],
+  );
+});
+
 test('Kitchen Pack Out section exports select only the requested operational menu group', () => {
   const foodService = [
     ['PASSED HORS D’OEUVRES', '', ''],

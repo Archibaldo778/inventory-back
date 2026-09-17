@@ -33,6 +33,8 @@ const PACK_OUT_SECTION_HEADINGS = new Set([
 ]);
 
 const isPackOutSectionHeading = (row) => {
+  if (row?.sectionItem === true) return false;
+  if (row?.sectionHeading === true) return true;
   const itemName = clean(row?.itemName, 300);
   const quantityIsEmpty = !Number.isFinite(Number(row?.quantity)) || Number(row.quantity) === 0;
   if (!itemName || !quantityIsEmpty) return false;
@@ -51,12 +53,51 @@ const foodServiceGroupKey = (row) => clean(row?.subEvent, 120).toLowerCase()
   || clean(row?.zoneName, 200).toLowerCase();
 
 const withPackOutSourceSections = (rows = []) => {
-  const sectionByGroup = new Map();
-  return (Array.isArray(rows) ? rows : []).map((row) => {
+  const values = Array.isArray(rows) ? rows : [];
+  const cocktailRecipeNames = new Set(values
+    .filter((row) => !/\bpack\s*out\b|\binvoice\b/i.test(clean(row?.zoneName, 200)))
+    .filter((row) => normalized(row?.fsType) === 'liquor')
+    .filter((row) => /\b(?:glass|garnish)\s*:/i.test(clean(row?.notes, 1000)))
+    .map((row) => normalized(row?.itemName))
+    .filter(Boolean));
+  const specialtyCarrierIndexes = new Set(values.flatMap((row, index) => {
+    if (!/(?:specialty|spceialty)\s+cocktail/i.test(clean(row?.itemName, 300)) || Number(row?.quantity) <= 0) return [];
     const groupKey = foodServiceGroupKey(row) || '__main__';
+    let hasNamedCocktail = false;
+    for (const candidate of values.slice(index + 1)) {
+      if ((foodServiceGroupKey(candidate) || '__main__') !== groupKey) continue;
+      if (isKnownPackOutSectionHeading(candidate)) break;
+      if (cocktailRecipeNames.has(normalized(candidate?.itemName))) {
+        hasNamedCocktail = true;
+        break;
+      }
+    }
+    return hasNamedCocktail ? [index] : [];
+  }));
+  const sectionByGroup = new Map();
+  const pendingSpecialtyQuantity = new Map();
+  return values.map((row, index) => {
+    const groupKey = foodServiceGroupKey(row) || '__main__';
+    if (specialtyCarrierIndexes.has(index)) {
+      const sourceSection = clean(row?.itemName, 300);
+      sectionByGroup.set(groupKey, sourceSection);
+      pendingSpecialtyQuantity.set(groupKey, Number(row.quantity));
+      return { ...row, sourceSection, sectionHeading: true };
+    }
+    if (cocktailRecipeNames.has(normalized(row?.itemName))) {
+      const carriedQuantity = pendingSpecialtyQuantity.get(groupKey);
+      if (Number.isFinite(carriedQuantity) && carriedQuantity > 0) pendingSpecialtyQuantity.delete(groupKey);
+      return {
+        ...row,
+        quantity: Number(row?.quantity) > 0 ? row.quantity : carriedQuantity ?? row.quantity,
+        sourceSection: sectionByGroup.get(groupKey) || clean(row?.sourceSection, 300),
+        sectionItem: true,
+      };
+    }
     if (isPackOutSectionHeading(row)) {
       const sourceSection = clean(row?.itemName, 300);
       sectionByGroup.set(groupKey, sourceSection);
+      pendingSpecialtyQuantity.delete(groupKey);
       return { ...row, sourceSection, sectionHeading: true };
     }
     return { ...row, sourceSection: sectionByGroup.get(groupKey) || clean(row?.sourceSection, 300) };

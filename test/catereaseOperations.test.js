@@ -1593,9 +1593,8 @@ test('Kitchen Menu keeps liquor and its garnish in a separate Beverage section',
   const cocktailOffset = xml.indexOf('>AGAVE SPICE<');
   assert.ok(beverageOffset > 0 && cocktailOffset > beverageOffset);
   assert.match(xml, />Tequila, lime and agave</);
-  assert.match(xml, />GARNISH: Jalapeno</);
   assert.match(xml, />Half without</);
-  assert.equal((xml.match(/>GARNISH: Jalapeno</g) || []).length, 1);
+  assert.doesNotMatch(xml, />GARNISH: Jalapeno</);
   assert.match(xml, /Last Modified: 9\/16\/2026 \(3:58 pm\)/);
   assert.match(xml, />EVENT NOTES</);
   assert.match(xml, />Keep the open kitchen clean\.</);

@@ -968,7 +968,8 @@ const kitchenMenuSections = (rows, recipes, includeAnnotations = false) => {
       && previousBeverage
       && isBeverage(previousBeverage);
     if (cocktailGarnish) {
-      previousBeverage.comments = [...previousBeverage.comments, row.itemName, ...row.comments]
+      const garnishComments = row.comments.length ? row.comments : [row.itemName];
+      previousBeverage.comments = [...previousBeverage.comments, ...garnishComments]
         .filter((value, index, values) => value && values.indexOf(value) === index);
       return;
     }

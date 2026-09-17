@@ -102,3 +102,29 @@ test('missing guest rows name the exact required bottle', () => {
   assert.match(received.message, /Missing received quantity for: Ketel One Vodka/);
   assert.match(returned.message, /Missing returned quantity for: Ketel One Vodka/);
 });
+
+test('captain can submit final returns without inventing an Actual received count', () => {
+  const item = {
+    _id: 'aperol',
+    name: 'Aperol',
+    section: 'Spirits',
+    scope: 'alcohol',
+    included: true,
+    sentQty: 10,
+    deliveredQty: null,
+    returnConfirmed: false,
+  };
+
+  const result = applyGuestReturnRows([item], [
+    { itemId: 'aperol', deliveredQty: null, returnedQty: 4 },
+  ], { by: 'Captain Stephen' });
+
+  assert.equal(result.valid, true);
+  assert.deepEqual(result.variances, []);
+  assert.deepEqual(result.unverifiedReceived, [{
+    itemId: 'aperol', name: 'Aperol', returnedQty: 4,
+  }]);
+  assert.equal(item.deliveredQty, null);
+  assert.equal(item.returnedOpenQty, 4);
+  assert.equal(item.returnConfirmed, true);
+});

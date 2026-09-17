@@ -65,27 +65,36 @@ export const prepareGuestReturnRows = (items, rows) => {
   const { byId } = indexed;
   const updates = [];
   const variances = [];
+  const unverifiedReceived = [];
   for (const item of required) {
     const itemId = String(item?._id || item?.id || '');
     const row = byId.get(itemId);
-    const deliveredQty = Number(row?.deliveredQty);
+    const deliveredValue = row?.deliveredQty;
+    const savedDeliveredQty = item?.deliveredQty === null || item?.deliveredQty === undefined || item?.deliveredQty === ''
+      ? null
+      : Number(item.deliveredQty);
+    const deliveredQty = deliveredValue === null || deliveredValue === undefined || deliveredValue === ''
+      ? (Number.isFinite(savedDeliveredQty) && savedDeliveredQty >= 0 ? savedDeliveredQty : null)
+      : Number(deliveredValue);
     const returnedQty = Number(row?.returnedQty);
-    if (!row || !Number.isFinite(deliveredQty) || deliveredQty < 0) {
-      return { valid: false, message: `Enter a valid received quantity for ${item?.name || 'item'}`, updates: [], variances: [] };
+    if (deliveredQty !== null && (!Number.isFinite(deliveredQty) || deliveredQty < 0)) {
+      return { valid: false, message: `Enter a valid received quantity for ${item?.name || 'item'} or leave it blank`, updates: [], variances: [], unverifiedReceived: [] };
     }
     if (!Number.isFinite(returnedQty) || returnedQty < 0) {
-      return { valid: false, message: `Enter a valid returned quantity for ${item?.name || 'item'}`, updates: [], variances: [] };
+      return { valid: false, message: `Enter a valid returned quantity for ${item?.name || 'item'}`, updates: [], variances: [], unverifiedReceived: [] };
     }
     const pendingSentQty = item.sentQtyPending === true
-      ? Math.max(Number(item.sentQty || 0), deliveredQty, returnedQty)
+      ? Math.max(Number(item.sentQty || 0), deliveredQty ?? 0, returnedQty)
       : Number(item.sentQty || 0);
-    const difference = Math.round((returnedQty - deliveredQty) * 10000) / 10000;
-    if (difference > 0.0001) {
+    const difference = deliveredQty === null ? 0 : Math.round((returnedQty - deliveredQty) * 10000) / 10000;
+    if (deliveredQty === null) {
+      unverifiedReceived.push({ itemId, name: String(item?.name || 'Item'), returnedQty });
+    } else if (difference > 0.0001) {
       variances.push({ itemId, name: String(item?.name || 'Item'), deliveredQty, returnedQty, difference });
     }
     updates.push({ item, deliveredQty, returnedQty, pendingSentQty });
   }
-  return { valid: true, message: '', updates, variances };
+  return { valid: true, message: '', updates, variances, unverifiedReceived };
 };
 
 export const applyGuestReturnRows = (items, rows, { at = new Date(), by = '' } = {}) => {
@@ -93,7 +102,7 @@ export const applyGuestReturnRows = (items, rows, { at = new Date(), by = '' } =
   if (!prepared.valid) return prepared;
   prepared.updates.forEach(({ item, deliveredQty, returnedQty, pendingSentQty }) => {
     if (item.sentQtyPending === true) item.sentQty = pendingSentQty;
-    item.deliveredQty = deliveredQty;
+    if (deliveredQty !== null) item.deliveredQty = deliveredQty;
     item.returnedFullQty = 0;
     item.returnedOpenQty = returnedQty;
     item.lostDamagedQty = 0;

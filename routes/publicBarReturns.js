@@ -626,7 +626,7 @@ router.patch('/:eventId/returns', async (req, res) => {
     const now = new Date();
     const prepared = applyGuestReturnRows(required, rows, { at: now, by: reporterName });
     if (!prepared.valid) return res.status(400).json({ message: prepared.message });
-    const { updates, variances } = prepared;
+    const { updates, variances, unverifiedReceived } = prepared;
     event.status = 'submitted';
     event.submittedAt = now;
     event.submittedBy = reporterName;
@@ -641,10 +641,17 @@ router.patch('/:eventId/returns', async (req, res) => {
         count: updates.length,
         varianceCount: variances.length,
         variances: variances.slice(0, 50),
+        unverifiedReceivedCount: unverifiedReceived.length,
+        unverifiedReceived: unverifiedReceived.slice(0, 50),
       }),
     });
     await event.save();
-    return res.json({ ok: true, event: publicEvent(event), varianceCount: variances.length });
+    return res.json({
+      ok: true,
+      event: publicEvent(event),
+      varianceCount: variances.length,
+      unverifiedReceivedCount: unverifiedReceived.length,
+    });
   } catch (error) {
     return sendApiError(res, error, { context: 'Guest returns submission failed', fallbackMessage: 'Could not submit returned quantities' });
   }

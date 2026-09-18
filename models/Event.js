@@ -51,30 +51,6 @@ const catereaseManualAdditionSchema = new mongoose.Schema(
   { _id: true }
 );
 
-const kitchenPackOutBlueprintRowSchema = new mongoose.Schema(
-  {
-    kind: { type: String, enum: ['heading', 'item'], required: true },
-    label: { type: String, default: '', trim: true },
-    itemName: { type: String, default: '', trim: true },
-    quantityText: { type: String, default: '', trim: true },
-    notEnough: { type: String, default: '', trim: true },
-    justEnough: { type: String, default: '', trim: true },
-    tooMuch: { type: String, default: '', trim: true },
-  },
-  { _id: false }
-);
-
-const kitchenPackOutBlueprintSchema = new mongoose.Schema(
-  {
-    name: { type: String, required: true, trim: true },
-    fileName: { type: String, required: true, trim: true },
-    rows: { type: [kitchenPackOutBlueprintRowSchema], default: [] },
-    importedBy: { type: String, default: '', trim: true },
-    importedAt: { type: Date, default: Date.now },
-  },
-  { _id: true }
-);
-
 const eventSchema = new mongoose.Schema(
   {
     externalId: { type: String, trim: true, index: true, sparse: true },
@@ -89,7 +65,6 @@ const eventSchema = new mongoose.Schema(
     documentHistory: { type: [eventDocumentSchema], default: [] },
     catereaseOperations: { type: mongoose.Schema.Types.Mixed, default: null },
     catereaseManualAdditions: { type: [catereaseManualAdditionSchema], default: [] },
-    kitchenPackOutBlueprints: { type: [kitchenPackOutBlueprintSchema], default: [] },
     deckRevision: { type: Number, default: 0, min: 0, select: false },
   },
   { timestamps: true }

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import crypto from 'node:crypto';
 import CatereaseFile from '../models/CatereaseFile.js';
 import CatereaseIntegration from '../models/CatereaseIntegration.js';
+import CalendarReportStatus from '../models/CalendarReportStatus.js';
 import Event from '../models/Event.js';
 import BarEvent from '../models/BarEvent.js';
 import DecorPackout from '../models/DecorPackout.js';
@@ -77,7 +78,6 @@ import {
 import { normalizeKitchenRecipeName, syncKitchenRecipeMatches } from '../utils/kitchenRecipeMatching.js';
 import {
   CATEREASE_CALENDAR_EVENT_FIELDS,
-  catereaseCalendarAvailability,
   normalizeCatereaseCalendarEvent,
 } from '../utils/catereaseCalendar.js';
 import {
@@ -121,27 +121,6 @@ const listAllCatereaseCalendarEvents = async (from, to) => {
     pages += 1;
     if (pages > 100) throw new Error('Caterease calendar pagination did not finish');
   } while (cursor);
-  return rows;
-};
-
-const listCalendarResourceForEvents = async (resource, eventIds, fields) => {
-  const rows = [];
-  // The Hub accepts up to 200 IDs, but a composite Caterease EvtNum is long
-  // enough for that request to exceed the upstream/proxy URL limit.
-  const batchSize = 40;
-  for (let offset = 0; offset < eventIds.length; offset += batchSize) {
-    const eventId = eventIds.slice(offset, offset + batchSize).join(',');
-    let cursor = '';
-    let pages = 0;
-    do {
-      const page = await listCatereaseOperationalResource(resource, eventId, { cursor, limit: 200, fields });
-      rows.push(...page.data);
-      if (page.pagination.hasMore && !page.pagination.nextCursor) throw new Error(`Caterease ${resource} pagination cursor is missing`);
-      cursor = page.pagination.hasMore ? page.pagination.nextCursor : '';
-      pages += 1;
-      if (pages > 200) throw new Error(`Caterease ${resource} pagination did not finish`);
-    } while (cursor);
-  }
   return rows;
 };
 
@@ -1141,14 +1120,12 @@ router.get('/calendar', requireAuth, requireWorkspaceAccess, viewSyncRateLimit, 
 
     const sourceEvents = await listAllCatereaseCalendarEvents(from, to);
     const eventIds = [...new Set(sourceEvents.map((row) => String(row?.EvtNum || '').trim()).filter(Boolean))];
-    const [requiredItems, foodService, shifts] = eventIds.length ? await Promise.all([
-      listCalendarResourceForEvents('eventrequireditem', eventIds, 'EvtNum,UID'),
-      listCalendarResourceForEvents('foodservusage', eventIds, 'EvtNum,ItemName'),
-      listCalendarResourceForEvents('shift', eventIds, 'EvtNum,ShiftNum'),
-    ]) : [[], [], []];
-    const availability = catereaseCalendarAvailability({ requiredItems, foodService, shifts });
+    const storedStatuses = eventIds.length
+      ? await CalendarReportStatus.find({ eventKey: { $in: eventIds } }).lean()
+      : [];
+    const statusesByEvent = new Map(storedStatuses.map((status) => [String(status.eventKey), status]));
     const items = sourceEvents
-      .map((row) => normalizeCatereaseCalendarEvent(row, availability.get(String(row?.EvtNum || '').trim())))
+      .map((row) => normalizeCatereaseCalendarEvent(row, statusesByEvent.get(String(row?.EvtNum || '').trim())))
       .filter((event) => event.date && event.title)
       .sort((left, right) => left.date.localeCompare(right.date) || left.title.localeCompare(right.title));
     return res.json({
@@ -1166,6 +1143,51 @@ router.get('/calendar', requireAuth, requireWorkspaceAccess, viewSyncRateLimit, 
     return sendApiError(res, error, {
       context: 'Caterease calendar report failed',
       fallbackMessage: 'Failed to load the Caterease event calendar',
+    });
+  }
+});
+
+router.patch('/calendar/:eventKey/status', requireAuth, requireWorkspaceAccess, viewSyncRateLimit, async (req, res) => {
+  try {
+    const eventKey = String(req.params.eventKey || '').trim();
+    const field = String(req.body?.field || '').trim().toLowerCase();
+    const value = String(req.body?.value ?? '').replace(/\s+/g, ' ').trim().slice(0, 40);
+    if (!eventKey || !['sr', 'km', 'po'].includes(field)) {
+      return res.status(400).json({ error: 'A valid calendar event and field are required' });
+    }
+    const now = new Date();
+    const actorName = String(req.auth?.username || req.auth?.email || '').trim().slice(0, 180);
+    const actorId = String(req.auth?.userId || '').trim().slice(0, 120);
+    const status = await CalendarReportStatus.findOneAndUpdate(
+      { eventKey },
+      {
+        $set: {
+          externalId: String(req.body?.externalId || '').trim().slice(0, 40),
+          [`${field}.value`]: value,
+          [`${field}.updatedAt`]: now,
+          [`${field}.updatedBy`]: actorName,
+          [`${field}.updatedById`]: actorId,
+        },
+      },
+      { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: false }
+    ).lean();
+    return res.json({
+      eventKey,
+      calendarReport: {
+        sr: String(status?.sr?.value || ''),
+        km: String(status?.km?.value || ''),
+        po: String(status?.po?.value || ''),
+      },
+      calendarReportAudit: {
+        sr: status?.sr || {},
+        km: status?.km || {},
+        po: status?.po || {},
+      },
+    });
+  } catch (error) {
+    return sendApiError(res, error, {
+      context: 'Caterease calendar status update failed',
+      fallbackMessage: 'Failed to save the calendar status',
     });
   }
 });

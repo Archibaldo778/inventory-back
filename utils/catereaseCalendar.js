@@ -29,20 +29,13 @@ const guestCount = (row) => {
   return null;
 };
 
-export const catereaseCalendarAvailability = ({ requiredItems = [], foodService = [], shifts = [] } = {}) => {
-  const result = new Map();
-  const mark = (rows, field) => (Array.isArray(rows) ? rows : []).forEach((row) => {
-    const key = clean(row?.EvtNum);
-    if (!key) return;
-    result.set(key, { ...(result.get(key) || {}), [field]: true });
-  });
-  mark(requiredItems, 'po');
-  mark(foodService, 'km');
-  mark(shifts, 'sr');
-  return result;
-};
+const reportField = (field = {}) => ({
+  value: clean(field?.value),
+  updatedAt: field?.updatedAt || null,
+  updatedBy: clean(field?.updatedBy),
+});
 
-export const normalizeCatereaseCalendarEvent = (row = {}, availability = {}) => {
+export const normalizeCatereaseCalendarEvent = (row = {}, manualStatus = {}) => {
   const rawEventId = clean(row?.EvtNum);
   const actualGuests = guestCount(row);
   const status = clean(row?.Status);
@@ -62,9 +55,14 @@ export const normalizeCatereaseCalendarEvent = (row = {}, availability = {}) => 
       guestCount: actualGuests,
       category,
       calendarReport: {
-        sr: availability?.sr ? 'Yes' : '',
-        km: availability?.km ? 'Yes' : '',
-        po: availability?.po ? 'Yes' : '',
+        sr: reportField(manualStatus?.sr).value,
+        km: reportField(manualStatus?.km).value,
+        po: reportField(manualStatus?.po).value,
+      },
+      calendarReportAudit: {
+        sr: reportField(manualStatus?.sr),
+        km: reportField(manualStatus?.km),
+        po: reportField(manualStatus?.po),
       },
       catereaseEventId: rawEventId,
       catereaseRevisedAt: clean(row?.Revised),
@@ -79,4 +77,3 @@ export const normalizeCatereaseCalendarEvent = (row = {}, availability = {}) => 
     documents: [],
   };
 };
-

@@ -711,6 +711,41 @@ test('Kitchen Pack Out documents follow Pack Out sub-events and split combined o
   );
 });
 
+test('Kitchen Pack Out fallback rows stop at menu boundaries and never turn instructions into items', () => {
+  const menuSubEvent = 'S-MENU';
+  const packOutRows = [
+    { FdSvNum: 'F-DESSERT-PO', ItemName: 'Boxes', SubEvtNum: 'S-DESSERT', SEDescription: 'Pack Out - Dessert Station', Type: 'Equipment' },
+    { FdSvNum: 'F-ICE-PO', ItemName: 'Machines', SubEvtNum: 'S-ICE', SEDescription: 'Pack Out - Ice Cream', Type: 'Equipment' },
+    { FdSvNum: 'F-HD-PO', ItemName: 'Trays', SubEvtNum: 'S-HD', SEDescription: 'Pack Out - HD', Type: 'Equipment' },
+    { FdSvNum: 'F-HD-HEAD', ItemName: 'PASSED HDS', Qty: 0, SubEvtNum: menuSubEvent, SEDescription: 'Menu', Type: 'Food', NSort: 1 },
+    { FdSvNum: 'F-HD', ItemName: 'Tuna bite', Qty: 0, SubEvtNum: menuSubEvent, SEDescription: 'Menu', Type: 'Food', NSort: 2 },
+    { FdSvNum: 'F-DESSERT-HEAD', ItemName: 'DESSERT STATION', Qty: 0, SubEvtNum: menuSubEvent, SEDescription: 'Menu', Type: 'Food', NSort: 3 },
+    { FdSvNum: 'F-OCC', ItemName: 'PROVIDED BY OCC', Qty: 0, SubEvtNum: menuSubEvent, SEDescription: 'Menu', Type: 'Food', NSort: 4 },
+    { FdSvNum: 'F-COOKIE', ItemName: 'Mini cookies (sugar cookies, cowboy cookies, salted chocolate chip & snickerdoodle)', Qty: 0, SubEvtNum: menuSubEvent, SEDescription: 'Menu', Type: 'Food', NSort: 5 },
+    { FdSvNum: 'F-ICE-HEAD', ItemName: 'SOFT SERVE', Qty: 0, SubEvtNum: menuSubEvent, SEDescription: 'Menu', Type: 'Food', NSort: 6 },
+    { FdSvNum: 'F-MACHINE', ItemName: 'OCC TO PROVIDE (4) MACHINES', Qty: 0, SubEvtNum: menuSubEvent, SEDescription: 'Menu', Type: 'Food', NSort: 7 },
+    { FdSvNum: 'F-FOOTPRINT', ItemName: 'Footprint 1: Vanilla or Coffee or Vanilla coffee swirl', Qty: 0, SubEvtNum: menuSubEvent, SEDescription: 'Menu', Type: 'Food', NSort: 8 },
+    { FdSvNum: 'F-CLIENT', ItemName: 'PROVIDED BY CLIENT', Qty: 0, SubEvtNum: menuSubEvent, SEDescription: 'Menu', Type: 'Food', NSort: 9 },
+    { FdSvNum: 'F-DONUT', ItemName: 'Donuts', Qty: 0, SubEvtNum: menuSubEvent, SEDescription: 'Menu', Type: 'Food', NSort: 10 },
+  ];
+  const snapshot = buildCatereaseOperationalSnapshot({
+    eventId: 'E-FALLBACK',
+    packOutRows,
+    kitchenMenuRows: packOutRows,
+    kitchenPackOutRows: [{ UID: 'R-HD', FdSvNum: 'F-HD', ItemName: 'Tuna', FSName: 'Tuna bite' }],
+    printTemplateRows: [{ UID: 6, PrintKind: 'EvtReq', Title: 'Kitchen Pack Out' }],
+  });
+
+  assert.deepEqual(
+    snapshot.kitchenPackOutDocuments.find(({ zoneName }) => zoneName === 'Dessert Station').rows.map(({ itemName }) => itemName),
+    ['sugar cookies', 'cowboy cookies', 'salted chocolate chip', 'snickerdoodle']
+  );
+  assert.deepEqual(
+    snapshot.kitchenPackOutDocuments.find(({ zoneName }) => zoneName === 'Ice Cream').rows,
+    []
+  );
+});
+
 test('required items are not guessed when a food service name belongs to multiple sub-events', () => {
   const snapshot = buildCatereaseOperationalSnapshot({
     eventId: 'E20244',
@@ -1271,6 +1306,7 @@ test('Kitchen Pack Out uses the Caterease feedback table layout', async () => {
     event: { title: 'Dinner', date: '2026-09-11', externalId: 'E22672', meta: {} },
     snapshot,
     type: 'kitchen_packout',
+    zoneName: 'Dessert Station',
   });
   const zip = await JSZip.loadAsync(buffer);
   const xml = await zip.file('word/document.xml').async('string');
@@ -1285,6 +1321,7 @@ test('Kitchen Pack Out uses the Caterease feedback table layout', async () => {
   assert.match(xml, />Option A: 5 hours or less - Peanut butter &amp; jelly sandwiches</);
   assert.ok(xml.indexOf('>Staff Meal<') > xml.indexOf('>Hot Line<'));
   assert.doesNotMatch(xml, />Revision</);
+  assert.doesNotMatch(xml, />Dessert Station</);
   assert.match(xml, />Quantity</);
   assert.match(xml, />Not Enough</);
   assert.match(xml, />Just Enough</);
@@ -1586,7 +1623,7 @@ test('operational snapshot checksum is stable when API row order changes', () =>
     packOutRows: [{ ItemName: 'B', Qty: 2 }, { ItemName: 'A', Qty: 1 }],
     syncedAt: new Date('2026-09-11T12:00:00Z'),
   });
-  assert.equal(first.schemaVersion, 24);
+  assert.equal(first.schemaVersion, 25);
   const second = buildCatereaseOperationalSnapshot({
     eventId: 'E22672',
     packOutRows: [{ ItemName: 'A', Qty: 1 }, { ItemName: 'B', Qty: 2 }],

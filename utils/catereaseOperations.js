@@ -338,7 +338,7 @@ const kitchenPackOutKnownRouteKind = (value) => {
   if (/dinner\s*kitchen|seated\s*dinner/.test(text)) return 'dinner';
   if (/ice\s*cream|soft\s*serve/.test(text)) return 'ice-cream';
   if (/vendor/.test(text)) return 'vendor-meal';
-  if (/dessert/.test(text)) return 'dessert-station';
+  if (/dessert|\bsweets?\b/.test(text)) return 'dessert-station';
   if (/staff\s*(?:holding|meal)/.test(text)) return 'staff-meal';
   if (/beverage|bar\b/.test(text)) return 'beverage';
   return '';
@@ -430,17 +430,59 @@ const kitchenMenuRouteByFoodServiceId = (foodService = [], routes = []) => {
     const itemName = clean(row?.itemName, 300);
     const letters = itemName.replace(/[^A-Za-z]+/g, '');
     const isHeading = letters && letters === letters.toUpperCase();
-    const nextKind = isHeading ? kitchenPackOutRouteKind(itemName, routes) : '';
-    if (nextKind) currentKind = nextKind;
-    else if (/^beverages?$/i.test(itemName)) currentKind = '';
+    const outsideKitchenScope = /^(?:external\s+vendor|outsourced|included)\b/i.test(itemName)
+      || (/^provided\s+by\b/i.test(itemName) && !/^provided\s+by\s+occ\b/i.test(itemName));
+    const nextKind = isHeading && !outsideKitchenScope ? kitchenPackOutRouteKind(itemName, routes) : '';
+    if (outsideKitchenScope) currentKind = '';
+    else if (nextKind) currentKind = nextKind;
+    else if (isHeading && !/^\s*(?:provided\s+by\s+occ|occ\s+to\s+provide)\b/i.test(itemName)) currentKind = '';
     const id = clean(row?.foodServiceId, 120).toLowerCase();
     if (id && currentKind) routeById.set(id, currentKind);
   });
   return routeById;
 };
 
+const isKitchenPackOutFallbackNoise = (value) => {
+  const text = clean(value, 300);
+  return !text
+    || /^(?:provided\s+by|occ\s+to\s+provide|included|placed\s+on|external\s+vendor|outsourced)\b/i.test(text)
+    || /^(?:vendor\s+meals?|soft\s+serve|staff\s+meals?|sweets?)$/i.test(text)
+    || /^footprint\s+\d+\s*:/i.test(text)
+    || /\bon\s+request$/i.test(text);
+};
+
+const kitchenPackOutFallbackItems = (row, route) => {
+  const name = clean(row?.itemName, 300);
+  const list = name.match(/^([^()]+\b(?:cookies?|assorted|selection|variety)[^()]*)\(([^()]+)\)\s*$/i);
+  const parts = list
+    ? list[2].split(/\s*(?:,|&)\s*/).map((value) => clean(value, 200)).filter(Boolean)
+    : [];
+  const names = parts.length >= 3 ? parts : [name];
+  return names.map((itemName, index) => ({
+    ...row,
+    sourceId: index ? `${row.sourceId}-fallback-${index + 1}` : row.sourceId,
+    itemName,
+    station: route.zoneName,
+    topLevelFoodService: false,
+    routeFallbackItem: true,
+  }));
+};
+
 const buildKitchenPackOutDocuments = (snapshot, rows = []) => {
-  const sourceValues = Array.isArray(rows) ? rows : [];
+  const rawSourceValues = Array.isArray(rows) ? rows : [];
+  const sourceRequiredItemKeys = new Set(rawSourceValues
+    .filter((row) => !row?.topLevelFoodService)
+    .map((row) => itemKey(row?.itemName))
+    .filter(Boolean));
+  const sourceValues = rawSourceValues.filter((row) => {
+    if (!row?.topLevelFoodService) return true;
+    const sourceSection = clean(row?.sourceSection, 300);
+    const outsideKitchenScope = !/^provided\s+by\s+occ\b/i.test(sourceSection)
+      && /^(?:provided\s+by|external\s+vendor|outsourced|included)\b/i.test(sourceSection);
+    return !outsideKitchenScope
+      && !sourceRequiredItemKeys.has(itemKey(row?.itemName))
+      && !isKitchenPackOutFallbackNoise(row?.itemName);
+  });
   if (!sourceValues.length) return [];
   const routes = kitchenPackOutRouteDefinitions(snapshot?.foodService || snapshot?.packOut || []);
   const routeByFoodServiceId = kitchenMenuRouteByFoodServiceId(snapshot?.foodService || snapshot?.packOut || [], routes);
@@ -449,6 +491,7 @@ const buildKitchenPackOutDocuments = (snapshot, rows = []) => {
     routes.push({ zoneKey: 'kpo-route:dessert-station', zoneName: 'Dessert Station', kind: 'dessert-station', sourceSubEvent: '' });
   }
   const representedIds = new Set(sourceValues.map((row) => clean(row?.foodServiceId, 120).toLowerCase()).filter(Boolean));
+  const requiredItemKeys = new Set(sourceValues.map((row) => itemKey(row?.itemName)).filter(Boolean));
   const routedFoodRows = (Array.isArray(snapshot?.foodService) ? snapshot.foodService : snapshot?.packOut || [])
     .filter((row) => clean(row?.fsType, 80).toLowerCase() === 'food')
     .filter((row) => {
@@ -456,6 +499,8 @@ const buildKitchenPackOutDocuments = (snapshot, rows = []) => {
       const kind = routeByFoodServiceId.get(id);
       return id && kind && !['beverage', 'staff-meal'].includes(kind)
         && !representedIds.has(id)
+        && !requiredItemKeys.has(itemKey(row?.itemName))
+        && !isKitchenPackOutFallbackNoise(row?.itemName)
         && kitchenPackOutRouteKind(row?.itemName, routes) !== kind
         && !/^\*\*|\b(?:note|rental needs)\b/i.test(clean(row?.itemName, 300));
     })
@@ -471,7 +516,11 @@ const buildKitchenPackOutDocuments = (snapshot, rows = []) => {
       if (kind === 'staff-meal') return route.kind === 'dinner' && route === dinnerRoutes.at(-1);
       return kind === route.kind;
     });
-    if (routeRows.length) documents.push({ ...route, rows: routeRows });
+    const hasRequiredItems = routeRows.some((row) => !row?.topLevelFoodService);
+    const documentRows = hasRequiredItems
+      ? routeRows
+      : routeRows.flatMap((row) => row?.topLevelFoodService ? kitchenPackOutFallbackItems(row, route) : [row]);
+    documents.push({ ...route, rows: documentRows });
   });
   return documents;
 };
@@ -611,7 +660,7 @@ export const buildCatereaseOperationalSnapshot = ({
     kitchenPackOutDocuments,
   })).digest('hex');
   return {
-    schemaVersion: 24,
+    schemaVersion: 25,
     eventId: clean(eventId, 120),
     syncedAt,
     checksum,
@@ -1393,7 +1442,7 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
     [`Venue Notes: ${event?.meta?.venueNotes || ''}`, `Event Number: ${displayedEventNumber(event?.externalId || snapshot?.eventId || '')}`],
     [`Allergen/Restrictions: ${event?.meta?.allergens || event?.meta?.restrictions || ''}`, ''],
   ], [5300, 5300])}` : isKitchenPackOut
-    ? `${zoneHeading}${kitchenPackOutDetailsTable}`
+    ? kitchenPackOutDetailsTable
     : isStaffRequest
     ? `${paragraph(title, { bold: true, size: 36, align: 'center', after: 120 })}${zoneHeading}${eventDetailsTable}`
     : `${paragraph('Revision', { bold: true, size: 32, align: 'right', after: 80 })}${eventDetailsTable}`;

@@ -777,9 +777,30 @@ test('Caterease Pack Out rows preserve operational grouping', () => {
     category: 'Paper goods',
     fsType: '',
     menuGroup: 'Kitchen Equipment',
+    sortOrder: null,
+    revised: '',
     useRecipe: false,
     notes: '',
   });
+});
+
+test('Caterease Pack Out rows follow NSort within each sub-event', () => {
+  const rows = normalizeCatereasePackOutRows([
+    { FdSvNum: 'F16', SubEvtNum: 'BEV', ItemName: 'Fever Tree Tonic', Qty: 3, NSort: 16 },
+    { FdSvNum: 'F12', SubEvtNum: 'BEV', ItemName: 'MIXERS CASES', Qty: 0, NSort: 12 },
+    { FdSvNum: 'F14', SubEvtNum: 'BEV', ItemName: 'Fever Tree Tonic', Qty: 4, NSort: 14 },
+    { FdSvNum: 'F13', SubEvtNum: 'BEV', ItemName: 'Fever Tree Soda', Qty: 8, NSort: 13 },
+    { FdSvNum: 'F15', SubEvtNum: 'BEV', ItemName: 'Fever Tree Gingerbeer', Qty: 3, NSort: 15, Revised: '2026-09-16T18:05:27.17' },
+  ]);
+
+  assert.deepEqual(rows.map((row) => row.itemName), [
+    'MIXERS CASES',
+    'Fever Tree Soda',
+    'Fever Tree Tonic',
+    'Fever Tree Gingerbeer',
+    'Fever Tree Tonic',
+  ]);
+  assert.equal(rows[3].revised, '2026-09-16T18:05:27.17');
 });
 
 test('Caterease Pack Out suppresses a description that only repeats the item name', () => {
@@ -1008,6 +1029,46 @@ test('operational DOCX exports only the requested sub-event', async () => {
   assert.doesNotMatch(xml, />Photo</);
   assert.equal((xml.match(/<w:tbl>/g) || []).length, 2, 'Caterease PO uses one event table and one continuous item table');
   assert.match(xml, /<w:gridSpan w:val="5"\/[^>]*>/);
+});
+
+test('Pack Out header uses its own latest row revision and never invents a delivery time', async () => {
+  const snapshot = buildCatereaseOperationalSnapshot({
+    eventId: 'E22538',
+    eventRow: {
+      Extra13: '07:00 PM',
+      Extra14: '12:00 AM',
+      Revised: '2026-09-16T19:14:00',
+    },
+    packOutRows: [
+      {
+        FdSvNum: 'HD-1', ItemName: 'Panna', Qty: 12, SubEvtNum: 'S-HD',
+        SEDescription: 'Pack Out - HD & Greenroom', NSort: 1, Revised: '2026-09-16T17:22:00',
+      },
+      {
+        FdSvNum: 'HD-2', ItemName: 'Pellegrino', Qty: 12, SubEvtNum: 'S-HD',
+        SEDescription: 'Pack Out - HD & Greenroom', NSort: 2, Revised: '2026-09-16T17:31:39.247',
+      },
+      {
+        FdSvNum: 'BEV-1', ItemName: 'Ice', Qty: 4, SubEvtNum: 'S-BEV',
+        SEDescription: 'Pack Out - Beverage', NSort: 1, Revised: '2026-09-16T18:05:27.17',
+      },
+    ],
+  });
+  const buffer = await renderCatereaseOperationalDocx({
+    event: { title: 'Dinner', date: '2026-09-18', externalId: 'E22538', meta: {} },
+    snapshot,
+    type: 'po',
+    zoneKey: 's-hd|pack out - hd & greenroom',
+    zoneName: 'Pack Out - HD & Greenroom',
+    includePackOutTemplate: false,
+  });
+  const zip = await JSZip.loadAsync(buffer);
+  const xml = await zip.file('word/document.xml').async('string');
+  const text = docxText(xml);
+
+  assert.match(text, /Date PO Modified: 9\/16\/2026 \(5:31 pm\)/);
+  assert.doesNotMatch(text, /Date PO Modified: 9\/16\/2026 \(7:14 pm\)/);
+  assert.doesNotMatch(text, /Delivery Time: 7:00 pm/);
 });
 
 test('Pack Out appends the specific packout name to the red event title', async () => {
@@ -1425,7 +1486,7 @@ test('operational snapshot checksum is stable when API row order changes', () =>
     packOutRows: [{ ItemName: 'B', Qty: 2 }, { ItemName: 'A', Qty: 1 }],
     syncedAt: new Date('2026-09-11T12:00:00Z'),
   });
-  assert.equal(first.schemaVersion, 22);
+  assert.equal(first.schemaVersion, 23);
   const second = buildCatereaseOperationalSnapshot({
     eventId: 'E22672',
     packOutRows: [{ ItemName: 'A', Qty: 1 }, { ItemName: 'B', Qty: 2 }],

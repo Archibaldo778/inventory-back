@@ -45,7 +45,7 @@ const operationalZoneIdentity = (row) => [
 export const normalizeCatereasePackOutRows = (rows = []) => {
   const normalizedRows = (Array.isArray(rows) ? rows : [])
     .slice(0, 10000)
-    .map((row) => ({
+    .map((row, sourceIndex) => ({
     sourceId: clean(first(row, ['UID', 'FdSvNum', 'FSNum', 'ItemNum', 'ItemID', 'ID']), 120) || fallbackSourceId(row),
     foodServiceId: clean(first(row, ['FdSvNum', 'FSNum']), 120),
     itemId: clean(first(row, ['ItemNum', 'ItemID']), 120),
@@ -58,14 +58,33 @@ export const normalizeCatereasePackOutRows = (rows = []) => {
     category: clean(first(row, ['Category']), 160),
     fsType: clean(first(row, ['FSType', 'Type', 'ItemType']), 160),
     menuGroup: clean(first(row, ['MenuGroup', 'FSCategory', 'GroupName']), 160),
+    sortOrder: numberOrNull(first(row, ['NSort'])),
+    revised: clean(first(row, ['Revised']), 80),
+    sourceIndex,
     ...(first(row, ['UseRecipe']) !== ''
       ? { useRecipe: nullableBooleanValue(first(row, ['UseRecipe'])) }
       : {}),
       notes: clean(catereaseRichTextToPlain(first(row, ['Notes', 'Comment', 'Description', 'Instructions'])), 1000),
     }));
   const itemNames = new Set(normalizedRows.map((row) => itemKey(row.itemName)).filter(Boolean));
+  const groupOrder = new Map();
+  normalizedRows.forEach((row) => {
+    const key = clean(row.subEvent, 120).toLowerCase();
+    if (!groupOrder.has(key)) groupOrder.set(key, groupOrder.size);
+  });
   return normalizedRows
+    .sort((left, right) => {
+      const groupDifference = groupOrder.get(clean(left.subEvent, 120).toLowerCase())
+        - groupOrder.get(clean(right.subEvent, 120).toLowerCase());
+      if (groupDifference) return groupDifference;
+      const leftHasSort = Number.isFinite(left.sortOrder);
+      const rightHasSort = Number.isFinite(right.sortOrder);
+      if (leftHasSort && rightHasSort && left.sortOrder !== right.sortOrder) return left.sortOrder - right.sortOrder;
+      if (leftHasSort !== rightHasSort) return leftHasSort ? -1 : 1;
+      return left.sourceIndex - right.sourceIndex;
+    })
     .map((row) => {
+      const { sourceIndex: _sourceIndex, ...normalizedRow } = row;
       const nameKey = itemKey(row.itemName);
       const notesKey = itemKey(row.notes);
       const redundantDescription = notesKey && (
@@ -74,7 +93,7 @@ export const normalizeCatereasePackOutRows = (rows = []) => {
         || (notesKey.length >= 4 && nameKey.startsWith(`${notesKey} `))
         || ['garnish', 'specialty cocktail'].includes(notesKey)
       );
-      return { ...row, notes: redundantDescription ? '' : row.notes };
+      return { ...normalizedRow, notes: redundantDescription ? '' : row.notes };
     })
     .filter((row) => row.itemName && row.menuGroup.toLowerCase() !== 'standard');
 };
@@ -415,7 +434,7 @@ export const buildCatereaseOperationalSnapshot = ({
     packOutTemplates,
   })).digest('hex');
   return {
-    schemaVersion: 22,
+    schemaVersion: 23,
     eventId: clean(eventId, 120),
     syncedAt,
     checksum,
@@ -551,6 +570,21 @@ const catereaseModifiedDateTime = (value) => {
   const displayHour = hour % 12 || 12;
   const suffix = hour >= 12 ? 'pm' : 'am';
   return `${Number(match[2])}/${Number(match[3])}/${match[1]} (${displayHour}:${String(minute).padStart(2, '0')} ${suffix})`;
+};
+
+const latestCatereaseRevision = (rows = [], fallback = '') => {
+  let latest = '';
+  let latestTime = Number.NaN;
+  (Array.isArray(rows) ? rows : []).forEach((row) => {
+    const candidate = clean(row?.revised, 80);
+    const candidateTime = Date.parse(candidate);
+    if (!candidate || !Number.isFinite(candidateTime)) return;
+    if (!Number.isFinite(latestTime) || candidateTime > latestTime) {
+      latest = candidate;
+      latestTime = candidateTime;
+    }
+  });
+  return latest || clean(fallback, 80);
 };
 
 const itemKey = (value) => clean(value, 300).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
@@ -1111,7 +1145,6 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
   const salesRep = event?.meta?.salesRep || snapshot?.salesRep || '';
   const deliveryTime = event?.meta?.deliveryTime
     || formatOperationalTime(snapshot?.deliveryTime)
-    || formatOperationalTime(snapshot?.eventStartTime)
     || '';
   const staffingRows = Array.isArray(snapshot?.staffRequest) && snapshot.staffRequest.length
     ? snapshot.staffRequest
@@ -1130,6 +1163,13 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
   const packOutEventName = packOutName
     ? `${event?.title || 'Event'}_${packOutName.toUpperCase()}`
     : event?.title;
+  const normalizedZoneKey = clean(zoneKey, 200).toLowerCase();
+  const revisionRows = type === 'po' && normalizedZoneKey
+    ? (snapshot?.foodService || snapshot?.packOut || []).filter((row) => (
+      operationalZoneIdentity(row) === normalizedZoneKey
+    ))
+    : rows;
+  const documentRevised = latestCatereaseRevision(revisionRows, snapshot?.eventRevised);
   const zoneHeading = printableZoneName && !genericZoneNames.has(printableZoneName.toLowerCase())
     ? paragraph(printableZoneName, { bold: true, size: 36, color: 'FF0000', align: 'center', after: 120 })
     : '';
@@ -1137,7 +1177,7 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
     [eventNameCell('Event: ', packOutEventName), highlightedValueCell('Event Date: ', longDate(event?.date))],
     [labeledValueCell('Sales Rep: ', salesRep), labeledValueCell('Event Timing: ', packOutEventTiming, { valueBold: true })],
     [labeledValueCell('Guests: ', guestCount), labeledValueCell('Delivery Time: ', deliveryTime)],
-    [labeledValueCell('Event Number: ', displayedEventNumber(event?.externalId || snapshot?.eventId || '')), labeledValueCell('Date PO Modified: ', catereaseModifiedDateTime(snapshot?.eventRevised))],
+    [labeledValueCell('Event Number: ', displayedEventNumber(event?.externalId || snapshot?.eventId || '')), labeledValueCell('Date PO Modified: ', catereaseModifiedDateTime(documentRevised))],
   ], [5327, 5328]);
   const staffMealHeader = [staffMeal.quantity, staffMeal.name].filter(Boolean).join(' - ');
   const kitchenPackOutTitle = template?.label || 'Kitchen Pack Out';

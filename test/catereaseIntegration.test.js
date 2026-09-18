@@ -16,4 +16,6 @@ test('food service fields exclude unsupported Vendor', () => {
   assert.equal(fields.includes('Vendor'), false);
   assert.equal(fields.includes('Comment'), true);
   assert.equal(fields.includes('Description'), true);
+  assert.equal(fields.includes('NSort'), true);
+  assert.equal(fields.includes('Revised'), true);
 });

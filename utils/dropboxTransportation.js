@@ -80,7 +80,11 @@ const normalizeTitle = (value) => clean(value)
   .replace(/[’']/g, '')
   .replace(/wiliamsburg/g, 'williamsburg')
   .replace(/\bphilly\b/g, 'philadelphia')
-  .replace(/\b(?:setup|travel|day|dry goods|beverage only|plans|for|inc|a)\b/g, ' ')
+  // Transportation sheets often use the short event name while Caterease adds
+  // operational suffixes such as "Staffing 9/18" or "Beverage Service".
+  // These words must not prevent an otherwise unambiguous same-day match.
+  .replace(/\bstaffing(?:\s+\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?)?\b/g, ' ')
+  .replace(/\b(?:setup|travel|day|service|dry goods|beverage only|plans|for|inc|a)\b/g, ' ')
   .replace(/[^a-z0-9]+/g, ' ')
   .replace(/\s+/g, ' ')
   .trim();

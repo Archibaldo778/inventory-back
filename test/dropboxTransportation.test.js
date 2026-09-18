@@ -52,6 +52,30 @@ test('transportation matching combines delivery and pickup rows for the same dri
   });
 });
 
+test('transportation matching ignores Caterease operational suffixes absent from the driver sheet', () => {
+  const rows = [{
+    eventName: 'Hermes Williamsburg Opening',
+    driver: 'Roman Kokorin',
+    phone: '646-581-4973',
+    vehicle: 'Edge (N18)',
+    callTime: '6:00 AM',
+    departureTime: '7:15 AM',
+    arrivalTime: '8:00 AM',
+    pickupTime: '',
+    notes: '',
+    address: '',
+  }];
+  const result = matchTransportationToEvents(rows, [{
+    _id: 'event-hermes-private-day',
+    title: 'Hermes Williamsburg Opening Beverage Service - Private Day - Staffing 9/18',
+  }]);
+
+  assert.equal(result.unmatched.length, 0);
+  assert.equal(result.matches.length, 1);
+  assert.equal(result.matches[0].sourceEventName, 'Hermes Williamsburg Opening');
+  assert.equal(result.matches[0].drivers[0].name, 'Roman Kokorin');
+});
+
 test('transportation filename follows the dated Dropbox convention', () => {
   assert.equal(transportationFileName('2026-09-17'), '09-17-2026 Trans.xlsx');
 });

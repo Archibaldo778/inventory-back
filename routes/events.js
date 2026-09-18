@@ -173,6 +173,10 @@ const findEventTitleDateMatches = async (event, session = null) => {
   return candidates.filter((candidate) => normalizeImportedEventMatchTitle(candidate.title) === expectedTitle);
 };
 
+export const uniqueNowstaTitleDateMatch = (matches = []) => (
+  Array.isArray(matches) && matches.length === 1 ? matches[0] : null
+);
+
 const findManualEventMatches = async (event, excludeId = null, session = null) => {
   const matches = await findEventTitleDateMatches(event, session);
   const importedBaseId = normalizeImportedEventBaseId(event.externalId);
@@ -540,21 +544,26 @@ const applyNowstaApiRows = async (sourceRows, actor = {}) => {
       };
       const identityConditions = [{ externalId: event.externalId }];
       if (apiEventId) identityConditions.push({ 'meta.nowsta.apiEventId': apiEventId });
-      const existing = await Event.findOne({
+      let existing = await Event.findOne({
         $or: identityConditions,
         status: { $not: /^deleted$/i },
       }).lean();
+      let matchedByTitleDate = false;
 
       if (!existing) {
         const titleDateMatches = await findEventTitleDateMatches(event);
-        if (titleDateMatches.length) {
+        const fallbackMatch = uniqueNowstaTitleDateMatch(titleDateMatches);
+        if (fallbackMatch) {
+          existing = await Event.findById(fallbackMatch._id).lean();
+          matchedByTitleDate = Boolean(existing);
+        } else if (titleDateMatches.length > 1) {
           stats.skipped += 1;
           operations.push({
             action: 'skipped',
             externalId: event.externalId,
             title: event.title,
             date: event.date,
-            message: 'A same-name event exists on this date but has a different Event ID. Review it manually; automatic sync changed nothing.',
+            message: 'Multiple same-name events exist on this date with different Event IDs. Review the duplicates manually; automatic sync changed nothing.',
             undoable: false,
           });
           continue;
@@ -625,7 +634,9 @@ const applyNowstaApiRows = async (sourceRows, actor = {}) => {
         date: event.date,
         message: action === 'created'
           ? 'Event created from Nowsta API.'
-          : 'Exact Event ID match refreshed from Nowsta API.',
+          : matchedByTitleDate
+            ? 'Unique same-name and date event linked and refreshed from Nowsta API.'
+            : 'Exact Event ID match refreshed from Nowsta API.',
         before,
         after: savedEvent ? snapshotImportedEvent(savedEvent) : null,
         undoable: true,

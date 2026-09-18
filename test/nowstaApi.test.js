@@ -7,6 +7,14 @@ import {
   isNowstaOperationalEventTitle,
   resolveNowstaSyncRange,
 } from '../utils/nowstaApi.js';
+import { uniqueNowstaTitleDateMatch } from '../routes/events.js';
+
+test('Nowsta sync may attach staffing to one unique same-title same-date event', () => {
+  const event = { _id: 'existing-event' };
+  assert.equal(uniqueNowstaTitleDateMatch([event]), event);
+  assert.equal(uniqueNowstaTitleDateMatch([]), null);
+  assert.equal(uniqueNowstaTitleDateMatch([event, { _id: 'duplicate' }]), null);
+});
 
 test('Nowsta API rows preserve stable IDs and include assigned workers', () => {
   const rows = buildNowstaImportRows({

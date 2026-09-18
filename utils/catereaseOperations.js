@@ -304,11 +304,23 @@ const attachRequiredItemSubEvents = (requiredItems = [], foodService = []) => {
     zonesByFoodServiceName.set(nameKey, matches);
   });
   return requiredItems.map((row) => {
-    if (row?.subEvent) return row;
     const exactZone = zoneByFoodServiceId.get(clean(row?.foodServiceId, 120).toLowerCase());
-    const matches = exactZone ? null : zonesByFoodServiceName.get(clean(row?.station, 300).toLowerCase());
-    if (!exactZone && (!matches || matches.size !== 1)) return row;
-    const zone = exactZone || [...matches.values()][0];
+    // Event-required-item rows may carry the event's generic SubEvtNum rather
+    // than the sub-event that owns their parent food-service row. FdSvNum is
+    // the structural parent reference and must win whenever it is available.
+    if (exactZone) {
+      return {
+        ...row,
+        subEvent: exactZone.subEvent || row.subEvent,
+        zoneName: exactZone.zoneName || row.zoneName,
+        fsType: row.fsType || exactZone.fsType,
+        category: row.category || exactZone.category,
+      };
+    }
+    if (row?.subEvent) return row;
+    const matches = zonesByFoodServiceName.get(clean(row?.station, 300).toLowerCase());
+    if (!matches || matches.size !== 1) return row;
+    const zone = [...matches.values()][0];
     return {
       ...row,
       subEvent: zone.subEvent,
@@ -317,6 +329,151 @@ const attachRequiredItemSubEvents = (requiredItems = [], foodService = []) => {
       category: row.category || zone.category,
     };
   });
+};
+
+const kitchenPackOutKnownRouteKind = (value) => {
+  const text = clean(value, 300).toLowerCase();
+  if (/green\s*room|greenroom/.test(text)) return 'greenroom';
+  if (/\b(?:hds?|hors\s*d['’]?oeuvres?)\b/.test(text)) return 'hds';
+  if (/dinner\s*kitchen|seated\s*dinner/.test(text)) return 'dinner';
+  if (/ice\s*cream|soft\s*serve/.test(text)) return 'ice-cream';
+  if (/vendor/.test(text)) return 'vendor-meal';
+  if (/dessert/.test(text)) return 'dessert-station';
+  if (/staff\s*(?:holding|meal)/.test(text)) return 'staff-meal';
+  if (/beverage|bar\b/.test(text)) return 'beverage';
+  return '';
+};
+
+const kitchenPackOutRouteKind = (value, routes = []) => {
+  const knownKind = kitchenPackOutKnownRouteKind(value);
+  if (knownKind) return knownKind;
+  const valueKey = itemKey(value);
+  if (!valueKey) return '';
+  const exactRoute = routes.find((route) => route.matchKey === valueKey);
+  if (exactRoute) return exactRoute.kind;
+  const ignored = new Set(['pack', 'out', 'kitchen', 'station', 'service', 'meal', 'menu']);
+  const valueTokens = new Set(valueKey.split(' ').filter((token) => token && !ignored.has(token)));
+  if (!valueTokens.size) return '';
+  let bestRoute = null;
+  let bestScore = 0;
+  routes.forEach((route) => {
+    const routeTokens = new Set(itemKey(route.matchKey).split(' ').filter((token) => token && !ignored.has(token)));
+    if (!routeTokens.size) return;
+    const overlap = [...valueTokens].filter((token) => routeTokens.has(token)).length;
+    const score = overlap / Math.max(valueTokens.size, routeTokens.size);
+    if (score > bestScore) {
+      bestScore = score;
+      bestRoute = route;
+    }
+  });
+  return bestScore >= 0.5 ? bestRoute?.kind || '' : '';
+};
+
+const kitchenPackOutRouteLabel = (part, kind) => {
+  const text = clean(part, 200);
+  if (kind === 'hds') return 'HDs';
+  if (kind === 'greenroom') return 'Greenroom';
+  if (kind === 'vendor-meal') return 'Vendor Meal';
+  if (kind === 'ice-cream') return 'Ice Cream';
+  if (kind === 'dessert-station') return 'Dessert Station';
+  if (kind === 'dinner') {
+    const number = text.match(/#?\s*(\d+)\s*$/)?.[1];
+    return `Seated Dinner${number ? ` ${number}` : ''}`;
+  }
+  return text;
+};
+
+const kitchenPackOutRouteDefinitions = (foodService = []) => {
+  const routes = [];
+  const seen = new Set();
+  const add = (label, kind, sourceSubEvent = '', matchKey = '') => {
+    if (!kind || ['beverage', 'staff-meal'].includes(kind)) return;
+    const baseKey = kind === 'dinner'
+      ? `${kind}-${clean(label, 80).match(/\d+/)?.[0] || routes.filter((route) => route.kind === kind).length + 1}`
+      : kind;
+    let key = baseKey;
+    let occurrence = 2;
+    while (seen.has(key)) {
+      key = `${baseKey}-${occurrence}`;
+      occurrence += 1;
+    }
+    seen.add(key);
+    const safeKey = itemKey(key).replace(/\s+/g, '-');
+    routes.push({ zoneKey: `kpo-route:${safeKey}`, zoneName: label, kind, sourceSubEvent, matchKey: matchKey || itemKey(label) });
+  };
+
+  const packOutZones = new Map();
+  (Array.isArray(foodService) ? foodService : []).forEach((row) => {
+    const zoneName = clean(row?.zoneName, 200);
+    if (!/^pack\s*out\s*[-–—:]/i.test(zoneName)) return;
+    const identity = operationalZoneIdentity(row);
+    if (!packOutZones.has(identity)) packOutZones.set(identity, row);
+  });
+  packOutZones.forEach((row) => {
+    const description = clean(row.zoneName, 200).replace(/^pack\s*out\s*[-–—:]\s*/i, '');
+    description.split(/\s*&\s*/).map((part) => clean(part, 120)).filter(Boolean).forEach((part) => {
+      const knownKind = kitchenPackOutKnownRouteKind(part);
+      const kind = knownKind || `subevent:${itemKey(part)}`;
+      add(kitchenPackOutRouteLabel(part, knownKind || kind), kind, clean(row.subEvent, 120), itemKey(part));
+    });
+  });
+  return routes;
+};
+
+const kitchenMenuRouteByFoodServiceId = (foodService = [], routes = []) => {
+  const routeById = new Map();
+  const menuRows = (Array.isArray(foodService) ? foodService : [])
+    .filter((row) => !/\b(?:invoice|pack\s*out)\b/i.test(clean(row?.zoneName, 200)))
+    .sort((left, right) => (Number(left?.sortOrder) || 0) - (Number(right?.sortOrder) || 0));
+  let currentKind = '';
+  menuRows.forEach((row) => {
+    const itemName = clean(row?.itemName, 300);
+    const letters = itemName.replace(/[^A-Za-z]+/g, '');
+    const isHeading = letters && letters === letters.toUpperCase();
+    const nextKind = isHeading ? kitchenPackOutRouteKind(itemName, routes) : '';
+    if (nextKind) currentKind = nextKind;
+    else if (/^beverages?$/i.test(itemName)) currentKind = '';
+    const id = clean(row?.foodServiceId, 120).toLowerCase();
+    if (id && currentKind) routeById.set(id, currentKind);
+  });
+  return routeById;
+};
+
+const buildKitchenPackOutDocuments = (snapshot, rows = []) => {
+  const sourceValues = Array.isArray(rows) ? rows : [];
+  if (!sourceValues.length) return [];
+  const routes = kitchenPackOutRouteDefinitions(snapshot?.foodService || snapshot?.packOut || []);
+  const routeByFoodServiceId = kitchenMenuRouteByFoodServiceId(snapshot?.foodService || snapshot?.packOut || [], routes);
+  if (!routes.some((route) => route.kind === 'dessert-station')
+    && [...routeByFoodServiceId.values()].includes('dessert-station')) {
+    routes.push({ zoneKey: 'kpo-route:dessert-station', zoneName: 'Dessert Station', kind: 'dessert-station', sourceSubEvent: '' });
+  }
+  const representedIds = new Set(sourceValues.map((row) => clean(row?.foodServiceId, 120).toLowerCase()).filter(Boolean));
+  const routedFoodRows = (Array.isArray(snapshot?.foodService) ? snapshot.foodService : snapshot?.packOut || [])
+    .filter((row) => clean(row?.fsType, 80).toLowerCase() === 'food')
+    .filter((row) => {
+      const id = clean(row?.foodServiceId, 120).toLowerCase();
+      const kind = routeByFoodServiceId.get(id);
+      return id && kind && !['beverage', 'staff-meal'].includes(kind)
+        && !representedIds.has(id)
+        && kitchenPackOutRouteKind(row?.itemName, routes) !== kind
+        && !/^\*\*|\b(?:note|rental needs)\b/i.test(clean(row?.itemName, 300));
+    })
+    .map((row) => ({ ...row, station: row.itemName, topLevelFoodService: true }));
+  const values = [...sourceValues, ...routedFoodRows];
+  const dinnerRoutes = routes.filter((route) => route.kind === 'dinner');
+  const documents = [{ zoneKey: 'kpo-route:main', zoneName: 'Main', rows: values }];
+  routes.forEach((route) => {
+    const routeRows = values.filter((row) => {
+      const kind = routeByFoodServiceId.get(clean(row?.foodServiceId, 120).toLowerCase())
+        || kitchenPackOutRouteKind(row?.menuGroup, routes)
+        || kitchenPackOutRouteKind(row?.station, routes);
+      if (kind === 'staff-meal') return route.kind === 'dinner' && route === dinnerRoutes.at(-1);
+      return kind === route.kind;
+    });
+    if (routeRows.length) documents.push({ ...route, rows: routeRows });
+  });
+  return documents;
 };
 
 const maximumPositiveValue = (rows, keys) => {
@@ -413,6 +570,25 @@ export const buildCatereaseOperationalSnapshot = ({
       || fallbackZoneNameBySubEvent.get(clean(row.subEvent, 120).toLowerCase())
       || '',
   }));
+  const operationalSnapshot = {
+    requiredItems: kitchenPackOut,
+    kitchenPackOut,
+    foodService: packOut,
+    packOut,
+    kitchenMenu,
+    packOutTemplates,
+  };
+  const kitchenPackOutTemplate = packOutTemplates.find((template) => (
+    template.documentType === 'kitchen_packout'
+    && template.operationalVisible !== false
+    && template.supported !== false
+  ));
+  const kitchenPackOutDocuments = kitchenPackOutTemplate
+    ? buildKitchenPackOutDocuments(
+      operationalSnapshot,
+      catereaseOperationalTemplateRows(operationalSnapshot, kitchenPackOutTemplate.key, packOutTemplates)
+    )
+    : [];
   const checksum = crypto.createHash('sha256').update(JSON.stringify({
     eventId: clean(eventId, 120),
     guestCount,
@@ -432,9 +608,10 @@ export const buildCatereaseOperationalSnapshot = ({
     kitchenMenu: stableRows(kitchenMenu),
     staffRequest: stableRows(staffRequest),
     packOutTemplates,
+    kitchenPackOutDocuments,
   })).digest('hex');
   return {
-    schemaVersion: 23,
+    schemaVersion: 24,
     eventId: clean(eventId, 120),
     syncedAt,
     checksum,
@@ -456,6 +633,7 @@ export const buildCatereaseOperationalSnapshot = ({
     foodService: packOut,
     subEvents,
     packOutTemplates,
+    kitchenPackOutDocuments,
     kitchenMenu,
     staffRequest,
     sourceErrors: (Array.isArray(sourceErrors) ? sourceErrors : []).slice(0, 8),
@@ -894,6 +1072,11 @@ const manualAdditionRow = (addition, type = '') => ({
 
 export const operationalRows = (snapshot, type, zoneKey = '', templateKey = '', manualAdditions = []) => {
   const version = Number(snapshot?.schemaVersion) || 1;
+  const normalizedZoneKey = clean(zoneKey, 200).toLowerCase();
+  const routedKitchenPackOut = type === 'kitchen_packout' && normalizedZoneKey.startsWith('kpo-route:')
+    ? (Array.isArray(snapshot?.kitchenPackOutDocuments) ? snapshot.kitchenPackOutDocuments : [])
+      .find((document) => clean(document?.zoneKey, 200).toLowerCase() === normalizedZoneKey)
+    : null;
   let rows;
   const templates = Array.isArray(snapshot?.packOutTemplates) ? snapshot.packOutTemplates : undefined;
   const template = catereasePackOutTemplate(templateKey, templates);
@@ -931,12 +1114,13 @@ export const operationalRows = (snapshot, type, zoneKey = '', templateKey = '', 
     const legacyKitchenPackOut = (version >= 2 ? snapshot?.kitchenMenu : snapshot?.packOut) || [];
     rows = buildKitchenMenuRows(legacyKitchenPackOut);
   }
-  const normalizedZoneKey = clean(zoneKey, 200).toLowerCase();
   const kitchenPackOutSection = type === 'kitchen_packout' && normalizedZoneKey.startsWith('kpo-section:')
     ? catereaseKitchenPackOutDocumentGroups(snapshot, rows)
       .find((group) => group.zoneKey === normalizedZoneKey)
     : null;
-  const sourceRows = kitchenPackOutSection
+  const sourceRows = routedKitchenPackOut
+    ? routedKitchenPackOut.rows
+    : kitchenPackOutSection
     ? kitchenPackOutSection.rows
     : normalizedZoneKey
       ? (Array.isArray(rows) ? rows : []).filter((row) => catereaseOperationalZoneKey(row) === normalizedZoneKey)

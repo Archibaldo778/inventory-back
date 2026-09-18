@@ -611,6 +611,106 @@ test('sub-event descriptions become human document names across operational data
   assert.equal(snapshot.staffRequest[0].zoneName, 'Staff Holding');
 });
 
+test('Kitchen Pack Out follows the parent food-service sub-event when required rows carry a generic sub-event', () => {
+  const snapshot = buildCatereaseOperationalSnapshot({
+    eventId: 'E22538',
+    subEventRows: [
+      { SubEvtNum: 'S-GREENROOM', Description: 'Greenroom' },
+      { SubEvtNum: 'S-DINNER-1', Description: 'Seated Dinner 1' },
+    ],
+    packOutRows: [
+      { FdSvNum: 'FS-CHICKEN', ItemName: 'Whole roasted chicken', SubEvtNum: 'S-GREENROOM', FSType: 'Food' },
+      { FdSvNum: 'FS-EGGPLANT', ItemName: 'Roasted eggplant', SubEvtNum: 'S-DINNER-1', FSType: 'Food' },
+    ],
+    kitchenPackOutRows: [
+      { UID: 'R-CHICKEN', FdSvNum: 'FS-CHICKEN', ItemName: 'Roasted chicken, whole', FSName: 'Whole roasted chicken', SubEvtNum: 'S-GENERIC' },
+      { UID: 'R-EGGPLANT', FdSvNum: 'FS-EGGPLANT', ItemName: 'Miso roasted eggplant', FSName: 'Roasted eggplant', SubEvtNum: 'S-GENERIC' },
+    ],
+    printTemplateRows: [{ UID: 7, PrintKind: 'EvtReq', Title: 'Kitchen Pack Out', Condition2: "(Type = 'Food')" }],
+  });
+
+  assert.deepEqual(snapshot.requiredItems.map(({ itemName, subEvent, zoneName }) => ({ itemName, subEvent, zoneName })), [
+    { itemName: 'Roasted chicken, whole', subEvent: 'S-GREENROOM', zoneName: 'Greenroom' },
+    { itemName: 'Miso roasted eggplant', subEvent: 'S-DINNER-1', zoneName: 'Seated Dinner 1' },
+  ]);
+  assert.deepEqual(
+    operationalRows(snapshot, 'kitchen_packout', 's-greenroom|greenroom', 'print-7').map(({ itemName }) => itemName),
+    ['Roasted chicken, whole']
+  );
+  assert.deepEqual(
+    operationalRows(snapshot, 'kitchen_packout', 's-dinner-1|seated dinner 1', 'print-7').map(({ itemName }) => itemName),
+    ['Miso roasted eggplant']
+  );
+});
+
+test('Kitchen Pack Out documents follow Pack Out sub-events and split combined operational kitchens', () => {
+  const menuSubEvent = 'S-MENU';
+  const packOutRows = [
+    { FdSvNum: 'F-HDG', ItemName: 'KITCHEN EQUIPMENT', SubEvtNum: 'S-HD-GREEN', SEDescription: 'Pack Out - HD & Greenroom', Type: 'Equipment' },
+    { FdSvNum: 'F-D1-PO', ItemName: 'KITCHEN EQUIPMENT', SubEvtNum: 'S-D1', SEDescription: 'Pack Out - Dinner Kitchen #1', Type: 'Equipment' },
+    { FdSvNum: 'F-D2-PO', ItemName: 'KITCHEN EQUIPMENT', SubEvtNum: 'S-D2', SEDescription: 'Pack Out - Dinner Kitchen #2', Type: 'Equipment' },
+    { FdSvNum: 'F-IV', ItemName: 'Soft serve machines', SubEvtNum: 'S-IV', SEDescription: 'Pack Out - Ice Cream & Vendor', Type: 'Food' },
+    { FdSvNum: 'F-CHEF-PO', ItemName: 'Hot boxes', SubEvtNum: 'S-CHEF', SEDescription: "Pack Out - Chef's Table", Type: 'Equipment' },
+    { FdSvNum: 'F-GREEN', ItemName: 'GREENROOM', Qty: 0, SubEvtNum: menuSubEvent, SEDescription: 'Menu', Type: 'Food', NSort: 1 },
+    { FdSvNum: 'F-CHICKEN', ItemName: 'Whole roasted chicken', Qty: 0, SubEvtNum: menuSubEvent, SEDescription: 'Menu', Type: 'Food', NSort: 2 },
+    { FdSvNum: 'F-VENDOR-HEAD', ItemName: 'VENDOR MEALS', Qty: 40, SubEvtNum: menuSubEvent, SEDescription: 'Menu', Type: 'Food', NSort: 3 },
+    { FdSvNum: 'F-VENDOR', ItemName: 'Vendor Meal Proteins', Qty: 0, SubEvtNum: menuSubEvent, SEDescription: 'Menu', Type: 'Food', NSort: 4 },
+    { FdSvNum: 'F-HD-HEAD', ItemName: "PASSED HORS D'OEUVRES", Qty: 0, SubEvtNum: menuSubEvent, SEDescription: 'Menu', Type: 'Food', NSort: 5 },
+    { FdSvNum: 'F-HD', ItemName: 'Chicken satay', Qty: 0, SubEvtNum: menuSubEvent, SEDescription: 'Menu', Type: 'Food', NSort: 6 },
+    { FdSvNum: 'F-DINNER-HEAD', ItemName: 'SEATED DINNER', Qty: 0, SubEvtNum: menuSubEvent, SEDescription: 'Menu', Type: 'Food', NSort: 7 },
+    { FdSvNum: 'F-DINNER', ItemName: 'Sea bass', Qty: 0, SubEvtNum: menuSubEvent, SEDescription: 'Menu', Type: 'Food', NSort: 8 },
+    { FdSvNum: 'F-DESSERT-HEAD', ItemName: 'DESSERT STATION', Qty: 0, SubEvtNum: menuSubEvent, SEDescription: 'Menu', Type: 'Food', NSort: 9 },
+    { FdSvNum: 'F-DESSERT', ItemName: 'Brownies', Qty: 0, SubEvtNum: menuSubEvent, SEDescription: 'Menu', Type: 'Food', NSort: 10 },
+    { FdSvNum: 'F-ICE-HEAD', ItemName: 'SOFT SERVE', Qty: 0, SubEvtNum: menuSubEvent, SEDescription: 'Menu', Type: 'Food', NSort: 11 },
+    { FdSvNum: 'F-ICE', ItemName: 'Vanilla swirl', Qty: 0, SubEvtNum: menuSubEvent, SEDescription: 'Menu', Type: 'Food', NSort: 12 },
+    { FdSvNum: 'F-CHEF-HEAD', ItemName: "CHEF'S TABLE", Qty: 0, SubEvtNum: menuSubEvent, SEDescription: 'Menu', Type: 'Food', NSort: 13 },
+    { FdSvNum: 'F-CHEF', ItemName: 'Carved lamb', Qty: 0, SubEvtNum: menuSubEvent, SEDescription: 'Menu', Type: 'Food', NSort: 14 },
+  ];
+  const snapshot = buildCatereaseOperationalSnapshot({
+    eventId: 'E22538',
+    packOutRows,
+    kitchenMenuRows: packOutRows,
+    kitchenPackOutRows: [
+      { UID: 'R-GREEN', FdSvNum: 'F-CHICKEN', ItemName: 'Chicken', FSName: 'Whole roasted chicken' },
+      { UID: 'R-VENDOR', FdSvNum: 'F-VENDOR', ItemName: 'Salmon', FSName: 'Vendor Meal Proteins' },
+      { UID: 'R-HD', FdSvNum: 'F-HD', ItemName: 'Satay', FSName: 'Chicken satay' },
+      { UID: 'R-DINNER', FdSvNum: 'F-DINNER', ItemName: 'Sea bass', FSName: 'Sea bass' },
+      { UID: 'R-DESSERT', FdSvNum: 'F-DESSERT', ItemName: 'Brownies', FSName: 'Brownies' },
+      { UID: 'R-ICE', FdSvNum: 'F-ICE', ItemName: 'Vanilla', FSName: 'Vanilla swirl' },
+      { UID: 'R-CHEF', FdSvNum: 'F-CHEF', ItemName: 'Lamb', FSName: 'Carved lamb' },
+    ],
+    printTemplateRows: [{ UID: 6, PrintKind: 'EvtReq', Title: 'Kitchen Pack Out' }],
+  });
+
+  assert.deepEqual(snapshot.kitchenPackOutDocuments.map(({ zoneName }) => zoneName), [
+    'Main',
+    'HDs',
+    'Greenroom',
+    'Seated Dinner 1',
+    'Seated Dinner 2',
+    'Ice Cream',
+    'Vendor Meal',
+    "Chef's Table",
+    'Dessert Station',
+  ]);
+  assert.deepEqual(
+    snapshot.kitchenPackOutDocuments.find(({ zoneName }) => zoneName === 'Greenroom').rows.map(({ itemName }) => itemName),
+    ['Chicken']
+  );
+  assert.deepEqual(
+    snapshot.kitchenPackOutDocuments.find(({ zoneName }) => zoneName === 'Seated Dinner 1').rows.map(({ itemName }) => itemName),
+    ['Sea bass']
+  );
+  assert.deepEqual(
+    snapshot.kitchenPackOutDocuments.find(({ zoneName }) => zoneName === 'Seated Dinner 2').rows.map(({ itemName }) => itemName),
+    ['Sea bass']
+  );
+  assert.deepEqual(
+    snapshot.kitchenPackOutDocuments.find(({ zoneName }) => zoneName === "Chef's Table").rows.map(({ itemName }) => itemName),
+    ['Lamb']
+  );
+});
+
 test('required items are not guessed when a food service name belongs to multiple sub-events', () => {
   const snapshot = buildCatereaseOperationalSnapshot({
     eventId: 'E20244',
@@ -1486,7 +1586,7 @@ test('operational snapshot checksum is stable when API row order changes', () =>
     packOutRows: [{ ItemName: 'B', Qty: 2 }, { ItemName: 'A', Qty: 1 }],
     syncedAt: new Date('2026-09-11T12:00:00Z'),
   });
-  assert.equal(first.schemaVersion, 23);
+  assert.equal(first.schemaVersion, 24);
   const second = buildCatereaseOperationalSnapshot({
     eventId: 'E22672',
     packOutRows: [{ ItemName: 'A', Qty: 1 }, { ItemName: 'B', Qty: 2 }],

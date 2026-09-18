@@ -14,22 +14,14 @@ import DecorPackout from '../models/DecorPackout.js';
 import BarEvent from '../models/BarEvent.js';
 import BarTask from '../models/BarTask.js';
 import BeverageItem from '../models/BeverageItem.js';
-import Staff from '../models/Staff.js';
 import ImportRun from '../models/ImportRun.js';
 import DocumentImportRun from '../models/DocumentImportRun.js';
 import { requireAdmin, requireRoles } from '../middleware/auth.js';
 import { createMemoryRateLimiter } from '../middleware/rateLimit.js';
 import { clearApiCacheGroups, createGroupedApiCache } from '../utils/apiCache.js';
-import { createApiError, sendApiError } from '../utils/apiErrors.js';
+import { sendApiError } from '../utils/apiErrors.js';
 import { fetchNowstaImportRows, resolveNowstaSyncRange } from '../utils/nowstaApi.js';
 import { runWithTransactionFallback } from '../utils/mongoTransaction.js';
-import {
-  addTransportationRow,
-  buildTransportationPatch,
-  buildTransportationRow,
-  removeTransportationRow,
-  updateTransportationRow,
-} from '../utils/eventTransportation.js';
 import {
   importedEventMatchesSnapshot,
   snapshotImportedEvent,
@@ -1532,77 +1524,6 @@ router.delete('/:id', async (req, res) => {
     sendApiError(res, e, {
       context: 'Event deletion failed',
       fallbackMessage: 'Failed to delete event',
-    });
-  }
-});
-
-const resolveTransportationDriver = async (source = {}) => {
-  const requestedStaffId = String(source?.driverStaffId ?? '').trim();
-  if (!requestedStaffId) return { staff: null };
-  const staff = await Staff.findById(requestedStaffId).select('_id firstName lastName').lean();
-  if (!staff) throw createApiError(400, 'Driver staff member was not found');
-  return { staff };
-};
-
-// Add a transportation row
-router.post('/:id/transportation', async (req, res) => {
-  try {
-    const event = await Event.findById(req.params.id);
-    if (!event) return res.status(404).json({ error: 'Not found' });
-    const { staff } = await resolveTransportationDriver(req.body);
-    const row = buildTransportationRow(req.body, { staff });
-    const rows = addTransportationRow(event.meta?.transportation, row);
-    event.meta = { ...(event.meta || {}), transportation: rows };
-    event.markModified('meta');
-    await event.save();
-    clearCache();
-    res.status(201).json(rows);
-  } catch (e) {
-    sendApiError(res, e, {
-      context: 'Transportation row creation failed',
-      fallbackMessage: 'Failed to add transportation row',
-    });
-  }
-});
-
-// Edit a transportation row
-router.patch('/:id/transportation/:rowId', async (req, res) => {
-  try {
-    const event = await Event.findById(req.params.id);
-    if (!event) return res.status(404).json({ error: 'Not found' });
-    const { staff } = await resolveTransportationDriver(req.body);
-    const patch = buildTransportationPatch(req.body, { staff });
-    const { rows, found } = updateTransportationRow(event.meta?.transportation, req.params.rowId, patch);
-    if (!found) return res.status(404).json({ error: 'Transportation row not found' });
-    event.meta = { ...(event.meta || {}), transportation: rows };
-    event.markModified('meta');
-    await event.save();
-    clearCache();
-    res.json(rows);
-  } catch (e) {
-    sendApiError(res, e, {
-      context: 'Transportation row update failed',
-      fallbackMessage: 'Failed to update transportation row',
-    });
-  }
-});
-
-// Delete a transportation row
-router.delete('/:id/transportation/:rowId', async (req, res) => {
-  try {
-    const event = await Event.findById(req.params.id);
-    if (!event) return res.status(404).json({ error: 'Not found' });
-    const { rows, found } = removeTransportationRow(event.meta?.transportation, req.params.rowId);
-    if (!found) return res.status(404).json({ error: 'Transportation row not found' });
-    event.meta = { ...(event.meta || {}), transportation: rows };
-    event.markModified('meta');
-    await event.save();
-    clearCache();
-    res.json(rows);
-  } catch (e) {
-    sendApiError(res, e, {
-      context: 'Transportation row deletion failed',
-      fallbackMessage: 'Failed to delete transportation row',
     });
   }
 });

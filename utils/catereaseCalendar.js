@@ -12,6 +12,9 @@ export const CATEREASE_CALENDAR_EVENT_FIELDS = [
   'GtdGuests',
   'PlnGuests',
   'SalesRep',
+  'Extra2',
+  'Extra8',
+  'Extra20',
   'Revised',
 ].join(',');
 
@@ -42,6 +45,16 @@ export const normalizeCatereaseCalendarEvent = (row = {}, manualStatus = {}) => 
   const category = clean(row?.Category);
   const salesRep = clean(row?.SalesRep);
   const client = clean(row?.Client);
+  const catereaseReport = {
+    sr: clean(row?.Extra8),
+    km: clean(row?.Extra2),
+    po: clean(row?.Extra20),
+  };
+  const resolvedReport = {
+    sr: catereaseReport.sr || reportField(manualStatus?.sr).value,
+    km: catereaseReport.km || reportField(manualStatus?.km).value,
+    po: catereaseReport.po || reportField(manualStatus?.po).value,
+  };
   return {
     _id: `caterease:${rawEventId || clean(row?.EventNum)}`,
     externalId: clean(row?.EventNum),
@@ -54,11 +67,7 @@ export const normalizeCatereaseCalendarEvent = (row = {}, manualStatus = {}) => 
     meta: {
       guestCount: actualGuests,
       category,
-      calendarReport: {
-        sr: reportField(manualStatus?.sr).value,
-        km: reportField(manualStatus?.km).value,
-        po: reportField(manualStatus?.po).value,
-      },
+      calendarReport: resolvedReport,
       calendarReportAudit: {
         sr: reportField(manualStatus?.sr),
         km: reportField(manualStatus?.km),

@@ -16,6 +16,9 @@ test('Caterease calendar maps the event header without Nowsta data', () => {
     ActGuests: '          ',
     GtdGuests: '200',
     SalesRep: 'Olivier Cheng',
+    Extra2: 'Rev1',
+    Extra8: 'Yes',
+    Extra20: 'Yes',
     Revised: '2026-04-20T14:56:06.483',
   }, {
     sr: { value: 'Rev2', updatedBy: 'Sales User', updatedAt: '2026-09-18T12:00:00Z' },
@@ -26,11 +29,27 @@ test('Caterease calendar maps the event header without Nowsta data', () => {
   assert.equal(event.date, '2026-09-18');
   assert.equal(event.status, '.Lost');
   assert.equal(event.meta.guestCount, 200);
-  assert.deepEqual(event.meta.calendarReport, { sr: 'Rev2', km: '', po: 'Yes' });
+  assert.deepEqual(event.meta.calendarReport, { sr: 'Yes', km: 'Rev1', po: 'Yes' });
   assert.equal(event.meta.calendarReportAudit.sr.updatedBy, 'Sales User');
 });
 
 test('Caterease calendar does not infer sent-document status from operational rows', () => {
   const event = normalizeCatereaseCalendarEvent({ EvtNum: 'event-a', EventNum: 'E1', PartyName: 'Test' });
   assert.deepEqual(event.meta.calendarReport, { sr: '', km: '', po: '' });
+});
+
+test('Caterease live SR KM and PO fields take precedence and manual status only fills blanks', () => {
+  const event = normalizeCatereaseCalendarEvent({
+    EvtNum: 'event-a',
+    EventNum: 'E1',
+    PartyName: 'Test',
+    Extra8: 'Rev3',
+    Extra2: '',
+    Extra20: 'Yes',
+  }, {
+    sr: { value: 'Rev1' },
+    km: { value: 'Rev2' },
+    po: { value: '' },
+  });
+  assert.deepEqual(event.meta.calendarReport, { sr: 'Rev3', km: 'Rev2', po: 'Yes' });
 });

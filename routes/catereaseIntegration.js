@@ -1120,12 +1120,23 @@ router.get('/calendar', requireAuth, requireWorkspaceAccess, viewSyncRateLimit, 
 
     const sourceEvents = await listAllCatereaseCalendarEvents(from, to);
     const eventIds = [...new Set(sourceEvents.map((row) => String(row?.EvtNum || '').trim()).filter(Boolean))];
-    const storedStatuses = eventIds.length
-      ? await CalendarReportStatus.find({ eventKey: { $in: eventIds } }).lean()
+    const externalIds = [...new Set(sourceEvents.map((row) => String(row?.EventNum || '').trim()).filter(Boolean))];
+    const storedStatuses = eventIds.length || externalIds.length
+      ? await CalendarReportStatus.find({
+        $or: [
+          { eventKey: { $in: eventIds } },
+          { externalId: { $in: externalIds } },
+        ],
+      }).lean()
       : [];
     const statusesByEvent = new Map(storedStatuses.map((status) => [String(status.eventKey), status]));
+    const statusesByExternalId = new Map(storedStatuses.map((status) => [String(status.externalId), status]));
     const items = sourceEvents
-      .map((row) => normalizeCatereaseCalendarEvent(row, statusesByEvent.get(String(row?.EvtNum || '').trim())))
+      .map((row) => normalizeCatereaseCalendarEvent(
+        row,
+        statusesByEvent.get(String(row?.EvtNum || '').trim())
+          || statusesByExternalId.get(String(row?.EventNum || '').trim())
+      ))
       .filter((event) => event.date && event.title)
       .sort((left, right) => left.date.localeCompare(right.date) || left.title.localeCompare(right.title));
     return res.json({
@@ -1158,11 +1169,13 @@ router.patch('/calendar/:eventKey/status', requireAuth, requireWorkspaceAccess, 
     const now = new Date();
     const actorName = String(req.auth?.username || req.auth?.email || '').trim().slice(0, 180);
     const actorId = String(req.auth?.userId || '').trim().slice(0, 120);
+    const externalId = String(req.body?.externalId || '').trim().slice(0, 40);
     const status = await CalendarReportStatus.findOneAndUpdate(
-      { eventKey },
+      externalId ? { $or: [{ eventKey }, { externalId }] } : { eventKey },
       {
         $set: {
-          externalId: String(req.body?.externalId || '').trim().slice(0, 40),
+          eventKey,
+          externalId,
           [`${field}.value`]: value,
           [`${field}.updatedAt`]: now,
           [`${field}.updatedBy`]: actorName,

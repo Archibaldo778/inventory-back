@@ -794,6 +794,31 @@ const catereaseKitchenPackOutTable = (groups, recipes = [], staffMeal = {}) => {
   return `<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/><w:tblLayout w:type="fixed"/>${tableBorders}</w:tblPr><w:tblGrid>${widths.map((width) => `<w:gridCol w:w="${width}"/>`).join('')}</w:tblGrid>${header}${body}</w:tbl>`;
 };
 
+const kitchenPackOutBlueprintTable = (rows) => {
+  const widths = [5300, 1400, 1600, 1600, 1500];
+  const headers = ['', 'Quantity', 'Not Enough', 'Just Enough', 'Too Much'];
+  const header = `<w:tr>${headers.map((value, index) => cell(value, {
+    bold: true,
+    width: widths[index],
+    shading: 'E7E6E6',
+    align: 'center',
+  })).join('')}</w:tr>`;
+  const totalWidth = widths.reduce((total, width) => total + width, 0);
+  const body = rows.map((row) => {
+    if (row.blueprintKind === 'heading') {
+      return `<w:tr><w:tc><w:tcPr><w:gridSpan w:val="${widths.length}"/><w:tcW w:w="${totalWidth}" w:type="dxa"/></w:tcPr>${paragraph(row.label, { bold: true, size: 20, after: 0 })}</w:tc></w:tr>`;
+    }
+    return `<w:tr>${[
+      row.itemName,
+      row.quantityText,
+      row.notEnough,
+      row.justEnough,
+      row.tooMuch,
+    ].map((value, index) => cell(value, { width: widths[index], align: index ? 'center' : '' })).join('')}</w:tr>`;
+  }).join('');
+  return `<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/><w:tblLayout w:type="fixed"/>${tableBorders}</w:tblPr><w:tblGrid>${widths.map((width) => `<w:gridCol w:w="${width}"/>`).join('')}</w:tblGrid>${header}${body}</w:tbl>`;
+};
+
 const packOutTable = (rows, decorImages = [], includeTemplate = true) => {
   const filteredRows = rows.filter((row) => clean(row?.menuGroup, 160).toLowerCase() !== 'standard');
   const hasSourceSections = !includeTemplate && filteredRows.some((row) => (
@@ -892,7 +917,7 @@ const manualAdditionRow = (addition, type = '') => ({
   comments: type === 'staff_request' ? clean(addition?.notes, 1000) : '',
 });
 
-export const operationalRows = (snapshot, type, zoneKey = '', templateKey = '', manualAdditions = []) => {
+export const operationalRows = (snapshot, type, zoneKey = '', templateKey = '', manualAdditions = [], kitchenPackOutBlueprints = []) => {
   const version = Number(snapshot?.schemaVersion) || 1;
   let rows;
   const templates = Array.isArray(snapshot?.packOutTemplates) ? snapshot.packOutTemplates : undefined;
@@ -932,6 +957,26 @@ export const operationalRows = (snapshot, type, zoneKey = '', templateKey = '', 
     rows = buildKitchenMenuRows(legacyKitchenPackOut);
   }
   const normalizedZoneKey = clean(zoneKey, 200).toLowerCase();
+  const blueprintId = type === 'kitchen_packout' && normalizedZoneKey.startsWith('kpo-blueprint:')
+    ? normalizedZoneKey.slice('kpo-blueprint:'.length)
+    : '';
+  const blueprint = blueprintId
+    ? (Array.isArray(kitchenPackOutBlueprints) ? kitchenPackOutBlueprints : []).find((candidate) => (
+      clean(candidate?._id, 100).toLowerCase() === blueprintId
+    ))
+    : null;
+  if (blueprint) {
+    return (Array.isArray(blueprint.rows) ? blueprint.rows : []).map((row, index) => ({
+      sourceId: `kpo-blueprint:${blueprintId}:${index}`,
+      blueprintKind: clean(row?.kind, 20),
+      label: clean(row?.label, 500),
+      itemName: clean(row?.itemName, 500),
+      quantityText: clean(row?.quantityText, 100),
+      notEnough: clean(row?.notEnough, 100),
+      justEnough: clean(row?.justEnough, 100),
+      tooMuch: clean(row?.tooMuch, 100),
+    }));
+  }
   const kitchenPackOutSection = type === 'kitchen_packout' && normalizedZoneKey.startsWith('kpo-section:')
     ? catereaseKitchenPackOutDocumentGroups(snapshot, rows)
       .find((group) => group.zoneKey === normalizedZoneKey)
@@ -1075,13 +1120,14 @@ const kitchenStaffingSection = (event, snapshot) => {
   }`;
 };
 
-const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = false, decorImages = [], includePackOutTemplate = true, zoneKey = '', zoneName = '', templateKey = '', manualAdditions = [] }) => {
+const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = false, decorImages = [], includePackOutTemplate = true, zoneKey = '', zoneName = '', templateKey = '', manualAdditions = [], kitchenPackOutBlueprints = [] }) => {
   const isKitchenPackOut = type === 'kitchen_packout';
   const isStaffRequest = type === 'staff_request';
   const isKitchenMenu = ['kitchen_menu', 'annotated_kitchen_menu'].includes(type);
   const isAnnotatedKitchenMenu = type === 'annotated_kitchen_menu';
   const template = catereasePackOutTemplate(templateKey, snapshot?.packOutTemplates);
-  const rows = operationalRows(snapshot, type, zoneKey, templateKey, manualAdditions);
+  const rows = operationalRows(snapshot, type, zoneKey, templateKey, manualAdditions, kitchenPackOutBlueprints);
+  const usesKitchenPackOutBlueprint = isKitchenPackOut && rows.some((row) => row.blueprintKind);
   const title = template?.label?.toUpperCase() || (isAnnotatedKitchenMenu ? 'ANNOTATED KITCHEN MENU' : isKitchenMenu ? 'KITCHEN MENU' : isKitchenPackOut ? 'KITCHEN PACK OUT' : isStaffRequest ? 'STAFF REQUEST FORM' : 'PACK OUT');
   const groups = groupedRows(rows, (row) => (
     row?.manual ? 'Manual additions'
@@ -1117,7 +1163,9 @@ const documentXml = ({ event, snapshot, type, recipes = [], includeBrandLogo = f
       ]),
       [formatQuantity(staffTotal), 'TOTAL STAFF NEEDED', '', '', '', '', '', ''],
     ], [550, 1900, 1000, 1000, 700, 2100, 1500, 1850])
-    : isKitchenPackOut ? catereaseKitchenPackOutTable(groups, recipes, staffMeal)
+    : isKitchenPackOut ? (usesKitchenPackOutBlueprint
+      ? kitchenPackOutBlueprintTable(rows)
+      : catereaseKitchenPackOutTable(groups, recipes, staffMeal))
     : usesFoodServicePackOut ? packOutTable(rows, decorImages, false)
     : template ? catereasePackOutTable(new Map([...groups.entries()].map(([group, values]) => [
       group,
@@ -1242,6 +1290,7 @@ export const renderCatereaseOperationalDocx = async ({
   zoneName = '',
   templateKey = '',
   manualAdditions = [],
+  kitchenPackOutBlueprints = [],
 }) => {
   const includeBrandLogo = Buffer.isBuffer(brandLogoSvg) && brandLogoSvg.length > 0;
   const embeddedDecorImages = (Array.isArray(decorImages) ? decorImages : [])
@@ -1269,6 +1318,7 @@ export const renderCatereaseOperationalDocx = async ({
     zoneName,
     templateKey,
     manualAdditions,
+    kitchenPackOutBlueprints,
   }));
   word.file('styles.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:rPr><w:rFonts w:ascii="Avenir Medium" w:hAnsi="Avenir Medium"/><w:sz w:val="20"/></w:rPr></w:style></w:styles>`);
   if (includeBrandLogo) word.folder('media').file('logo.svg', brandLogoSvg);

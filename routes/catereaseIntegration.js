@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import crypto from 'node:crypto';
+import multer from 'multer';
 import CatereaseFile from '../models/CatereaseFile.js';
 import CatereaseIntegration from '../models/CatereaseIntegration.js';
 import CalendarReportStatus from '../models/CalendarReportStatus.js';
@@ -84,6 +85,7 @@ import {
   loadBrandLogoSvg,
   loadCloudinaryWordImages,
 } from '../utils/operationalDocumentAssets.js';
+import { parseKitchenPackOutBlueprint } from '../utils/kitchenPackOutBlueprint.js';
 
 const router = Router();
 const requireCatereaseAdmin = [requireAuth, requireAdmin];
@@ -92,6 +94,10 @@ const viewSyncRateLimit = createMemoryRateLimiter({ windowMs: 10 * 60 * 1000, ma
 const downloadRateLimit = createMemoryRateLimiter({ windowMs: 60 * 1000, max: 120, message: 'Too many Caterease file downloads' });
 const outlookDraftRateLimit = createMemoryRateLimiter({ windowMs: 10 * 60 * 1000, max: 20, message: 'Too many Outlook draft requests' });
 const emailDraftRateLimit = createMemoryRateLimiter({ windowMs: 10 * 60 * 1000, max: 20, message: 'Too many email draft requests' });
+const kitchenPackOutUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { files: 20, fileSize: 20 * 1024 * 1024 },
+});
 const OPERATIONAL_EVENT_RESTRICTED_ROLES = new Set(['bar captain', 'bartender']);
 let syncPromise = null;
 let syncProgress = null;
@@ -126,7 +132,7 @@ const listAllCatereaseCalendarEvents = async (from, to) => {
 
 export const loadAuthorizedOperationalEvent = async (req, res, { mutable = false } = {}) => {
   const query = Event.findById(req.params.id)
-    .select('externalId title date client managerId meta catereaseOperations catereaseManualAdditions updatedAt');
+    .select('externalId title date client managerId meta catereaseOperations catereaseManualAdditions kitchenPackOutBlueprints updatedAt');
   const event = mutable ? await query : await query.lean();
   if (!event) {
     res.status(404).json({ error: 'Event not found' });
@@ -1300,6 +1306,7 @@ const buildOperationalAttachment = async (event, type, options = {}) => {
         : (options.zoneName || '')),
       templateKey,
       manualAdditions: event.catereaseManualAdditions || [],
+      kitchenPackOutBlueprints: event.kitchenPackOutBlueprints || [],
     });
   const safeTitle = safeOperationalFilePart(event.title, 100) || 'Event';
   const dateMatch = String(event.date || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -1383,11 +1390,54 @@ router.get('/operations/events/:id', requireAuth, async (req, res) => {
     return res.json({
       snapshot: event.catereaseOperations || null,
       manualAdditions: event.catereaseManualAdditions || [],
+      kitchenPackOutBlueprints: event.kitchenPackOutBlueprints || [],
     });
   } catch (error) {
     return sendApiError(res, error, { context: 'Caterease event operational data failed', fallbackMessage: 'Failed to load Caterease operational data' });
   }
 });
+
+router.post(
+  '/operations/events/:id/kitchen-packout-blueprints',
+  ...requireCatereaseAdmin,
+  kitchenPackOutUpload.array('files', 20),
+  async (req, res) => {
+    try {
+      const event = await loadAuthorizedOperationalEvent(req, res, { mutable: true });
+      if (!event) return undefined;
+      const files = Array.isArray(req.files) ? req.files : [];
+      if (!files.length) return res.status(400).json({ error: 'Select at least one Kitchen Pack Out Word file' });
+      const invalid = files.find((file) => !/\.docx$/i.test(String(file.originalname || '')));
+      if (invalid) return res.status(400).json({ error: `${invalid.originalname}: only .docx files are supported` });
+
+      const parsed = await Promise.all(files.map(async (file) => {
+        try {
+          return await parseKitchenPackOutBlueprint(file.buffer, file.originalname);
+        } catch (error) {
+          throw Object.assign(new Error(`${file.originalname}: ${error.message}`), { statusCode: 400 });
+        }
+      }));
+      const actor = operationalActor(req.auth);
+      const importedAt = new Date();
+      const names = new Map();
+      event.kitchenPackOutBlueprints = parsed.map((blueprint) => {
+        const count = (names.get(blueprint.name.toLowerCase()) || 0) + 1;
+        names.set(blueprint.name.toLowerCase(), count);
+        return {
+          ...blueprint,
+          name: count === 1 ? blueprint.name : `${blueprint.name} ${count}`,
+          importedBy: actor,
+          importedAt,
+        };
+      });
+      await event.save();
+      clearApiCacheGroups('events');
+      return res.status(201).json({ kitchenPackOutBlueprints: event.kitchenPackOutBlueprints });
+    } catch (error) {
+      return sendApiError(res, error, { context: 'Kitchen Pack Out blueprint import failed', fallbackMessage: 'Failed to import Kitchen Pack Out files' });
+    }
+  }
+);
 
 router.post('/operations/events/:id/manual-items', requireAuth, async (req, res) => {
   try {

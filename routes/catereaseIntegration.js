@@ -102,6 +102,7 @@ import {
   isLeadershipPrintFileSupported,
   mergeLeadershipPrintPdfs,
 } from '../utils/leadershipPrintPdf.js';
+import { isFinancialEventDocument } from '../utils/eventFileVisibility.js';
 
 const router = Router();
 const requireCatereaseAdmin = [requireAuth, requireAdmin];
@@ -1668,11 +1669,13 @@ router.get('/operations/events/:id/dropbox-files', requireAuth, dropboxFileRateL
         if (String(entry?.['.tag'] || '') !== 'file') return;
         const filePath = String(entry.path_display || entry.path_lower || '');
         if (!dropboxPathInsideFolder(filePath, folderPath) || /^~\$/i.test(String(entry.name || ''))) return;
+        const relativePath = filePath.slice(String(folderPath).length).replace(/^\/+/, '');
+        if (isFinancialEventDocument(relativePath)) return;
         files.push({
           id: String(entry.id || entry.path_lower || filePath),
           name: String(entry.name || 'Dropbox file'),
           path: filePath,
-          relativePath: filePath.slice(String(folderPath).length).replace(/^\/+/, ''),
+          relativePath,
           size: Number(entry.size || 0),
           rev: String(entry.rev || ''),
           modifiedAt: entry.server_modified || entry.client_modified || null,
@@ -1705,6 +1708,10 @@ router.get('/operations/events/:id/dropbox-file', requireAuth, dropboxFileRateLi
     const filePath = String(req.query?.path || '').trim();
     if (!dropboxPathInsideFolder(filePath, folderPath)) {
       return res.status(400).json({ error: 'The requested file is outside this event folder' });
+    }
+    const relativePath = filePath.slice(String(folderPath).length).replace(/^\/+/, '');
+    if (isFinancialEventDocument(relativePath)) {
+      return res.status(404).json({ error: 'The requested event file is not available' });
     }
     const buffer = await downloadDropboxFile(accessToken, filePath, {
       namespaceId: integration.namespaceId || '',
@@ -1741,6 +1748,10 @@ router.post('/operations/events/:id/leadership-print.pdf', requireAuth, leadersh
       const filePath = String(requestedFile?.path || '').trim();
       if (!dropboxPathInsideFolder(filePath, folderPath)) {
         return res.status(400).json({ error: 'A requested file is outside this event folder' });
+      }
+      const relativePath = filePath.slice(String(folderPath).length).replace(/^\/+/, '');
+      if (isFinancialEventDocument(relativePath)) {
+        return res.status(404).json({ error: 'A requested event file is not available' });
       }
       const fileName = filePath.split('/').filter(Boolean).pop() || 'event-file';
       if (!isLeadershipPrintFileSupported(fileName)) {

@@ -59,7 +59,7 @@ const transportationSyncPromises = new Map();
 const requireDropboxAdmin = [requireAuth, requireAdmin];
 
 const reclassifyStoredDropboxReviews = async (namespaceId) => {
-  const documents = await DropboxDocument.find({ namespaceId, status: 'review' })
+  const documents = await DropboxDocument.find({ namespaceId, status: 'review', sourceOrigin: { $ne: 'occ_generated' } })
     .select('dropboxId path name rev contentInspectedRev status documentType inferredDate eventId revisionNumber revisionLabel revisionSeries revisionGroupKey reason')
     .lean();
   if (!documents.length) return { total: 0, skippedOld: 0, discovered: 0, ignored: 0 };
@@ -142,6 +142,7 @@ const inspectDropboxDocumentContents = async (accessToken, namespaceId) => {
   const today = nyToday();
   const needsInspection = {
     namespaceId,
+    sourceOrigin: { $ne: 'occ_generated' },
     status: { $in: ['discovered', 'review', 'imported'] },
     $or: [
       { $expr: { $ne: ['$contentInspectedRev', '$rev'] } },
@@ -238,6 +239,7 @@ const inspectDropboxDocumentContents = async (accessToken, namespaceId) => {
 const reconcileDropboxRevisions = async (namespaceId) => {
   const documents = await DropboxDocument.find({
     namespaceId,
+    sourceOrigin: { $ne: 'occ_generated' },
     status: { $in: ['discovered', 'review', 'superseded', 'imported'] },
   }).lean();
   const plan = buildDropboxRevisionPlan(documents);
@@ -660,12 +662,7 @@ const resolveDropboxTeamRoot = async (accessToken, account, configuredRootPath) 
 };
 
 export const runDropboxDiscoverySync = async () => {
-  if (getCatereaseConfig().operationalSyncEnabled) {
-    throw Object.assign(
-      new Error('Dropbox sync is disabled because Caterease operational sync is enabled'),
-      { statusCode: 409 }
-    );
-  }
+  const overlayOnly = Boolean(getCatereaseConfig().operationalSyncEnabled);
   if (syncPromise) return syncPromise;
   syncPromise = (async () => {
     const integration = await loadIntegrationWithSecrets();
@@ -678,14 +675,17 @@ export const runDropboxDiscoverySync = async () => {
       // Do not make already indexed documents wait behind a potentially large
       // recursive Dropbox listing. This also lets a retry repair attachments
       // without downloading or rediscovering the files first.
-      const preexistingAttachments = integration.namespaceId
+      const emptyAttachments = { attached: 0, unchanged: 0, review: 0, failed: 0 };
+      const preexistingAttachments = !overlayOnly && integration.namespaceId
         ? await attachDiscoveredDropboxDocuments(integration.namespaceId)
-        : { attached: 0, unchanged: 0, review: 0, failed: 0 };
+        : emptyAttachments;
       // Rebuild every current/future BarEvent from documents already stored on
       // its dashboard event before making any remote Dropbox request. This
       // repairs events last overwritten by another source even when Dropbox is
       // temporarily unavailable.
-      const preexistingBarRebuild = await resyncCurrentDropboxBarItems();
+      const preexistingBarRebuild = overlayOnly
+        ? { events: 0, synced: 0, unchanged: 0, failed: 0 }
+        : await resyncCurrentDropboxBarItems();
       syncProgress = {
         ...syncProgress,
         attached: preexistingAttachments.attached,
@@ -730,7 +730,7 @@ export const runDropboxDiscoverySync = async () => {
           .filter(({ dropboxId }) => dropboxId);
         const existingRows = await DropboxDocument.find({
           dropboxId: { $in: entries.map(({ dropboxId }) => dropboxId) },
-        }).select('dropboxId rev contentHash status importedAt inferredDate documentType eventId revisionGroupKey contentEventId contentEventDate contentDocumentType contentInspectedRev contentParserVersion contentInspectionError').lean();
+        }).select('dropboxId rev contentHash status importedAt inferredDate documentType eventId revisionGroupKey contentEventId contentEventDate contentDocumentType contentInspectedRev contentParserVersion contentInspectionError sourceOrigin generatedBaselineRev').lean();
         const existingById = new Map(existingRows.map((row) => [String(row.dropboxId), row]));
         const operations = [];
         for (const { entry, dropboxId } of entries) {
@@ -781,7 +781,12 @@ export const runDropboxDiscoverySync = async () => {
             && String(existing.rev || '') === String(entry.rev || '')
             && String(existing.contentHash || '') === String(entry.content_hash || '')
             && !classificationChanged;
-          const nextStatus = unchangedImported ? 'imported' : classification.status;
+          const unchangedGenerated = existing?.sourceOrigin === 'occ_generated'
+            && String(existing.generatedBaselineRev || '') === String(entry.rev || '');
+          const changedGenerated = existing?.sourceOrigin === 'occ_generated' && !unchangedGenerated;
+          const nextStatus = unchangedGenerated
+            ? 'ignored'
+            : changedGenerated ? 'review' : unchangedImported ? 'imported' : classification.status;
           operations.push({
             updateOne: {
               filter: { dropboxId },
@@ -803,7 +808,11 @@ export const runDropboxDiscoverySync = async () => {
                 revisionSeries: revision.revisionSeries,
                 revisionGroupKey: revision.revisionGroupKey,
                 status: nextStatus,
-                reason: unchangedImported ? 'Already imported; Dropbox revision is unchanged' : classification.reason,
+                reason: unchangedGenerated
+                  ? 'Generated by OCC Decks; Dropbox revision is unchanged'
+                  : changedGenerated
+                    ? 'Generated OCC Decks file was edited in Dropbox; manual changes await review'
+                    : unchangedImported ? 'Already imported; Dropbox revision is unchanged' : classification.reason,
                 lastSeenAt: new Date(),
               },
               $setOnInsert: { firstSeenAt: new Date() },
@@ -831,14 +840,20 @@ export const runDropboxDiscoverySync = async () => {
       stats.discovered += reclassified.discovered;
       stats.ignored += reclassified.ignored;
       await reconcileDropboxRevisions(root.namespaceId);
-      const directAttachments = await attachDiscoveredDropboxDocuments(root.namespaceId);
+      const directAttachments = overlayOnly
+        ? emptyAttachments
+        : await attachDiscoveredDropboxDocuments(root.namespaceId);
       const inspected = await inspectDropboxDocumentContents(accessToken, root.namespaceId);
       stats.contentInspected = inspected.inspected;
       stats.contentEnriched = inspected.enriched;
       stats.contentInspectionFailed = inspected.failed;
       await reconcileDropboxRevisions(root.namespaceId);
-      const attachments = await attachDiscoveredDropboxDocuments(root.namespaceId);
-      const barRebuild = await resyncCurrentDropboxBarItems();
+      const attachments = overlayOnly
+        ? emptyAttachments
+        : await attachDiscoveredDropboxDocuments(root.namespaceId);
+      const barRebuild = overlayOnly
+        ? { events: 0, synced: 0, unchanged: 0, failed: 0 }
+        : await resyncCurrentDropboxBarItems();
       stats.attached = preexistingAttachments.attached + directAttachments.attached + attachments.attached;
       stats.attachmentUnchanged = preexistingAttachments.unchanged + directAttachments.unchanged + attachments.unchanged;
       stats.attachmentReview = preexistingAttachments.review + directAttachments.review + attachments.review;
@@ -849,6 +864,7 @@ export const runDropboxDiscoverySync = async () => {
         unchanged: barRebuild.unchanged,
         failed: preexistingBarRebuild.failed + barRebuild.failed,
       };
+      stats.mode = overlayOnly ? 'manual_overlay_discovery' : 'primary_document_import';
       integration.cursor = latestCursor;
       integration.lastSyncCompletedAt = new Date();
       integration.lastSyncSummary = stats;
@@ -973,9 +989,6 @@ router.post('/transportation/sync', requireAuth, transportationRateLimit, async 
 
 router.post('/sync', ...requireDropboxAdmin, syncRateLimit, async (_req, res) => {
   try {
-    if (getCatereaseConfig().operationalSyncEnabled) {
-      return res.status(409).json({ error: 'Dropbox sync is disabled because Caterease operational sync is enabled' });
-    }
     if (syncPromise) return res.status(202).json({ ok: true, started: false, syncing: true });
     void runDropboxDiscoverySync().catch((error) => {
       console.error('Dropbox background sync failed:', error?.message || error);

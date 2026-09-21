@@ -10,6 +10,8 @@ import KitchenIngredient from '../models/KitchenIngredient.js';
 import KitchenIngredientUnit from '../models/KitchenIngredientUnit.js';
 import KitchenRecipe from '../models/KitchenRecipe.js';
 import OutlookIntegration from '../models/OutlookIntegration.js';
+import DropboxDocument from '../models/DropboxDocument.js';
+import DropboxIntegration from '../models/DropboxIntegration.js';
 import {
   canSeeBarFinancials,
   requireAdmin,
@@ -77,6 +79,16 @@ import {
 } from '../utils/outlookApi.js';
 import { normalizeKitchenRecipeName, syncKitchenRecipeMatches } from '../utils/kitchenRecipeMatching.js';
 import {
+  createDropboxFolder,
+  decryptDropboxSecret,
+  refreshDropboxAccessToken,
+  uploadDropboxFile,
+} from '../utils/dropboxApi.js';
+import {
+  joinOperationalDropboxPath,
+  resolveOperationalDropboxFolder,
+} from '../utils/operationalDropbox.js';
+import {
   CATEREASE_CALENDAR_EVENT_FIELDS,
   normalizeCatereaseCalendarEvent,
 } from '../utils/catereaseCalendar.js';
@@ -92,6 +104,7 @@ const viewSyncRateLimit = createMemoryRateLimiter({ windowMs: 10 * 60 * 1000, ma
 const downloadRateLimit = createMemoryRateLimiter({ windowMs: 60 * 1000, max: 120, message: 'Too many Caterease file downloads' });
 const outlookDraftRateLimit = createMemoryRateLimiter({ windowMs: 10 * 60 * 1000, max: 20, message: 'Too many Outlook draft requests' });
 const emailDraftRateLimit = createMemoryRateLimiter({ windowMs: 10 * 60 * 1000, max: 20, message: 'Too many email draft requests' });
+const dropboxSaveRateLimit = createMemoryRateLimiter({ windowMs: 10 * 60 * 1000, max: 30, message: 'Too many Dropbox saves' });
 const OPERATIONAL_EVENT_RESTRICTED_ROLES = new Set(['bar captain', 'bartender']);
 let syncPromise = null;
 let syncProgress = null;
@@ -126,7 +139,7 @@ const listAllCatereaseCalendarEvents = async (from, to) => {
 
 export const loadAuthorizedOperationalEvent = async (req, res, { mutable = false } = {}) => {
   const query = Event.findById(req.params.id)
-    .select('externalId title date client managerId meta catereaseOperations catereaseManualAdditions updatedAt');
+    .select('externalId title date client managerId meta documents documentHistory catereaseOperations catereaseManualAdditions updatedAt');
   const event = mutable ? await query : await query.lean();
   if (!event) {
     res.status(404).json({ error: 'Event not found' });
@@ -1565,6 +1578,100 @@ router.post('/operations/events/:id/share-archive', requireAuth, emailDraftRateL
     return res.send(archive);
   } catch (error) {
     return sendApiError(res, error, { context: 'Document share failed', defaultStatus: 502, fallbackMessage: 'Could not prepare the documents for sharing' });
+  }
+});
+
+const ensureOperationalDropboxFolder = async (accessToken, folderPath, namespaceId) => {
+  const parts = String(folderPath || '').split('/').filter(Boolean);
+  let current = '';
+  for (const part of parts) {
+    current = joinOperationalDropboxPath(current, part);
+    try {
+      await createDropboxFolder(accessToken, current, { namespaceId });
+    } catch (error) {
+      if (Number(error?.statusCode) === 409 && /conflict/i.test(String(error?.message || ''))) continue;
+      throw error;
+    }
+  }
+};
+
+const generatedDropboxDocumentType = (descriptor = {}) => {
+  const type = String(descriptor?.type || '').trim().toLowerCase();
+  if (['po', 'kitchen_packout'].includes(type)) return 'po';
+  if (['kitchen_menu', 'annotated_kitchen_menu'].includes(type)) return 'kitchen_menu';
+  return 'review';
+};
+
+router.post('/operations/events/:id/dropbox', requireAuth, dropboxSaveRateLimit, async (req, res) => {
+  try {
+    const event = await loadAuthorizedOperationalEvent(req, res);
+    if (!event) return undefined;
+    const requested = Array.isArray(req.body?.documents) ? req.body.documents.slice(0, 20) : [];
+    if (!requested.length) return res.status(400).json({ error: 'Select at least one document' });
+    if (!event.catereaseOperations && requested.some((descriptor) => String(descriptor?.type || '').toLowerCase() !== 'decor_packout')) {
+      return res.status(404).json({ error: 'Caterease operational data has not been synced for this event' });
+    }
+    const integration = await DropboxIntegration.findOne({ provider: 'dropbox', enabled: true })
+      .select('+refreshToken.ciphertext +refreshToken.iv +refreshToken.tag')
+      .lean();
+    if (!integration?.refreshToken?.ciphertext) {
+      return res.status(409).json({ error: 'Connect Dropbox before saving generated documents' });
+    }
+
+    const accessToken = await refreshDropboxAccessToken(decryptDropboxSecret(integration.refreshToken));
+    const { folderPath, existing } = resolveOperationalDropboxFolder({ event, integration });
+    if (!existing) await ensureOperationalDropboxFolder(accessToken, folderPath, integration.namespaceId || '');
+    const { attachments } = await buildRequestedEmailAttachments(event, requested);
+    const savedAt = new Date();
+    const saved = [];
+    for (let index = 0; index < attachments.length; index += 1) {
+      const attachment = attachments[index];
+      const descriptor = requested[index] || {};
+      const targetPath = joinOperationalDropboxPath(folderPath, attachment.name);
+      const uploaded = await uploadDropboxFile(accessToken, targetPath, attachment.buffer, {
+        namespaceId: integration.namespaceId || '',
+        mode: 'add',
+        autorename: true,
+      });
+      const dropboxId = String(uploaded?.id || uploaded?.path_lower || uploaded?.path_display || targetPath);
+      const uploadedPath = String(uploaded?.path_display || uploaded?.path_lower || targetPath);
+      const uploadedRev = String(uploaded?.rev || '');
+      const uploadedHash = String(uploaded?.content_hash || '');
+      await DropboxDocument.findOneAndUpdate({ dropboxId }, {
+        $set: {
+          provider: 'dropbox',
+          namespaceId: String(integration.namespaceId || ''),
+          path: uploadedPath,
+          name: String(uploaded?.name || attachment.name),
+          rev: uploadedRev,
+          contentHash: uploadedHash,
+          size: Number(uploaded?.size || attachment.buffer.length || 0),
+          clientModifiedAt: uploaded?.client_modified || savedAt,
+          serverModifiedAt: uploaded?.server_modified || savedAt,
+          documentType: generatedDropboxDocumentType(descriptor),
+          inferredDate: String(event.date || '').slice(0, 10),
+          eventId: String(event.externalId || ''),
+          status: 'ignored',
+          reason: 'Generated by OCC Decks; retained as the manual-edit baseline',
+          lastSeenAt: savedAt,
+          sourceOrigin: 'occ_generated',
+          generatedEventId: event._id,
+          generatedDescriptor: descriptor,
+          generatedBaselineRev: uploadedRev,
+          generatedBaselineHash: uploadedHash,
+          generatedAt: savedAt,
+        },
+        $setOnInsert: { firstSeenAt: savedAt },
+      }, { upsert: true, new: true, setDefaultsOnInsert: true });
+      saved.push({ name: String(uploaded?.name || attachment.name), path: uploadedPath, rev: uploadedRev });
+    }
+    return res.json({ ok: true, folderPath, files: saved });
+  } catch (error) {
+    return sendApiError(res, error, {
+      context: 'Operational document Dropbox save failed',
+      defaultStatus: 502,
+      fallbackMessage: 'Could not save the generated documents to Dropbox',
+    });
   }
 });
 

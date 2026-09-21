@@ -625,9 +625,7 @@ export const startServer = async () => {
   let dropboxStartupTimer = null;
   const catereaseConfig = getCatereaseConfig();
   if (
-    !catereaseConfig.primaryFiles
-    && !catereaseConfig.operationalSyncEnabled
-    && String(process.env.DROPBOX_APP_KEY || '').trim()
+    String(process.env.DROPBOX_APP_KEY || '').trim()
     && String(process.env.DROPBOX_APP_SECRET || '').trim()
   ) {
     const configuredMinutes = Number(process.env.DROPBOX_SYNC_INTERVAL_MINUTES);

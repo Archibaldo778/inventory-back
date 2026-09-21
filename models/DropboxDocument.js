@@ -42,6 +42,12 @@ const dropboxDocumentSchema = new mongoose.Schema({
   lastSeenAt: { type: Date, default: Date.now },
   importedAt: { type: Date, default: null },
   importedEventId: { type: mongoose.Schema.Types.ObjectId, ref: 'Event', default: null },
+  sourceOrigin: { type: String, enum: ['external', 'occ_generated'], default: 'external', index: true },
+  generatedEventId: { type: mongoose.Schema.Types.ObjectId, ref: 'Event', default: null, index: true },
+  generatedDescriptor: { type: mongoose.Schema.Types.Mixed, default: null },
+  generatedBaselineRev: { type: String, trim: true, default: '' },
+  generatedBaselineHash: { type: String, trim: true, default: '' },
+  generatedAt: { type: Date, default: null },
 }, { timestamps: true });
 
 dropboxDocumentSchema.index({ status: 1, inferredDate: 1, serverModifiedAt: -1 });

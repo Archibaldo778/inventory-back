@@ -182,3 +182,43 @@ export const downloadDropboxFile = async (accessToken, path, { namespaceId = '' 
   if (!response.ok) throw createHttpError(response.status, `Dropbox download failed (${response.status})`);
   return Buffer.from(await response.arrayBuffer());
 };
+
+export const createDropboxFolder = (accessToken, path, { namespaceId = '' } = {}) => dropboxRpc(
+  'files/create_folder_v2',
+  accessToken,
+  { path: normalizeDropboxRootPath(path), autorename: false },
+  { namespaceId }
+);
+
+export const uploadDropboxFile = async (
+  accessToken,
+  path,
+  buffer,
+  { namespaceId = '', mode = 'add', autorename = true } = {}
+) => {
+  const response = await fetch(`${DROPBOX_CONTENT_URL}/files/upload`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/octet-stream',
+      'Dropbox-API-Arg': asciiJson({
+        path: normalizeDropboxRootPath(path),
+        mode,
+        autorename,
+        mute: false,
+        strict_conflict: false,
+      }),
+      ...pathRootHeader(namespaceId),
+    },
+    body: buffer,
+    signal: AbortSignal.timeout(120_000),
+  });
+  const text = await response.text();
+  let body = {};
+  try { body = text ? JSON.parse(text) : {}; } catch { body = {}; }
+  if (!response.ok) {
+    const message = body?.error_summary || body?.error || `Dropbox upload failed (${response.status})`;
+    throw createHttpError(response.status, String(message).slice(0, 500));
+  }
+  return body;
+};

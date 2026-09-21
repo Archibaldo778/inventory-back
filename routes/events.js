@@ -1316,7 +1316,12 @@ router.post('/import', requireAdmin, async (req, res) => {
 });
 
 // List (optionally by manager)
-router.get('/', cacheWithGroup('5 minutes', CACHE_GROUP), async (req, res) => {
+router.get('/', cacheWithGroup('5 minutes', CACHE_GROUP, {
+  shouldCacheRequest: (req) => (
+    Object.keys(req.query || {}).length === 0
+    || (String(req.query?.calendar || '') === '1' && !req.query?.managerId)
+  ),
+}), async (req, res) => {
   try {
     const q = {
       status: { $not: /^deleted$/i },

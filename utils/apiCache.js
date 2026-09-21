@@ -5,10 +5,14 @@ export const shouldCacheApiResponse = (req, res) => (
   && Object.keys(req?.query || {}).length === 0
 );
 
-export const createGroupedApiCache = (duration, group) => {
+export const createGroupedApiCache = (
+  duration,
+  group,
+  { shouldCacheRequest = (req) => Object.keys(req?.query || {}).length === 0 } = {}
+) => {
   const middleware = apicache.middleware(
     duration,
-    shouldCacheApiResponse,
+    (req, res) => Number(res?.statusCode) === 200 && shouldCacheRequest(req),
     { statusCodes: { include: [200] } }
   );
   return (req, res, next) => {

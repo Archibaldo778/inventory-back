@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { isFinancialEventDocument } from '../utils/eventFileVisibility.js';
+import {
+  isFinancialEventDocument,
+  isRestrictedEventDocument,
+} from '../utils/eventFileVisibility.js';
 
 test('event files hide invoices, proposals, and other financial documents', () => {
   assert.equal(isFinancialEventDocument('Leadership/Invoice_INV113298.pdf'), true);
@@ -16,4 +19,17 @@ test('operational leadership documents remain visible', () => {
   assert.equal(isFinancialEventDocument('Rental Order.xlsx'), false);
   assert.equal(isFinancialEventDocument('Tape Key.pdf'), false);
   assert.equal(isFinancialEventDocument('Staff Request.xlsx'), false);
+});
+
+test('event files hide insurance documents and videos', () => {
+  assert.equal(isRestrictedEventDocument('9W57-Insurance Requirements & Sample COI-UPDATED 6-1-26 1.pdf'), true);
+  assert.equal(isRestrictedEventDocument('25-26 Master COI - Solow Management Corp.pdf'), true);
+  assert.equal(isRestrictedEventDocument('Event Videos/load-in.mov'), true);
+  assert.equal(isRestrictedEventDocument('walkthrough.mp4'), true);
+});
+
+test('restricted file rules keep operational leadership files available', () => {
+  assert.equal(isRestrictedEventDocument('Pack Out/Beverage PO.docx'), false);
+  assert.equal(isRestrictedEventDocument('Rental Order.xlsx'), false);
+  assert.equal(isRestrictedEventDocument('Tape Key.pdf'), false);
 });

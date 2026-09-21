@@ -30,3 +30,23 @@ export const isFinancialEventDocument = (value) => {
     || normalized.includes(' profit loss ')
     || normalized.includes(' profit and loss ');
 };
+
+export const isInsuranceEventDocument = (value) => {
+  const raw = String(value || '').normalize('NFKD').toLowerCase();
+  if (/insurance/.test(raw)) return true;
+  const words = raw.replace(/[^a-z0-9]+/g, ' ').trim().split(/\s+/).filter(Boolean);
+  return words.includes('coi');
+};
+
+export const isVideoEventDocument = (value) => {
+  const raw = String(value || '').normalize('NFKD').toLowerCase();
+  if (/\.(?:3g2|3gp|avi|m4v|mkv|mov|mp4|mpeg|mpg|webm|wmv)$/i.test(raw)) return true;
+  const words = raw.replace(/[^a-z0-9]+/g, ' ').trim().split(/\s+/).filter(Boolean);
+  return words.includes('video') || words.includes('videos');
+};
+
+export const isRestrictedEventDocument = (value) => (
+  isFinancialEventDocument(value)
+  || isInsuranceEventDocument(value)
+  || isVideoEventDocument(value)
+);

@@ -102,7 +102,7 @@ import {
   isLeadershipPrintFileSupported,
   mergeLeadershipPrintPdfs,
 } from '../utils/leadershipPrintPdf.js';
-import { isFinancialEventDocument } from '../utils/eventFileVisibility.js';
+import { isRestrictedEventDocument } from '../utils/eventFileVisibility.js';
 
 const router = Router();
 const requireCatereaseAdmin = [requireAuth, requireAdmin];
@@ -1670,7 +1670,7 @@ router.get('/operations/events/:id/dropbox-files', requireAuth, dropboxFileRateL
         const filePath = String(entry.path_display || entry.path_lower || '');
         if (!dropboxPathInsideFolder(filePath, folderPath) || /^~\$/i.test(String(entry.name || ''))) return;
         const relativePath = filePath.slice(String(folderPath).length).replace(/^\/+/, '');
-        if (isFinancialEventDocument(relativePath)) return;
+        if (isRestrictedEventDocument(relativePath)) return;
         files.push({
           id: String(entry.id || entry.path_lower || filePath),
           name: String(entry.name || 'Dropbox file'),
@@ -1710,7 +1710,7 @@ router.get('/operations/events/:id/dropbox-file', requireAuth, dropboxFileRateLi
       return res.status(400).json({ error: 'The requested file is outside this event folder' });
     }
     const relativePath = filePath.slice(String(folderPath).length).replace(/^\/+/, '');
-    if (isFinancialEventDocument(relativePath)) {
+    if (isRestrictedEventDocument(relativePath)) {
       return res.status(404).json({ error: 'The requested event file is not available' });
     }
     const buffer = await downloadDropboxFile(accessToken, filePath, {
@@ -1750,7 +1750,7 @@ router.post('/operations/events/:id/leadership-print.pdf', requireAuth, leadersh
         return res.status(400).json({ error: 'A requested file is outside this event folder' });
       }
       const relativePath = filePath.slice(String(folderPath).length).replace(/^\/+/, '');
-      if (isFinancialEventDocument(relativePath)) {
+      if (isRestrictedEventDocument(relativePath)) {
         return res.status(404).json({ error: 'A requested event file is not available' });
       }
       const fileName = filePath.split('/').filter(Boolean).pop() || 'event-file';

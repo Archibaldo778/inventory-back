@@ -98,6 +98,10 @@ import {
   loadBrandLogoSvg,
   loadCloudinaryWordImages,
 } from '../utils/operationalDocumentAssets.js';
+import {
+  isLeadershipPrintFileSupported,
+  mergeLeadershipPrintPdfs,
+} from '../utils/leadershipPrintPdf.js';
 
 const router = Router();
 const requireCatereaseAdmin = [requireAuth, requireAdmin];
@@ -108,6 +112,7 @@ const outlookDraftRateLimit = createMemoryRateLimiter({ windowMs: 10 * 60 * 1000
 const emailDraftRateLimit = createMemoryRateLimiter({ windowMs: 10 * 60 * 1000, max: 20, message: 'Too many email draft requests' });
 const dropboxSaveRateLimit = createMemoryRateLimiter({ windowMs: 10 * 60 * 1000, max: 30, message: 'Too many Dropbox saves' });
 const dropboxFileRateLimit = createMemoryRateLimiter({ windowMs: 60 * 1000, max: 120, message: 'Too many Dropbox file requests' });
+const leadershipPrintRateLimit = createMemoryRateLimiter({ windowMs: 10 * 60 * 1000, max: 12, message: 'Too many PDF print requests' });
 const OPERATIONAL_EVENT_RESTRICTED_ROLES = new Set(['bar captain', 'bartender']);
 let syncPromise = null;
 let syncProgress = null;
@@ -1714,6 +1719,60 @@ router.get('/operations/events/:id/dropbox-file', requireAuth, dropboxFileRateLi
       context: 'Operational Dropbox file download failed',
       defaultStatus: 502,
       fallbackMessage: 'Could not download the Dropbox file',
+    });
+  }
+});
+
+router.post('/operations/events/:id/leadership-print.pdf', requireAuth, leadershipPrintRateLimit, async (req, res) => {
+  try {
+    const event = await loadAuthorizedOperationalEvent(req, res);
+    if (!event) return undefined;
+    const requested = Array.isArray(req.body?.files) ? req.body.files.slice(0, 40) : [];
+    if (!requested.length) return res.status(400).json({ error: 'Select at least one file to print' });
+
+    const totalCopies = requested.reduce((sum, file) => sum + Math.max(1, Math.min(99, Math.trunc(Number(file?.copies) || 1))), 0);
+    if (totalCopies > 100) return res.status(400).json({ error: 'The print job is limited to 100 document copies' });
+
+    const { integration, accessToken } = await loadOperationalDropboxAccess();
+    const { folderPath } = resolveOperationalDropboxFolder({ event, integration });
+    const documents = [];
+    let totalBytes = 0;
+    for (const requestedFile of requested) {
+      const filePath = String(requestedFile?.path || '').trim();
+      if (!dropboxPathInsideFolder(filePath, folderPath)) {
+        return res.status(400).json({ error: 'A requested file is outside this event folder' });
+      }
+      const fileName = filePath.split('/').filter(Boolean).pop() || 'event-file';
+      if (!isLeadershipPrintFileSupported(fileName)) {
+        return res.status(400).json({ error: `${fileName} cannot be converted to PDF` });
+      }
+      const buffer = await downloadDropboxFile(accessToken, filePath, {
+        namespaceId: integration.namespaceId || '',
+      });
+      totalBytes += buffer.length;
+      if (buffer.length > 25 * 1024 * 1024 || totalBytes > 80 * 1024 * 1024) {
+        return res.status(413).json({ error: 'The selected files are too large for one print job' });
+      }
+      documents.push({
+        fileName,
+        buffer,
+        copies: Math.max(1, Math.min(99, Math.trunc(Number(requestedFile?.copies) || 1))),
+      });
+    }
+
+    const pdf = await mergeLeadershipPrintPdfs({ documents });
+    const title = safeOperationalFilePart(event.title, 100) || 'Event';
+    const fileName = `${title} - Leadership Files.pdf`;
+    const asciiFileName = fileName.normalize('NFKD').replace(/[^\x20-\x7E]/g, '').replace(/["\\]/g, '').trim() || 'Leadership Files.pdf';
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${asciiFileName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`);
+    return res.send(pdf);
+  } catch (error) {
+    return sendApiError(res, error, {
+      context: 'Leadership PDF preparation failed',
+      defaultStatus: 502,
+      fallbackMessage: 'Could not prepare the Leadership Files PDF',
     });
   }
 });

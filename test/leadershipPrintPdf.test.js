@@ -32,12 +32,12 @@ test('existing PDF files pass through without invoking LibreOffice', async () =>
   assert.deepEqual(output, input);
 });
 
-test('Staff Request spreadsheets are prepared as one landscape print page', async () => {
+test('SR revision spreadsheets are prepared as one landscape print page', async () => {
   const zip = new JSZip();
   zip.file('[Content_Types].xml', '<Types/>');
   zip.file('xl/worksheets/sheet1.xml', '<?xml version="1.0"?><worksheet><sheetViews/><sheetData/><pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/></worksheet>');
   const source = await zip.generateAsync({ type: 'nodebuffer' });
-  const prepared = await prepareLeadershipFileForPdf({ fileName: 'Event Staff Request REV2.xlsx', buffer: source });
+  const prepared = await prepareLeadershipFileForPdf({ fileName: '09-21-26 Chanel Climate Week Event SR REV2.xlsx', buffer: source });
   const output = await JSZip.loadAsync(prepared);
   const worksheet = await output.file('xl/worksheets/sheet1.xml').async('string');
   assert.match(worksheet, /<pageSetUpPr fitToPage="1"\/>/);
@@ -45,8 +45,23 @@ test('Staff Request spreadsheets are prepared as one landscape print page', asyn
   assert.match(worksheet, /<pageMargins left="0\.25"/);
 });
 
+test('Staff Request spreadsheet content is detected even when its file name is generic', async () => {
+  const zip = new JSZip();
+  zip.file('[Content_Types].xml', '<Types/>');
+  zip.file('xl/worksheets/sheet1.xml', '<?xml version="1.0"?><worksheet><sheetViews/><sheetData><row><c t="inlineStr"><is><t>Staff Request Form</t></is></c></row></sheetData></worksheet>');
+  const source = await zip.generateAsync({ type: 'nodebuffer' });
+  const prepared = await prepareLeadershipFileForPdf({ fileName: 'Operations REV2.xlsx', buffer: source });
+  const output = await JSZip.loadAsync(prepared);
+  const worksheet = await output.file('xl/worksheets/sheet1.xml').async('string');
+  assert.match(worksheet, /orientation="landscape"/);
+  assert.match(worksheet, /fitToHeight="1"/);
+});
+
 test('non-Staff Request spreadsheets are not rewritten', async () => {
-  const input = Buffer.from('ordinary spreadsheet');
+  const zip = new JSZip();
+  zip.file('[Content_Types].xml', '<Types/>');
+  zip.file('xl/worksheets/sheet1.xml', '<?xml version="1.0"?><worksheet><sheetViews/><sheetData><row><c t="inlineStr"><is><t>Rental Order</t></is></c></row></sheetData></worksheet>');
+  const input = await zip.generateAsync({ type: 'nodebuffer' });
   const output = await prepareLeadershipFileForPdf({ fileName: 'Rental Order.xlsx', buffer: input });
   assert.deepEqual(output, input);
 });

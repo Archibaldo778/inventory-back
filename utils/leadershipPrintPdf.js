@@ -32,7 +32,7 @@ export const isLeadershipPrintFileSupported = (fileName) => {
 
 const isStaffRequestSpreadsheet = (fileName) => {
   const normalized = clean(fileName).replace(/[_-]+/g, ' ');
-  return /\bstaff(?:ing)?\s+request\b/i.test(normalized)
+  return (/\bstaff(?:ing)?\s+request\b/i.test(normalized) || /\bsr\b/i.test(normalized))
     && new Set(['xlsx', 'xlsm']).has(extensionOf(fileName));
 };
 
@@ -58,13 +58,22 @@ const enableWorksheetFitToPage = (xml) => {
 };
 
 export const prepareLeadershipFileForPdf = async ({ fileName, buffer }) => {
-  if (!isStaffRequestSpreadsheet(fileName)) return Buffer.from(buffer);
+  if (!new Set(['xlsx', 'xlsm']).has(extensionOf(fileName))) return Buffer.from(buffer);
   const zip = await JSZip.loadAsync(buffer);
   const worksheetNames = Object.keys(zip.files).filter((name) => /^xl\/worksheets\/sheet\d+\.xml$/i.test(name));
+  const worksheets = [];
   for (const worksheetName of worksheetNames) {
     const worksheet = zip.file(worksheetName);
     if (!worksheet) continue;
-    let xml = await worksheet.async('string');
+    worksheets.push({ worksheetName, xml: await worksheet.async('string') });
+  }
+  const sharedStrings = await zip.file('xl/sharedStrings.xml')?.async('string') || '';
+  const isStaffRequest = isStaffRequestSpreadsheet(fileName)
+    || /Staff\s*Request\s*Form/i.test(sharedStrings)
+    || worksheets.some(({ xml }) => /Staff\s*Request\s*Form/i.test(xml));
+  if (!isStaffRequest) return Buffer.from(buffer);
+  for (const { worksheetName, xml: sourceXml } of worksheets) {
+    let xml = sourceXml;
     xml = enableWorksheetFitToPage(xml);
     xml = replaceOrInsertWorksheetTag(
       xml,

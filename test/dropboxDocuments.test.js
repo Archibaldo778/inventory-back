@@ -12,6 +12,7 @@ import {
   inferDropboxPathDate,
   inferDropboxRevision,
   nyToday,
+  selectLatestDropboxFileRevisions,
   shouldReplaceDropboxEventDocument,
 } from '../utils/dropboxDocuments.js';
 
@@ -158,6 +159,29 @@ test('a numbered revision supersedes the original unnumbered document', () => {
   assert.equal(plan.find((row) => row.dropboxId === 'rev-1').isLatestRevision, true);
   assert.equal(plan.find((row) => row.dropboxId === 'original').status, 'superseded');
   assert.equal(plan.find((row) => row.dropboxId === 'original').supersededByDropboxId, 'rev-1');
+});
+
+test('event file listing keeps only the newest named revision in each document series', () => {
+  const files = [
+    { id: 'km-original', relativePath: 'Leadership Files/Event KM.docx', modifiedAt: '2026-09-18T10:00:00Z' },
+    { id: 'km-rev-1', relativePath: 'Leadership Files/Event KM REV1.docx', modifiedAt: '2026-09-18T11:00:00Z' },
+    { id: 'km-rev-3', relativePath: 'Leadership Files/Event KM Revision 3.docx', modifiedAt: '2026-09-18T12:00:00Z' },
+    { id: 'po-rev-2', relativePath: 'Leadership Files/Event PO REV2.docx', modifiedAt: '2026-09-18T10:00:00Z' },
+    { id: 'po-rev-2-newer', relativePath: 'Leadership Files/Event PO Revision 2.docx', modifiedAt: '2026-09-18T13:00:00Z' },
+    { id: 'rental', relativePath: 'Leadership Files/Rental Order.pdf', modifiedAt: '2026-09-18T09:00:00Z' },
+  ];
+  assert.deepEqual(
+    selectLatestDropboxFileRevisions(files).map((file) => file.id),
+    ['km-rev-3', 'po-rev-2-newer', 'rental'],
+  );
+});
+
+test('event file listing does not collapse unrelated unnumbered files', () => {
+  const files = [
+    { id: 'beverage', relativePath: 'Leadership Files/Beverage PO.docx' },
+    { id: 'staff', relativePath: 'Leadership Files/Staff Request.xlsx' },
+  ];
+  assert.deepEqual(selectLatestDropboxFileRevisions(files), files);
 });
 
 test('a moved Dropbox file replaces its old event card by stable Dropbox id', () => {

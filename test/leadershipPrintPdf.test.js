@@ -5,7 +5,9 @@ import {
   convertLeadershipFileToPdf,
   isLeadershipPrintFileSupported,
   mergeLeadershipPrintPdfs,
+  prepareLeadershipFileForPdf,
 } from '../utils/leadershipPrintPdf.js';
+import JSZip from 'jszip';
 
 const onePagePdf = async (width) => {
   const document = await PDFDocument.create();
@@ -27,6 +29,25 @@ test('existing PDF files pass through without invoking LibreOffice', async () =>
     buffer: input,
     run: async () => { throw new Error('should not run'); },
   });
+  assert.deepEqual(output, input);
+});
+
+test('Staff Request spreadsheets are prepared as one landscape print page', async () => {
+  const zip = new JSZip();
+  zip.file('[Content_Types].xml', '<Types/>');
+  zip.file('xl/worksheets/sheet1.xml', '<?xml version="1.0"?><worksheet><sheetViews/><sheetData/><pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/></worksheet>');
+  const source = await zip.generateAsync({ type: 'nodebuffer' });
+  const prepared = await prepareLeadershipFileForPdf({ fileName: 'Event Staff Request REV2.xlsx', buffer: source });
+  const output = await JSZip.loadAsync(prepared);
+  const worksheet = await output.file('xl/worksheets/sheet1.xml').async('string');
+  assert.match(worksheet, /<pageSetUpPr fitToPage="1"\/>/);
+  assert.match(worksheet, /<pageSetup[^>]*orientation="landscape"[^>]*fitToWidth="1"[^>]*fitToHeight="1"/);
+  assert.match(worksheet, /<pageMargins left="0\.25"/);
+});
+
+test('non-Staff Request spreadsheets are not rewritten', async () => {
+  const input = Buffer.from('ordinary spreadsheet');
+  const output = await prepareLeadershipFileForPdf({ fileName: 'Rental Order.xlsx', buffer: input });
   assert.deepEqual(output, input);
 });
 

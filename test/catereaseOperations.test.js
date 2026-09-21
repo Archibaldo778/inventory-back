@@ -1449,6 +1449,8 @@ test('Staff Request XLSX matches the Caterease staffing sheet fields', async () 
   assert.match(sheet, /<mergeCell ref="A2:A3"\/>/);
   assert.match(sheet, /<mergeCell ref="A12:A13"\/>/);
   assert.match(sheet, /<mergeCell ref="B12:B13"\/>/);
+  assert.match(sheet, /<pageSetUpPr fitToPage="1"\/>/);
+  assert.match(sheet, /<pageSetup paperSize="1" orientation="landscape" fitToWidth="1" fitToHeight="1"/);
   assert.match(styles, /<name val="Helvetica"\/>/);
   assert.doesNotMatch(styles, /<left style=/);
   assert.doesNotMatch(sheet, /Excluded/);

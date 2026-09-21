@@ -57,6 +57,47 @@ export const inferDropboxDocumentFamily = (value) => clean(value)
   .replace(/\s+/g, ' ')
   .trim();
 
+const eventFileModifiedAt = (file) => {
+  const value = file?.modifiedAt || file?.server_modified || file?.client_modified;
+  const timestamp = new Date(value || 0).getTime();
+  return Number.isFinite(timestamp) ? timestamp : 0;
+};
+
+export const selectLatestDropboxFileRevisions = (files) => {
+  const rows = (Array.isArray(files) ? files : []).map((file, index) => {
+    const identity = clean(file?.relativePath || file?.path || file?.name);
+    return {
+      file,
+      index,
+      family: inferDropboxDocumentFamily(identity),
+      revisionNumber: inferDropboxRevision(identity).number,
+    };
+  });
+  const groups = new Map();
+  rows.forEach((row) => {
+    if (!row.family) return;
+    const group = groups.get(row.family) || [];
+    group.push(row);
+    groups.set(row.family, group);
+  });
+  const included = new Set();
+  groups.forEach((group) => {
+    const numbered = group.filter((row) => row.revisionNumber !== null);
+    if (!numbered.length) {
+      group.forEach((row) => included.add(row.index));
+      return;
+    }
+    const latest = [...numbered].sort((left, right) => (
+      right.revisionNumber - left.revisionNumber
+      || eventFileModifiedAt(right.file) - eventFileModifiedAt(left.file)
+      || clean(right.file?.id).localeCompare(clean(left.file?.id))
+    ))[0];
+    included.add(latest.index);
+  });
+  rows.filter((row) => !row.family).forEach((row) => included.add(row.index));
+  return rows.filter((row) => included.has(row.index)).map((row) => row.file);
+};
+
 export const shouldReplaceDropboxEventDocument = (current, incoming, sourceSeries) => {
   const currentProvider = clean(current?.sourceProvider).toLowerCase();
   const currentSourceId = clean(current?.sourceId);

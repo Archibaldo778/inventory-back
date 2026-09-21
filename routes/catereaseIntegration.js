@@ -50,7 +50,7 @@ import {
   normalizeCatereaseRawEventId,
   selectLatestCatereaseFiles,
 } from '../utils/catereaseFiles.js';
-import { nyToday } from '../utils/dropboxDocuments.js';
+import { nyToday, selectLatestDropboxFileRevisions } from '../utils/dropboxDocuments.js';
 import { buildCatereaseFinancialPreview, buildCatereaseKitchenCatalog } from '../utils/catereaseKitchen.js';
 import {
   buildCatereaseOperationalSnapshot,
@@ -1688,8 +1688,9 @@ router.get('/operations/events/:id/dropbox-files', requireAuth, dropboxFileRateL
         namespaceId: integration.namespaceId || '',
       }) : null;
     }
-    files.sort((left, right) => String(left.relativePath || left.name).localeCompare(String(right.relativePath || right.name), undefined, { numeric: true }));
-    return res.json({ folderPath, files });
+    const latestFiles = selectLatestDropboxFileRevisions(files);
+    latestFiles.sort((left, right) => String(left.relativePath || left.name).localeCompare(String(right.relativePath || right.name), undefined, { numeric: true }));
+    return res.json({ folderPath, files: latestFiles });
   } catch (error) {
     return sendApiError(res, error, {
       context: 'Operational Dropbox file listing failed',

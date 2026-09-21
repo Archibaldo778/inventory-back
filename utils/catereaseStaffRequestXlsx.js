@@ -161,14 +161,14 @@ const worksheetXml = ({ event, snapshot, zoneKey = '', manualAdditions = [] }) =
   const totalCountRow = tableHeaderRow + rows.length + 2;
   const totalLabelRow = totalCountRow + 1;
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><dimension ref="A1:H${totalLabelRow}"/><sheetViews><sheetView workbookViewId="0"/></sheetViews><sheetFormatPr baseColWidth="10" defaultRowHeight="16"/><cols><col min="2" max="2" width="19.33203125" customWidth="1"/><col min="5" max="5" width="12" customWidth="1"/><col min="6" max="6" width="28.33203125" customWidth="1"/><col min="7" max="7" width="19.33203125" customWidth="1"/><col min="8" max="8" width="25.33203125" customWidth="1"/></cols><sheetData>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetPr><pageSetUpPr fitToPage="1"/></sheetPr><dimension ref="A1:H${totalLabelRow}"/><sheetViews><sheetView workbookViewId="0"/></sheetViews><sheetFormatPr baseColWidth="10" defaultRowHeight="16"/><cols><col min="2" max="2" width="19.33203125" customWidth="1"/><col min="5" max="5" width="12" customWidth="1"/><col min="6" max="6" width="28.33203125" customWidth="1"/><col min="7" max="7" width="19.33203125" customWidth="1"/><col min="8" max="8" width="25.33203125" customWidth="1"/></cols><sheetData>
 ${titleRow}
 ${headerRows.join('')}
 ${sheetRow(tableHeaderRow, ['#', 'Position', 'Start', 'End', 'Hours', 'Uniform', 'Admin Notes', 'Comments'], { styles: [3, 3, 3, 3, 3, 3, 3, 3] })}
 ${staffingRows.join('')}
 ${sheetRow(totalCountRow, [totalStaff], { styles: [12], numeric: [0] })}
 ${sheetRow(totalLabelRow, ['TOTAL STAFF NEEDED'], { styles: [12] })}
-</sheetData><mergeCells count="3"><mergeCell ref="A2:A3"/><mergeCell ref="A12:A13"/><mergeCell ref="B12:B13"/></mergeCells><pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/></worksheet>`;
+</sheetData><mergeCells count="3"><mergeCell ref="A2:A3"/><mergeCell ref="A12:A13"/><mergeCell ref="B12:B13"/></mergeCells><pageMargins left="0.25" right="0.25" top="0.35" bottom="0.35" header="0.15" footer="0.15"/><pageSetup paperSize="1" orientation="landscape" fitToWidth="1" fitToHeight="1" pageOrder="downThenOver"/></worksheet>`;
 };
 
 const stylesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>

@@ -11,7 +11,8 @@ import JSZip from 'jszip';
 
 const onePagePdf = async (width) => {
   const document = await PDFDocument.create();
-  document.addPage([width, 200]);
+  const page = document.addPage([width, 200]);
+  page.drawText('Printable content', { x: 10, y: 10 });
   return Buffer.from(await document.save());
 };
 
@@ -78,7 +79,33 @@ test('leadership PDFs preserve file order and requested copy counts', async () =
   });
   const merged = await PDFDocument.load(output);
   assert.equal(merged.getPageCount(), 3);
-  assert.deepEqual(merged.getPages().map((page) => page.getWidth()), [300, 300, 500]);
+  assert.deepEqual(merged.getPages().map((page) => page.getSize()), [
+    { width: 792, height: 612 },
+    { width: 792, height: 612 },
+    { width: 792, height: 612 },
+  ]);
+});
+
+test('print PDF scales oversized portrait and landscape pages onto Letter sheets', async () => {
+  const portraitDocument = await PDFDocument.create();
+  const portraitPage = portraitDocument.addPage([1000, 2000]);
+  portraitPage.drawText('Portrait content', { x: 10, y: 10 });
+  const portrait = Buffer.from(await portraitDocument.save());
+  const landscapeDocument = await PDFDocument.create();
+  const landscapePage = landscapeDocument.addPage([2000, 1000]);
+  landscapePage.drawText('Landscape content', { x: 10, y: 10 });
+  const landscape = Buffer.from(await landscapeDocument.save());
+  const output = await mergeLeadershipPrintPdfs({
+    documents: [
+      { fileName: 'Portrait.pdf', buffer: portrait, copies: 1 },
+      { fileName: 'Floor Plan.pdf', buffer: landscape, copies: 1 },
+    ],
+  });
+  const merged = await PDFDocument.load(output);
+  assert.deepEqual(merged.getPages().map((page) => page.getSize()), [
+    { width: 612, height: 792 },
+    { width: 792, height: 612 },
+  ]);
 });
 
 test('missing LibreOffice produces a clear configuration error', async () => {

@@ -208,6 +208,18 @@ test('event file revisions in real zone folders remain separate series', () => {
   );
 });
 
+test('Staff Request and SR file names resolve to one latest event series', () => {
+  const files = [
+    { id: 'staff-original', relativePath: 'Staff Request/Staff Request Form.xlsx', modifiedAt: '2026-09-20T10:00:00Z' },
+    { id: 'staff-rev-1', relativePath: 'Leadership File/SR/09-23-26 XTX Markets New York SR REV1.xlsx', modifiedAt: '2026-09-21T10:00:00Z' },
+    { id: 'staff-rev-2', relativePath: 'Leadership File/SR/09-23-26 XTX Markets New York Staff Request REV2.xlsx', modifiedAt: '2026-09-22T10:00:00Z' },
+  ];
+  assert.deepEqual(
+    selectLatestDropboxFileRevisions(files).map((file) => file.id),
+    ['staff-rev-2'],
+  );
+});
+
 test('a moved Dropbox file replaces its old event card by stable Dropbox id', () => {
   const incoming = { dropboxId: 'id:stable', name: 'Event KPO.docx', documentType: 'po' };
   assert.equal(shouldReplaceDropboxEventDocument({

@@ -76,7 +76,11 @@ const eventFileRevisionFamily = (value) => {
   const meaningfulFolders = parts
     .map((part) => inferDropboxDocumentFamily(part))
     .filter((part) => part && !EVENT_FILE_CONTAINER_FOLDERS.has(part));
-  return [...meaningfulFolders, inferDropboxDocumentFamily(fileName)].filter(Boolean).join('/');
+  const normalizedFileName = inferDropboxDocumentFamily(fileName);
+  const staffRequest = /\bstaff(?:ing)? request(?: form)?\b/.test(normalizedFileName)
+    || /(?:^|\s)sr(?:\s|$)/.test(normalizedFileName);
+  const fileFamily = staffRequest ? 'staff_request' : normalizedFileName;
+  return [...meaningfulFolders, fileFamily].filter(Boolean).join('/');
 };
 
 export const selectLatestDropboxFileRevisions = (files) => {

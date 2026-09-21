@@ -143,13 +143,39 @@ export const mergeLeadershipPrintPdfs = async ({ documents, convert = convertLea
   if (totalCopies > 100) throw httpError(400, 'The print job is limited to 100 document copies');
 
   const output = await PDFDocument.create();
+  const letterPortrait = { width: 612, height: 792 };
+  const letterLandscape = { width: 792, height: 612 };
+  const pageMargin = 18;
   for (const document of printable) {
     const pdfBuffer = await convert({ fileName: document.fileName, buffer: document.buffer });
     const source = await PDFDocument.load(pdfBuffer);
     const copies = Math.max(1, Math.min(99, Math.trunc(Number(document.copies) || 1)));
     for (let copy = 0; copy < copies; copy += 1) {
-      const pages = await output.copyPages(source, source.getPageIndices());
-      pages.forEach((page) => output.addPage(page));
+      for (const [pageIndex, sourcePage] of source.getPages().entries()) {
+        const sourceSize = sourcePage.getSize();
+        const targetSize = sourceSize.width > sourceSize.height ? letterLandscape : letterPortrait;
+        const alreadyLetter = Math.abs(sourceSize.width - targetSize.width) < 1
+          && Math.abs(sourceSize.height - targetSize.height) < 1;
+        if (alreadyLetter) {
+          const [page] = await output.copyPages(source, [pageIndex]);
+          output.addPage(page);
+          continue;
+        }
+        const embedded = await output.embedPage(sourcePage);
+        const scale = Math.min(
+          (targetSize.width - (pageMargin * 2)) / sourceSize.width,
+          (targetSize.height - (pageMargin * 2)) / sourceSize.height,
+        );
+        const width = sourceSize.width * scale;
+        const height = sourceSize.height * scale;
+        const page = output.addPage([targetSize.width, targetSize.height]);
+        page.drawPage(embedded, {
+          x: (targetSize.width - width) / 2,
+          y: (targetSize.height - height) / 2,
+          width,
+          height,
+        });
+      }
     }
   }
   return Buffer.from(await output.save());

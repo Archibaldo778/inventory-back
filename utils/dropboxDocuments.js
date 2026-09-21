@@ -63,13 +63,29 @@ const eventFileModifiedAt = (file) => {
   return Number.isFinite(timestamp) ? timestamp : 0;
 };
 
+const EVENT_FILE_CONTAINER_FOLDERS = new Set([
+  'leadership file', 'leadership files', 'document', 'documents', 'file', 'files',
+  'kitchen', 'km', 'kitchen menu', 'kitchen menus', 'akm', 'annotated kitchen menu', 'annotated kitchen menus',
+  'po', 'purchase order', 'purchase orders', 'pack out', 'pack outs', 'packout', 'packouts', 'kpo', 'kpos',
+  'sr', 'staff request', 'staff requests',
+]);
+
+const eventFileRevisionFamily = (value) => {
+  const parts = clean(value).replace(/\\/g, '/').split('/').filter(Boolean);
+  const fileName = parts.pop() || '';
+  const meaningfulFolders = parts
+    .map((part) => inferDropboxDocumentFamily(part))
+    .filter((part) => part && !EVENT_FILE_CONTAINER_FOLDERS.has(part));
+  return [...meaningfulFolders, inferDropboxDocumentFamily(fileName)].filter(Boolean).join('/');
+};
+
 export const selectLatestDropboxFileRevisions = (files) => {
   const rows = (Array.isArray(files) ? files : []).map((file, index) => {
     const identity = clean(file?.relativePath || file?.path || file?.name);
     return {
       file,
       index,
-      family: inferDropboxDocumentFamily(identity),
+      family: eventFileRevisionFamily(identity),
       revisionNumber: inferDropboxRevision(identity).number,
     };
   });

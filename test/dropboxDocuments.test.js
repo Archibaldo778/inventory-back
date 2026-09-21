@@ -184,6 +184,30 @@ test('event file listing does not collapse unrelated unnumbered files', () => {
   assert.deepEqual(selectLatestDropboxFileRevisions(files), files);
 });
 
+test('event file revisions collapse across legacy and Leadership File container folders', () => {
+  const files = [
+    { id: 'legacy-km', relativePath: 'KM/09-21-26 Chanel Climate Week - US Circularity Event KM.docx' },
+    { id: 'leadership-km', relativePath: 'Leadership File/KM/09-21-26 Chanel Climate Week - US Circularity Event KM REV1.docx' },
+    { id: 'annotated', relativePath: 'Leadership File/Kitchen/09-21-26 Chanel Climate Week - US Circularity Event AKM.docx' },
+  ];
+  assert.deepEqual(
+    selectLatestDropboxFileRevisions(files).map((file) => file.id),
+    ['leadership-km', 'annotated'],
+  );
+});
+
+test('event file revisions in real zone folders remain separate series', () => {
+  const files = [
+    { id: 'floor-1-old', relativePath: 'Leadership File/KM/First Floor/Event KM REV1.docx' },
+    { id: 'floor-1-new', relativePath: 'KM/First Floor/Event KM REV2.docx' },
+    { id: 'floor-2', relativePath: 'Leadership File/KM/Second Floor/Event KM REV1.docx' },
+  ];
+  assert.deepEqual(
+    selectLatestDropboxFileRevisions(files).map((file) => file.id),
+    ['floor-1-new', 'floor-2'],
+  );
+});
+
 test('a moved Dropbox file replaces its old event card by stable Dropbox id', () => {
   const incoming = { dropboxId: 'id:stable', name: 'Event KPO.docx', documentType: 'po' };
   assert.equal(shouldReplaceDropboxEventDocument({

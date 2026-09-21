@@ -81,6 +81,8 @@ import { normalizeKitchenRecipeName, syncKitchenRecipeMatches } from '../utils/k
 import {
   createDropboxFolder,
   decryptDropboxSecret,
+  downloadDropboxFile,
+  listDropboxFolder,
   refreshDropboxAccessToken,
   uploadDropboxFile,
 } from '../utils/dropboxApi.js';
@@ -105,6 +107,7 @@ const downloadRateLimit = createMemoryRateLimiter({ windowMs: 60 * 1000, max: 12
 const outlookDraftRateLimit = createMemoryRateLimiter({ windowMs: 10 * 60 * 1000, max: 20, message: 'Too many Outlook draft requests' });
 const emailDraftRateLimit = createMemoryRateLimiter({ windowMs: 10 * 60 * 1000, max: 20, message: 'Too many email draft requests' });
 const dropboxSaveRateLimit = createMemoryRateLimiter({ windowMs: 10 * 60 * 1000, max: 30, message: 'Too many Dropbox saves' });
+const dropboxFileRateLimit = createMemoryRateLimiter({ windowMs: 60 * 1000, max: 120, message: 'Too many Dropbox file requests' });
 const OPERATIONAL_EVENT_RESTRICTED_ROLES = new Set(['bar captain', 'bartender']);
 let syncPromise = null;
 let syncProgress = null;
@@ -1601,6 +1604,119 @@ const generatedDropboxDocumentType = (descriptor = {}) => {
   if (['kitchen_menu', 'annotated_kitchen_menu'].includes(type)) return 'kitchen_menu';
   return 'review';
 };
+
+const loadOperationalDropboxAccess = async () => {
+  const integration = await DropboxIntegration.findOne({ provider: 'dropbox', enabled: true })
+    .select('+refreshToken.ciphertext +refreshToken.iv +refreshToken.tag')
+    .lean();
+  if (!integration?.refreshToken?.ciphertext) {
+    throw Object.assign(new Error('Connect Dropbox before opening event files'), { statusCode: 409 });
+  }
+  return {
+    integration,
+    accessToken: await refreshDropboxAccessToken(decryptDropboxSecret(integration.refreshToken)),
+  };
+};
+
+const dropboxPathInsideFolder = (filePath, folderPath) => {
+  const file = String(filePath || '').trim().replace(/\/+$/g, '').toLowerCase();
+  const folder = String(folderPath || '').trim().replace(/\/+$/g, '').toLowerCase();
+  return Boolean(file && folder && file.startsWith(`${folder}/`));
+};
+
+const dropboxFileContentType = (fileName) => {
+  const extension = String(fileName || '').trim().toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] || '';
+  return ({
+    doc: 'application/msword',
+    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    pdf: 'application/pdf',
+    xls: 'application/vnd.ms-excel',
+    xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    png: 'image/png',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    webp: 'image/webp',
+  })[extension] || 'application/octet-stream';
+};
+
+router.get('/operations/events/:id/dropbox-files', requireAuth, dropboxFileRateLimit, async (req, res) => {
+  try {
+    const event = await loadAuthorizedOperationalEvent(req, res);
+    if (!event) return undefined;
+    const { integration, accessToken } = await loadOperationalDropboxAccess();
+    const { folderPath } = resolveOperationalDropboxFolder({ event, integration });
+    let page;
+    try {
+      page = await listDropboxFolder(accessToken, {
+        path: folderPath,
+        namespaceId: integration.namespaceId || '',
+      });
+    } catch (error) {
+      if (Number(error?.statusCode) === 409 && /not_found|path\/not_found/i.test(String(error?.message || ''))) {
+        return res.json({ folderPath, files: [] });
+      }
+      throw error;
+    }
+    const files = [];
+    while (page) {
+      (Array.isArray(page.entries) ? page.entries : []).forEach((entry) => {
+        if (String(entry?.['.tag'] || '') !== 'file') return;
+        const filePath = String(entry.path_display || entry.path_lower || '');
+        if (!dropboxPathInsideFolder(filePath, folderPath) || /^~\$/i.test(String(entry.name || ''))) return;
+        files.push({
+          id: String(entry.id || entry.path_lower || filePath),
+          name: String(entry.name || 'Dropbox file'),
+          path: filePath,
+          relativePath: filePath.slice(String(folderPath).length).replace(/^\/+/, ''),
+          size: Number(entry.size || 0),
+          rev: String(entry.rev || ''),
+          modifiedAt: entry.server_modified || entry.client_modified || null,
+          contentType: dropboxFileContentType(entry.name),
+          downloadUrl: `/api/integrations/caterease/operations/events/${encodeURIComponent(event._id)}/dropbox-file?path=${encodeURIComponent(filePath)}`,
+        });
+      });
+      page = page.has_more ? await listDropboxFolder(accessToken, {
+        cursor: page.cursor,
+        namespaceId: integration.namespaceId || '',
+      }) : null;
+    }
+    files.sort((left, right) => String(left.relativePath || left.name).localeCompare(String(right.relativePath || right.name), undefined, { numeric: true }));
+    return res.json({ folderPath, files });
+  } catch (error) {
+    return sendApiError(res, error, {
+      context: 'Operational Dropbox file listing failed',
+      defaultStatus: 502,
+      fallbackMessage: 'Could not load the event Dropbox files',
+    });
+  }
+});
+
+router.get('/operations/events/:id/dropbox-file', requireAuth, dropboxFileRateLimit, async (req, res) => {
+  try {
+    const event = await loadAuthorizedOperationalEvent(req, res);
+    if (!event) return undefined;
+    const { integration, accessToken } = await loadOperationalDropboxAccess();
+    const { folderPath } = resolveOperationalDropboxFolder({ event, integration });
+    const filePath = String(req.query?.path || '').trim();
+    if (!dropboxPathInsideFolder(filePath, folderPath)) {
+      return res.status(400).json({ error: 'The requested file is outside this event folder' });
+    }
+    const buffer = await downloadDropboxFile(accessToken, filePath, {
+      namespaceId: integration.namespaceId || '',
+    });
+    const fileName = filePath.split('/').filter(Boolean).pop() || 'event-file';
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('Content-Type', dropboxFileContentType(fileName));
+    res.attachment(fileName);
+    return res.send(buffer);
+  } catch (error) {
+    return sendApiError(res, error, {
+      context: 'Operational Dropbox file download failed',
+      defaultStatus: 502,
+      fallbackMessage: 'Could not download the Dropbox file',
+    });
+  }
+});
 
 router.post('/operations/events/:id/dropbox', requireAuth, dropboxSaveRateLimit, async (req, res) => {
   try {

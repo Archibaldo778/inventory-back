@@ -22,7 +22,7 @@ export const inferDropboxEventId = (value) => {
 
 export const inferDropboxRevision = (value) => {
   const source = clean(value);
-  const matches = [...source.matchAll(/\b(?:revision|rev(?:ision)?|version|ver)\s*[-_.#:]?\s*(\d{1,4})\b/gi)];
+  const matches = [...source.matchAll(/(?:^|[^a-z0-9])(?:revision|rev(?:ision)?|version|ver)\s*[-_.#:]?\s*(\d{1,4})(?=$|[^a-z0-9])/gi)];
   const shortMatches = [...source.matchAll(/(?:^|[\s._-])v\s*[-_.#:]?\s*(\d{1,4})(?=$|[\s._-])/gi)];
   const match = matches.at(-1) || shortMatches.at(-1);
   if (!match) return { number: null, label: '' };

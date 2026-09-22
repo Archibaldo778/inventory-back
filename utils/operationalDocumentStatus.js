@@ -3,12 +3,17 @@ import { inferDropboxRevision } from './dropboxDocuments.js';
 const clean = (value) => String(value ?? '').replace(/\s+/g, ' ').trim();
 
 export const STAFF_REQUEST_FILE_PATTERN = /(?:\bstaff(?:ing)?\s*(?:request|req)(?:\s*form)?\b|\bsr\b)/i;
+export const RENTAL_FILE_PATTERN = /(?:^|[^a-z0-9])(?:prl|rental(?:s|\s*order)?)(?=$|[^a-z0-9])/i;
+export const RENTAL_FOLDER_PATTERN = /[\\/]rentals?[\\/]/i;
+
+const excludedRentalFile = (value) => /\b(?:rental\s*notes?|notes?\s*rentals?|rental\s*samples?|samples?\s*rentals?)\b/i.test(value);
 
 export const inferOperationalStatusType = (value) => {
   const name = clean(value).replace(/[\\/_-]+/g, ' ');
   if (/\b(?:staff(?:ing)?\s*(?:request|req)(?:\s*form)?|sr)\b/i.test(name)) return 'sr';
   if (/\b(?:annotated\s*kitchen\s*menu|kitchen\s*menu|akm|km)\b/i.test(name)) return 'km';
   if (/\b(?:kitchen\s*pack\s*out|purchase\s*order|pack\s*out|kpo|po)\b/i.test(name)) return 'po';
+  if (!excludedRentalFile(name) && (RENTAL_FILE_PATTERN.test(name) || RENTAL_FOLDER_PATTERN.test(value))) return 'rental';
   return '';
 };
 
@@ -53,15 +58,19 @@ export const isStaffRequestNotApplicable = (event = {}) => /\b(?:staff\s*only|lo
 ].map(clean).filter(Boolean).join(' '));
 
 export const buildOperationalDocumentStatus = (files, { staffRequestNotApplicable = false } = {}) => {
-  const grouped = { sr: [], km: [], po: [] };
+  const grouped = { sr: [], km: [], po: [], rental: [] };
   (Array.isArray(files) ? files : []).forEach((file) => {
-    const type = inferOperationalStatusType(file?.relativePath || file?.path || file?.name);
+    const identity = clean(file?.relativePath || file?.path || file?.name);
+    const fileName = identity.replace(/\\/g, '/').split('/').at(-1) || '';
+    if (!/\.[a-z0-9]{2,5}$/i.test(fileName)) return;
+    const type = inferOperationalStatusType(identity);
     if (type) grouped[type].push(file);
   });
   const status = {
     sr: latestStatus(grouped.sr),
     km: latestStatus(grouped.km),
     po: latestStatus(grouped.po),
+    rental: latestStatus(grouped.rental),
   };
   if (!status.sr.available && staffRequestNotApplicable) status.sr = { ...status.sr, value: 'N/A', notApplicable: true };
   return status;

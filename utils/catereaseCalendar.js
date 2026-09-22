@@ -54,17 +54,19 @@ export const normalizeCatereaseCalendarEvent = (row = {}, _manualStatus = {}, dr
     sr: clean(row?.Extra8),
     km: clean(row?.Extra2),
     po: clean(row?.Extra20),
+    rental: '',
   };
   const dropboxAudit = {
     sr: dropboxReportField(dropboxStatus?.sr),
     km: dropboxReportField(dropboxStatus?.km),
     po: dropboxReportField(dropboxStatus?.po),
+    rental: dropboxReportField(dropboxStatus?.rental),
   };
   if (!dropboxAudit.sr.value && isStaffRequestNotApplicable(row)) {
     dropboxAudit.sr.value = 'N/A';
     dropboxAudit.sr.notApplicable = true;
   }
-  const resolvedReport = Object.fromEntries(['sr', 'km', 'po'].map((field) => [field, dropboxAudit[field].value]));
+  const resolvedReport = Object.fromEntries(['sr', 'km', 'po', 'rental'].map((field) => [field, dropboxAudit[field].value]));
   return {
     _id: `caterease:${rawEventId || clean(row?.EventNum)}`,
     externalId: clean(row?.EventNum),

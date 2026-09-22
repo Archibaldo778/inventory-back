@@ -60,6 +60,8 @@ import {
 import {
   buildOperationalDocumentStatus,
   isStaffRequestNotApplicable,
+  RENTAL_FILE_PATTERN,
+  RENTAL_FOLDER_PATTERN,
   STAFF_REQUEST_FILE_PATTERN,
 } from '../utils/operationalDocumentStatus.js';
 import { buildCatereaseFinancialPreview, buildCatereaseKitchenCatalog } from '../utils/catereaseKitchen.js';
@@ -1170,8 +1172,12 @@ router.get('/calendar', requireAuth, requireWorkspaceAccess, viewSyncRateLimit, 
         // event date from the Dropbox path during matching below.
         ...(legacyStaffRequestPathPattern ? [{
           inferredDate: '',
-          name: STAFF_REQUEST_FILE_PATTERN,
           path: legacyStaffRequestPathPattern,
+          $or: [
+            { name: STAFF_REQUEST_FILE_PATTERN },
+            { name: RENTAL_FILE_PATTERN },
+            { path: RENTAL_FOLDER_PATTERN },
+          ],
         }] : []),
       ],
     })
@@ -1210,6 +1216,7 @@ router.get('/calendar', requireAuth, requireWorkspaceAccess, viewSyncRateLimit, 
         withStaffRequest: items.filter((event) => event.meta.calendarReportAudit.sr.available).length,
         withKitchenMenu: items.filter((event) => event.meta.calendarReportAudit.km.available).length,
         withPackOut: items.filter((event) => event.meta.calendarReportAudit.po.available).length,
+        withRental: items.filter((event) => event.meta.calendarReportAudit.rental.available).length,
       },
     });
   } catch (error) {

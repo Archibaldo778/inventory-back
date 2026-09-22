@@ -50,7 +50,13 @@ import {
   normalizeCatereaseRawEventId,
   selectLatestCatereaseFiles,
 } from '../utils/catereaseFiles.js';
-import { nyToday, selectLatestDropboxFileRevisions } from '../utils/dropboxDocuments.js';
+import {
+  findDropboxEventMatch,
+  inferDropboxPathDate,
+  nyToday,
+  selectLatestDropboxFileRevisions,
+} from '../utils/dropboxDocuments.js';
+import { buildOperationalDocumentStatus, isStaffRequestNotApplicable } from '../utils/operationalDocumentStatus.js';
 import { buildCatereaseFinancialPreview, buildCatereaseKitchenCatalog } from '../utils/catereaseKitchen.js';
 import {
   buildCatereaseOperationalSnapshot,
@@ -1141,24 +1147,44 @@ router.get('/calendar', requireAuth, requireWorkspaceAccess, viewSyncRateLimit, 
     }
 
     const sourceEvents = await listAllCatereaseCalendarEvents(from, to);
-    const eventIds = [...new Set(sourceEvents.map((row) => String(row?.EvtNum || '').trim()).filter(Boolean))];
     const externalIds = [...new Set(sourceEvents.map((row) => String(row?.EventNum || '').trim()).filter(Boolean))];
-    const storedStatuses = eventIds.length || externalIds.length
-      ? await CalendarReportStatus.find({
-        $or: [
-          { eventKey: { $in: eventIds } },
-          { externalId: { $in: externalIds } },
-        ],
-      }).lean()
-      : [];
-    const statusesByEvent = new Map(storedStatuses.map((status) => [String(status.eventKey), status]));
-    const statusesByExternalId = new Map(storedStatuses.map((status) => [String(status.externalId), status]));
+    const calendarCandidates = sourceEvents.map((row, index) => ({
+      _id: String(row?.EvtNum || row?.EventNum || index),
+      externalId: String(row?.EventNum || '').trim(),
+      title: String(row?.PartyName || '').trim(),
+      date: String(row?.EvtDate || '').slice(0, 10),
+    }));
+    const dropboxDocuments = await DropboxDocument.find({
+      status: { $ne: 'deleted' },
+      $or: [
+        ...(externalIds.length ? [{ eventId: { $in: externalIds } }] : []),
+        { inferredDate: { $gte: from, $lte: to } },
+      ],
+    })
+      .select('dropboxId path name revisionNumber revisionLabel inferredDate eventId serverModifiedAt clientModifiedAt lastSeenAt status')
+      .limit(5000)
+      .lean();
+    const dropboxByEvent = new Map();
+    dropboxDocuments.forEach((document) => {
+      if (isRestrictedEventDocument(document.path || document.name)) return;
+      const match = findDropboxEventMatch({
+        ...document,
+        inferredDate: document.inferredDate || inferDropboxPathDate(document.path),
+      }, calendarCandidates);
+      if (match.status !== 'matched') return;
+      const key = String(match.event?._id || '');
+      const files = dropboxByEvent.get(key) || [];
+      files.push(document);
+      dropboxByEvent.set(key, files);
+    });
     const items = sourceEvents
-      .map((row) => normalizeCatereaseCalendarEvent(
-        row,
-        statusesByEvent.get(String(row?.EvtNum || '').trim())
-          || statusesByExternalId.get(String(row?.EventNum || '').trim())
-      ))
+      .map((row, index) => {
+        const key = String(row?.EvtNum || row?.EventNum || index);
+        const documentStatus = buildOperationalDocumentStatus(dropboxByEvent.get(key) || [], {
+          staffRequestNotApplicable: isStaffRequestNotApplicable(row),
+        });
+        return normalizeCatereaseCalendarEvent(row, {}, documentStatus);
+      })
       .filter((event) => event.date && event.title)
       .sort((left, right) => left.date.localeCompare(right.date) || left.title.localeCompare(right.title));
     return res.json({
@@ -1167,9 +1193,9 @@ router.get('/calendar', requireAuth, requireWorkspaceAccess, viewSyncRateLimit, 
       range: { from, to },
       counts: {
         events: items.length,
-        withStaffRequest: items.filter((event) => event.meta.calendarReport.sr).length,
-        withKitchenMenu: items.filter((event) => event.meta.calendarReport.km).length,
-        withPackOut: items.filter((event) => event.meta.calendarReport.po).length,
+        withStaffRequest: items.filter((event) => event.meta.calendarReportAudit.sr.available).length,
+        withKitchenMenu: items.filter((event) => event.meta.calendarReportAudit.km.available).length,
+        withPackOut: items.filter((event) => event.meta.calendarReportAudit.po.available).length,
       },
     });
   } catch (error) {

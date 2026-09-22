@@ -1,3 +1,5 @@
+import { isStaffRequestNotApplicable } from './operationalDocumentStatus.js';
+
 const clean = (value) => String(value ?? '').replace(/\s+/g, ' ').trim();
 
 export const CATEREASE_CALENDAR_EVENT_FIELDS = [
@@ -32,13 +34,16 @@ const guestCount = (row) => {
   return null;
 };
 
-const reportField = (field = {}) => ({
+const dropboxReportField = (field = {}) => ({
   value: clean(field?.value),
   updatedAt: field?.updatedAt || null,
-  updatedBy: clean(field?.updatedBy),
+  updatedBy: field?.available ? 'Dropbox' : '',
+  fileName: clean(field?.fileName),
+  available: Boolean(field?.available),
+  notApplicable: Boolean(field?.notApplicable),
 });
 
-export const normalizeCatereaseCalendarEvent = (row = {}, manualStatus = {}) => {
+export const normalizeCatereaseCalendarEvent = (row = {}, _manualStatus = {}, dropboxStatus = {}) => {
   const rawEventId = clean(row?.EvtNum);
   const actualGuests = guestCount(row);
   const status = clean(row?.Status);
@@ -50,11 +55,16 @@ export const normalizeCatereaseCalendarEvent = (row = {}, manualStatus = {}) => 
     km: clean(row?.Extra2),
     po: clean(row?.Extra20),
   };
-  const resolvedReport = {
-    sr: catereaseReport.sr || reportField(manualStatus?.sr).value,
-    km: catereaseReport.km || reportField(manualStatus?.km).value,
-    po: catereaseReport.po || reportField(manualStatus?.po).value,
+  const dropboxAudit = {
+    sr: dropboxReportField(dropboxStatus?.sr),
+    km: dropboxReportField(dropboxStatus?.km),
+    po: dropboxReportField(dropboxStatus?.po),
   };
+  if (!dropboxAudit.sr.value && isStaffRequestNotApplicable(row)) {
+    dropboxAudit.sr.value = 'N/A';
+    dropboxAudit.sr.notApplicable = true;
+  }
+  const resolvedReport = Object.fromEntries(['sr', 'km', 'po'].map((field) => [field, dropboxAudit[field].value]));
   return {
     _id: `caterease:${rawEventId || clean(row?.EventNum)}`,
     externalId: clean(row?.EventNum),
@@ -68,11 +78,9 @@ export const normalizeCatereaseCalendarEvent = (row = {}, manualStatus = {}) => 
       guestCount: actualGuests,
       category,
       calendarReport: resolvedReport,
-      calendarReportAudit: {
-        sr: reportField(manualStatus?.sr),
-        km: reportField(manualStatus?.km),
-        po: reportField(manualStatus?.po),
-      },
+      calendarReportAudit: dropboxAudit,
+      calendarReportSource: 'dropbox',
+      catereaseCalendarReport: catereaseReport,
       catereaseEventId: rawEventId,
       catereaseRevisedAt: clean(row?.Revised),
     },

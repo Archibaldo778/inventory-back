@@ -4,7 +4,7 @@ import {
   normalizeCatereaseCalendarEvent,
 } from '../utils/catereaseCalendar.js';
 
-test('Caterease calendar maps the event header without Nowsta data', () => {
+test('Caterease calendar maps event details but takes document availability from Dropbox', () => {
   const event = normalizeCatereaseCalendarEvent({
     EvtNum: '00001-00000000021964',
     EventNum: 'E21964              ',
@@ -20,17 +20,18 @@ test('Caterease calendar maps the event header without Nowsta data', () => {
     Extra8: 'Yes',
     Extra20: 'Yes',
     Revised: '2026-04-20T14:56:06.483',
-  }, {
-    sr: { value: 'Rev2', updatedBy: 'Sales User', updatedAt: '2026-09-18T12:00:00Z' },
-    km: { value: '' },
-    po: { value: 'Yes' },
+  }, {}, {
+    sr: { value: 'Rev2', available: true, updatedAt: '2026-09-18T12:00:00Z', fileName: 'Event SR REV2.xlsx' },
+    km: { value: 'Rev3', available: true },
+    po: { value: 'Yes', available: true },
   });
   assert.equal(event.externalId, 'E21964');
   assert.equal(event.date, '2026-09-18');
   assert.equal(event.status, '.Lost');
   assert.equal(event.meta.guestCount, 200);
-  assert.deepEqual(event.meta.calendarReport, { sr: 'Yes', km: 'Rev1', po: 'Yes' });
-  assert.equal(event.meta.calendarReportAudit.sr.updatedBy, 'Sales User');
+  assert.deepEqual(event.meta.calendarReport, { sr: 'Rev2', km: 'Rev3', po: 'Yes' });
+  assert.deepEqual(event.meta.catereaseCalendarReport, { sr: 'Yes', km: 'Rev1', po: 'Yes' });
+  assert.equal(event.meta.calendarReportAudit.sr.updatedBy, 'Dropbox');
 });
 
 test('Caterease calendar does not infer sent-document status from operational rows', () => {
@@ -38,7 +39,7 @@ test('Caterease calendar does not infer sent-document status from operational ro
   assert.deepEqual(event.meta.calendarReport, { sr: '', km: '', po: '' });
 });
 
-test('Caterease live SR KM and PO fields take precedence and manual status only fills blanks', () => {
+test('Caterease SR KM and PO values remain comparison-only when Dropbox has no files', () => {
   const event = normalizeCatereaseCalendarEvent({
     EvtNum: 'event-a',
     EventNum: 'E1',
@@ -51,5 +52,13 @@ test('Caterease live SR KM and PO fields take precedence and manual status only 
     km: { value: 'Rev2' },
     po: { value: '' },
   });
-  assert.deepEqual(event.meta.calendarReport, { sr: 'Rev3', km: 'Rev2', po: 'Yes' });
+  assert.deepEqual(event.meta.calendarReport, { sr: '', km: '', po: '' });
+  assert.deepEqual(event.meta.catereaseCalendarReport, { sr: 'Rev3', km: '', po: 'Yes' });
+});
+
+test('Staff Only and Load Out events show N/A unless Dropbox contains an SR', () => {
+  const event = normalizeCatereaseCalendarEvent({
+    EvtNum: 'event-a', EventNum: 'E1', PartyName: 'Event Load Out', Category: 'Staff Only',
+  });
+  assert.equal(event.meta.calendarReport.sr, 'N/A');
 });

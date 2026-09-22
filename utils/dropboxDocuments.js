@@ -381,10 +381,10 @@ export const classifyDropboxEntry = (entry, { today = nyToday() } = {}) => {
   const path = clean(entry?.path_display || entry?.path_lower);
   const name = clean(entry?.name);
   if (tag === 'deleted') return { status: 'deleted', reason: 'Removed from Dropbox', inferredDate: '', documentType: 'review' };
-  if (tag !== 'file' || !/\.docx$/i.test(name) || /^~\$/i.test(name)) {
-    return { status: 'ignored', reason: 'Not a DOCX PO/Kitchen Menu', inferredDate: '', documentType: 'review' };
-  }
   const inferredDate = inferDropboxPathDate(path);
+  if (tag !== 'file' || !/\.docx$/i.test(name) || /^~\$/i.test(name)) {
+    return { status: 'ignored', reason: 'Not a DOCX PO/Kitchen Menu', inferredDate, documentType: 'review' };
+  }
   const folderDatePrefix = inferYearMonth(path);
   const todayMonth = today.slice(0, 7);
   if (

@@ -50,14 +50,19 @@ const latestStatus = (files) => {
   };
 };
 
-export const isStaffRequestNotApplicable = (event = {}) => /\b(?:staff\s*only|load[\s-]*in|load[\s-]*out)\b/i.test([
+export const isOperationalDocumentsNotApplicable = (event = {}) => /\b(?:staff\s*only|load[\s-]*in|load[\s-]*out|rental[\s-]*check[\s-]*in)\b/i.test([
   event?.Category,
   event?.category,
   event?.PartyName,
   event?.title,
 ].map(clean).filter(Boolean).join(' '));
 
-export const buildOperationalDocumentStatus = (files, { staffRequestNotApplicable = false } = {}) => {
+export const isStaffRequestNotApplicable = isOperationalDocumentsNotApplicable;
+
+export const buildOperationalDocumentStatus = (files, {
+  operationalDocumentsNotApplicable = false,
+  staffRequestNotApplicable = false,
+} = {}) => {
   const grouped = { sr: [], km: [], po: [], rental: [] };
   (Array.isArray(files) ? files : []).forEach((file) => {
     const identity = clean(file?.relativePath || file?.path || file?.name);
@@ -72,6 +77,11 @@ export const buildOperationalDocumentStatus = (files, { staffRequestNotApplicabl
     po: latestStatus(grouped.po),
     rental: latestStatus(grouped.rental),
   };
-  if (!status.sr.available && staffRequestNotApplicable) status.sr = { ...status.sr, value: 'N/A', notApplicable: true };
+  const defaultOperationalDocumentsToNotApplicable = operationalDocumentsNotApplicable || staffRequestNotApplicable;
+  if (defaultOperationalDocumentsToNotApplicable) {
+    ['sr', 'km', 'po'].forEach((type) => {
+      if (!status[type].available) status[type] = { ...status[type], value: 'N/A', notApplicable: true };
+    });
+  }
   return status;
 };

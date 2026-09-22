@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   buildOperationalDocumentStatus,
   inferOperationalStatusType,
+  isOperationalDocumentsNotApplicable,
   isStaffRequestNotApplicable,
   RENTAL_FILE_PATTERN,
 } from '../utils/operationalDocumentStatus.js';
@@ -35,10 +36,24 @@ test('Dropbox operational status uses the highest revision and its update time',
   assert.equal(status.rental.value, 'Rev2');
 });
 
-test('Staff Only Load In and Load Out default SR to N/A until a document exists', () => {
+test('Staff Only, Load In, Load Out, and Rental Check-In default SR KM and PO to N/A until files exist', () => {
   assert.equal(isStaffRequestNotApplicable({ Category: 'Staff Only - Load In' }), true);
-  assert.equal(buildOperationalDocumentStatus([], { staffRequestNotApplicable: true }).sr.value, 'N/A');
-  assert.equal(buildOperationalDocumentStatus([
+  assert.equal(isStaffRequestNotApplicable({ Category: 'Load Out' }), true);
+  assert.equal(isStaffRequestNotApplicable({ Category: 'Rental Check-In' }), true);
+  assert.equal(isOperationalDocumentsNotApplicable({ Category: 'Rental Check-In' }), true);
+  assert.equal(isStaffRequestNotApplicable({ PartyName: 'Chanel Rental Check In' }), true);
+  const empty = buildOperationalDocumentStatus([], { operationalDocumentsNotApplicable: true });
+  assert.deepEqual({ sr: empty.sr.value, km: empty.km.value, po: empty.po.value, rental: empty.rental.value }, {
+    sr: 'N/A', km: 'N/A', po: 'N/A', rental: '',
+  });
+  const withDocuments = buildOperationalDocumentStatus([
     { path: '/Event/SR/Event Staff Request REV1.xlsx' },
-  ], { staffRequestNotApplicable: true }).sr.value, 'Rev1');
+    { path: '/Event/KM/Event Kitchen Menu REV2.docx' },
+  ], { operationalDocumentsNotApplicable: true });
+  assert.deepEqual({
+    sr: withDocuments.sr.value,
+    km: withDocuments.km.value,
+    po: withDocuments.po.value,
+    rental: withDocuments.rental.value,
+  }, { sr: 'Rev1', km: 'Rev2', po: 'N/A', rental: '' });
 });

@@ -1,4 +1,4 @@
-import { isStaffRequestNotApplicable } from './operationalDocumentStatus.js';
+import { isOperationalDocumentsNotApplicable } from './operationalDocumentStatus.js';
 
 const clean = (value) => String(value ?? '').replace(/\s+/g, ' ').trim();
 
@@ -62,9 +62,12 @@ export const normalizeCatereaseCalendarEvent = (row = {}, _manualStatus = {}, dr
     po: dropboxReportField(dropboxStatus?.po),
     rental: dropboxReportField(dropboxStatus?.rental),
   };
-  if (!dropboxAudit.sr.value && isStaffRequestNotApplicable(row)) {
-    dropboxAudit.sr.value = 'N/A';
-    dropboxAudit.sr.notApplicable = true;
+  if (isOperationalDocumentsNotApplicable(row)) {
+    ['sr', 'km', 'po'].forEach((field) => {
+      if (dropboxAudit[field].value) return;
+      dropboxAudit[field].value = 'N/A';
+      dropboxAudit[field].notApplicable = true;
+    });
   }
   const resolvedReport = Object.fromEntries(['sr', 'km', 'po', 'rental'].map((field) => [field, dropboxAudit[field].value]));
   return {

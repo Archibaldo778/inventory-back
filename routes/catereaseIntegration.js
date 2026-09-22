@@ -59,7 +59,7 @@ import {
 } from '../utils/dropboxDocuments.js';
 import {
   buildOperationalDocumentStatus,
-  isStaffRequestNotApplicable,
+  isOperationalDocumentsNotApplicable,
   RENTAL_FILE_PATTERN,
   RENTAL_FOLDER_PATTERN,
   STAFF_REQUEST_FILE_PATTERN,
@@ -1201,7 +1201,7 @@ router.get('/calendar', requireAuth, requireWorkspaceAccess, viewSyncRateLimit, 
       .map((row, index) => {
         const key = String(row?.EvtNum || row?.EventNum || index);
         const documentStatus = buildOperationalDocumentStatus(dropboxByEvent.get(key) || [], {
-          staffRequestNotApplicable: isStaffRequestNotApplicable(row),
+          operationalDocumentsNotApplicable: isOperationalDocumentsNotApplicable(row),
         });
         return normalizeCatereaseCalendarEvent(row, {}, documentStatus);
       })

@@ -57,9 +57,22 @@ test('Caterease SR KM and PO values remain comparison-only when Dropbox has no f
   assert.deepEqual(event.meta.catereaseCalendarReport, { sr: 'Rev3', km: '', po: 'Yes', rental: '' });
 });
 
-test('Staff Only and Load Out events show N/A unless Dropbox contains an SR', () => {
+test('Staff Only and Load Out events default SR KM and PO to N/A', () => {
   const event = normalizeCatereaseCalendarEvent({
     EvtNum: 'event-a', EventNum: 'E1', PartyName: 'Event Load Out', Category: 'Staff Only',
   });
-  assert.equal(event.meta.calendarReport.sr, 'N/A');
+  assert.deepEqual(event.meta.calendarReport, { sr: 'N/A', km: 'N/A', po: 'N/A', rental: '' });
+});
+
+test('Rental Check-In defaults SR KM and PO to N/A but shows actual files from its folder', () => {
+  const row = {
+    EvtNum: 'event-rental', EventNum: 'E2', PartyName: 'Chanel Rental Check In', Category: 'Rental Check-In',
+  };
+  assert.deepEqual(normalizeCatereaseCalendarEvent(row).meta.calendarReport, {
+    sr: 'N/A', km: 'N/A', po: 'N/A', rental: '',
+  });
+  assert.deepEqual(normalizeCatereaseCalendarEvent(row, {}, {
+    sr: { value: 'Rev2', available: true, fileName: 'Chanel Rental Check In SR REV2.xlsx' },
+    po: { value: 'Yes', available: true, fileName: 'Chanel Rental Check In PO.docx' },
+  }).meta.calendarReport, { sr: 'Rev2', km: 'N/A', po: 'Yes', rental: '' });
 });

@@ -51,5 +51,7 @@ const dropboxDocumentSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 dropboxDocumentSchema.index({ status: 1, inferredDate: 1, serverModifiedAt: -1 });
+dropboxDocumentSchema.index({ serverModifiedAt: -1 });
+dropboxDocumentSchema.index({ firstSeenAt: -1 });
 
 export default mongoose.model('DropboxDocument', dropboxDocumentSchema);

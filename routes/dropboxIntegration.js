@@ -37,9 +37,11 @@ import {
   classifyDropboxEntry,
   findDropboxEventMatch,
   getDropboxRevisionMetadata,
+  inferDropboxPathDate,
   nyToday,
   shouldReplaceDropboxEventDocument,
 } from '../utils/dropboxDocuments.js';
+import { buildOperationalDocumentActivities } from '../utils/operationalDocumentActivity.js';
 import {
   matchTransportationToEvents,
   parseTransportationWorkbook,
@@ -54,6 +56,7 @@ const downloadRateLimit = createMemoryRateLimiter({ windowMs: 60 * 1000, max: 60
 const transportationRateLimit = createMemoryRateLimiter({ windowMs: 5 * 60 * 1000, max: 30, message: 'Too many transportation sync requests' });
 let syncPromise = null;
 let syncProgress = null;
+let operationalActivityCache = { expiresAt: 0, payload: null };
 const transportationSyncPromises = new Map();
 
 const requireDropboxAdmin = [requireAuth, requireAdmin];
@@ -969,6 +972,54 @@ router.get('/status', ...requireDropboxAdmin, async (_req, res) => {
     });
   } catch (error) {
     return sendApiError(res, error, { context: 'Dropbox status failed', fallbackMessage: 'Failed to load Dropbox status' });
+  }
+});
+
+router.get('/activity', requireAuth, async (req, res) => {
+  try {
+    const useDefaultWindow = !String(req.query?.since || '').trim();
+    if (useDefaultWindow && operationalActivityCache.payload && operationalActivityCache.expiresAt > Date.now()) {
+      return res.json(operationalActivityCache.payload);
+    }
+    const now = Date.now();
+    const requestedSince = new Date(String(req.query?.since || '')).getTime();
+    const oldestAllowed = now - 14 * 24 * 60 * 60 * 1000;
+    const since = Math.max(oldestAllowed, Number.isFinite(requestedSince) ? requestedSince : now - 24 * 60 * 60 * 1000);
+    const documents = await DropboxDocument.find({
+      status: { $ne: 'deleted' },
+      sourceOrigin: { $ne: 'occ_generated' },
+      $or: [
+        { firstSeenAt: { $gte: new Date(since) } },
+        { serverModifiedAt: { $gte: new Date(since) } },
+      ],
+    })
+      .select('dropboxId rev path name inferredDate eventId revisionNumber importedEventId firstSeenAt serverModifiedAt clientModifiedAt')
+      .sort({ serverModifiedAt: -1, firstSeenAt: -1 })
+      .limit(2500)
+      .lean();
+    const dates = [...new Set(documents.map((document) => (
+      String(document.inferredDate || '').slice(0, 10) || inferDropboxPathDate(document.path)
+    )).filter(Boolean))];
+    const externalIds = [...new Set(documents.map((document) => String(document.eventId || '').trim()).filter(Boolean))];
+    const importedEventIds = [...new Set(documents.map((document) => String(document.importedEventId || '').trim()).filter(Boolean))];
+    const eventOr = [
+      ...(dates.length ? [{ date: { $in: dates } }] : []),
+      ...(externalIds.length ? [{ externalId: { $in: externalIds } }] : []),
+      ...(importedEventIds.length ? [{ _id: { $in: importedEventIds } }] : []),
+    ];
+    const events = eventOr.length ? await Event.find({
+      status: { $not: /^deleted$/i },
+      $or: eventOr,
+    }).select('_id externalId title date managerId').lean() : [];
+    const items = buildOperationalDocumentActivities(documents, events, { since, today: nyToday() }).slice(0, 50);
+    const payload = { items, since: new Date(since).toISOString(), generatedAt: new Date(now).toISOString() };
+    if (useDefaultWindow) operationalActivityCache = { expiresAt: now + 45_000, payload };
+    return res.json(payload);
+  } catch (error) {
+    return sendApiError(res, error, {
+      context: 'Dropbox activity failed',
+      fallbackMessage: 'Failed to load Dropbox document activity',
+    });
   }
 });
 

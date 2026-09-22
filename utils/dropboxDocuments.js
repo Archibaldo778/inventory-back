@@ -213,6 +213,37 @@ export const inferDropboxEventTitles = (document = {}) => {
     });
 };
 
+const DROPBOX_EVENT_FILE_CONTAINERS = new Set([
+  ...EVENT_FILE_CONTAINER_FOLDERS,
+  'rental', 'rentals', 'rental order', 'rental orders',
+]);
+
+export const inferDropboxEventFolder = (value) => {
+  const parts = clean(value).replace(/\\/g, '/').split('/').filter(Boolean);
+  if (parts.length < 2) return '';
+  const folders = parts.slice(0, -1);
+  const containerIndex = folders.findIndex((part) => (
+    DROPBOX_EVENT_FILE_CONTAINERS.has(inferDropboxDocumentFamily(part))
+  ));
+  return clean(containerIndex > 0 ? folders[containerIndex - 1] : folders.at(-1));
+};
+
+export const findDropboxFolderEventMatch = (document, events = []) => {
+  const folder = inferDropboxEventFolder(document?.path || document?.path_display || document?.path_lower);
+  if (folder) {
+    const folderMatch = findDropboxEventMatch({
+      ...document,
+      name: folder,
+      path: folder,
+      eventId: '',
+      inferredDate: inferDropboxPathDate(folder),
+    }, events);
+    if (folderMatch.status === 'matched') return folderMatch;
+  }
+  if (normalizedEventNumber(document?.eventId)) return findDropboxEventMatch(document, events);
+  return { status: 'unmatched', events: [], reason: 'event_folder' };
+};
+
 export const findDropboxEventMatch = (document, events = []) => {
   const candidates = (Array.isArray(events) ? events : []).filter((event) => event?._id || event?.id);
   const date = clean(document?.inferredDate);

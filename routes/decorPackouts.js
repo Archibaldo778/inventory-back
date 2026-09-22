@@ -8,7 +8,7 @@ import Product from '../models/Product.js';
 import { clearApiCacheGroups } from '../utils/apiCache.js';
 import { parseDecorInventoryCode } from '../utils/decorInventoryCodes.js';
 import { sendApiError } from '../utils/apiErrors.js';
-import { buildDecorPackoutCanvas } from '../utils/decorPackoutBoard.js';
+import { buildDecorPackoutCanvas, removeGeneratedDecorPackoutDuplicates } from '../utils/decorPackoutBoard.js';
 import { requireAuth } from '../middleware/auth.js';
 import { renderCatereaseOperationalDocx } from '../utils/catereaseOperations.js';
 import { loadBrandLogoSvg, loadCloudinaryWordImages } from '../utils/operationalDocumentAssets.js';
@@ -145,6 +145,14 @@ const isCanvasPackoutItem = (item, packoutId) => {
   );
 };
 
+const packoutProductKey = (item, fallbackDeckId = '') => {
+  const deckId = String(item?.deckId || fallbackDeckId || '');
+  const productId = String(item?.productId || '');
+  const inventoryCode = String(item?.inventoryCode || '').trim().toUpperCase();
+  const identity = productId || inventoryCode;
+  return deckId && identity ? `${deckId}:${identity}` : '';
+};
+
 const mergePackoutItemsFromEventBoards = async (packout) => {
   const decks = await Deck.find({ eventId: packout.eventId, type: 'decor' }).sort({ createdAt: 1 }).lean();
   const deckIds = decks.map((deck) => deck._id);
@@ -152,13 +160,30 @@ const mergePackoutItemsFromEventBoards = async (packout) => {
     ? await Page.find({ deckId: { $in: deckIds }, deletedAt: null }).sort({ deckId: 1, index: 1, createdAt: 1 }).lean()
     : [];
   const candidates = [];
+  const duplicateCleanupTasks = [];
   pages.forEach((page) => {
     const deck = decks.find((entry) => String(entry._id) === String(page.deckId));
     const zone = String(deck?.title || '').trim() || 'Decor';
-    (Array.isArray(page?.canvas?.images) ? page.canvas.images : []).forEach((item) => {
+    const originalImages = Array.isArray(page?.canvas?.images) ? page.canvas.images : [];
+    const images = removeGeneratedDecorPackoutDuplicates(originalImages, packout._id);
+    if (images.length !== originalImages.length) {
+      const revision = Math.max(0, Number(page.revision) || 0);
+      const revisionFilter = revision === 0
+        ? { $or: [{ revision: 0 }, { revision: { $exists: false } }] }
+        : { revision };
+      duplicateCleanupTasks.push(Page.updateOne(
+        { _id: page._id, deletedAt: null, ...revisionFilter },
+        { $set: { 'canvas.images': images }, $inc: { revision: 1 } }
+      ).catch((error) => {
+        console.error('Decor packout duplicate cleanup failed:', error);
+        return null;
+      }));
+    }
+    images.forEach((item) => {
       if (isCanvasPackoutItem(item, packout._id)) candidates.push({ item, deck, page, zone });
     });
   });
+  await Promise.all(duplicateCleanupTasks);
 
   const productIds = [...new Set(candidates.map(({ item }) => String(item.productId || '')).filter(isObjectId))];
   const inventoryCodes = [...new Set(candidates
@@ -251,8 +276,18 @@ const mergePackoutItemsFromEventBoards = async (packout) => {
       boardItemId: value.boardItemId,
     });
   });
+  const uniqueItems = new Map();
+  const unkeyedItems = [];
+  packout.items.forEach((item) => {
+    const key = packoutProductKey(item, packout.deckId);
+    if (!key) {
+      unkeyedItems.push(item);
+      return;
+    }
+    if (!uniqueItems.has(key)) uniqueItems.set(key, item);
+  });
+  packout.items = [...uniqueItems.values(), ...unkeyedItems];
   await packout.save();
-  await syncPackoutToBoardSafely(packout);
   clearCaches();
   return packout;
 };

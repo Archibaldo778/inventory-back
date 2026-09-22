@@ -26,3 +26,9 @@ test('Canvas products are linked to the shared packout instead of duplicated', (
   assert.match(boardSource, /expectedByBoardItemId/);
   assert.match(boardSource, /decorPackoutItemId: itemId/);
 });
+
+test('Canvas import never writes the imported packout back over its source board', () => {
+  const mergeBody = routeSource.match(/const mergePackoutItemsFromEventBoards[\s\S]+?return packout;\n};/)?.[0] || '';
+  assert.match(mergeBody, /removeGeneratedDecorPackoutDuplicates/);
+  assert.doesNotMatch(mergeBody, /syncPackoutToBoardSafely\(packout\)/);
+});

@@ -16,6 +16,28 @@ export const decorPackoutPlaceholder = (name) => {
 
 const itemImage = (item) => text(item?.image || item?.imageUrl || item?.images?.[0]);
 
+const canvasProductKey = (item) => {
+  const productId = idOf(item?.productId);
+  const inventoryCode = text(item?.inventoryCode).toUpperCase();
+  return productId || inventoryCode;
+};
+
+export const removeGeneratedDecorPackoutDuplicates = (imagesValue, packoutValue) => {
+  const images = Array.isArray(imagesValue) ? imagesValue : [];
+  const packoutId = idOf(packoutValue);
+  if (!packoutId) return images;
+  const generatedPrefix = `packout-${packoutId}-`;
+  const originalKeys = new Set(images
+    .filter((item) => !text(item?.id).startsWith(generatedPrefix))
+    .map(canvasProductKey)
+    .filter(Boolean));
+  return images.filter((item) => {
+    if (!text(item?.id).startsWith(generatedPrefix)) return true;
+    const key = canvasProductKey(item);
+    return !key || !originalKeys.has(key);
+  });
+};
+
 export const buildDecorPackoutCanvas = (canvasValue, packoutValue) => {
   const canvas = canvasValue && typeof canvasValue === 'object' ? canvasValue : {};
   const packoutId = idOf(packoutValue);

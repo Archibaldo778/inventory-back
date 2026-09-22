@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import mongoose from 'mongoose';
 
 import DecorPackout from '../models/DecorPackout.js';
-import { buildDecorPackoutCanvas } from '../utils/decorPackoutBoard.js';
+import { buildDecorPackoutCanvas, removeGeneratedDecorPackoutDuplicates } from '../utils/decorPackoutBoard.js';
 
 const objectId = () => new mongoose.Types.ObjectId();
 
@@ -121,4 +121,15 @@ test('decor board sync adopts an existing Canvas product instead of adding a dup
   assert.equal(result.canvas.images[0].x, 320);
   assert.equal(result.canvas.images[0].decorPackoutId, String(packoutId));
   assert.equal(result.canvas.images[0].decorPackoutItemId, String(itemId));
+});
+
+test('Canvas import removes only a generated duplicate when the dragged product already exists', () => {
+  const packoutId = objectId();
+  const productId = objectId();
+  const original = { id: '1727000000000', productId: String(productId), name: 'Stage vase' };
+  const generated = { id: `packout-${packoutId}-${objectId()}`, productId: String(productId), name: 'Stage vase' };
+  const unrelated = { id: `packout-${packoutId}-${objectId()}`, productId: String(objectId()), name: 'Tray' };
+  const result = removeGeneratedDecorPackoutDuplicates([original, generated, unrelated], packoutId);
+
+  assert.deepEqual(result.map((item) => item.id), [original.id, unrelated.id]);
 });

@@ -452,6 +452,7 @@ import catereaseIntegrationRoutes, {
   runCatereaseOperationalSync,
 } from './routes/catereaseIntegration.js';
 import brotherLabelRoutes from './routes/brotherLabels.js';
+import notificationRoutes from './routes/notifications.js';
 import { getCatereaseConfig } from './utils/catereaseApi.js';
 
 app.use('/api/auth', authRoutes);
@@ -461,6 +462,7 @@ app.use('/api/products', requireAuth, requireProductWorkspaceAccess, requireProd
 app.use('/api/users', requireAuth, requireUsersAccess, userRoutes);
 app.use('/users', requireAuth, requireUsersAccess, userRoutes);
 app.use('/api/events', requireAuth, requireWorkspaceAccess, eventRoutes);
+app.use('/api/notifications', requireAuth, notificationRoutes);
 app.use('/api/decor-packouts', requireAuth, requireWorkspaceAccess, decorPackoutRoutes);
 app.use('/api/decks', requireAuth, requireWorkspaceAccess, deckRoutes);
 app.use('/api/pages', requireAuth, requireWorkspaceAccess, pageRoutes);

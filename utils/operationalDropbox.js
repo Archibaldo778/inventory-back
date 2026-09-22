@@ -21,21 +21,21 @@ export const resolveOperationalDropboxFolder = ({ event = {}, integration = {} }
     .map((document) => clean(document?.sourcePath))
     .filter(Boolean);
   if (existingPaths.length) {
-    const firstParts = existingPaths[0].split('/').filter(Boolean);
+    const firstParentParts = path.posix.dirname(existingPaths[0]).split('/').filter(Boolean);
     const date = clean(event.date);
     const dateMatch = date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
     const dateTokens = dateMatch ? [date, `${dateMatch[2]}-${dateMatch[3]}-${dateMatch[1]}`, `${dateMatch[2]}-${dateMatch[3]}-${dateMatch[1].slice(-2)}`] : [];
     const eventId = clean(event.externalId).toLowerCase();
-    const eventFolderIndex = firstParts.findIndex((part) => {
+    const eventFolderIndex = firstParentParts.findIndex((part) => {
       const normalized = part.toLowerCase();
       return dateTokens.some((token) => normalized.includes(token.toLowerCase()))
         || (eventId && normalized.includes(eventId));
     });
     if (eventFolderIndex >= 0) {
-      return { folderPath: `/${firstParts.slice(0, eventFolderIndex + 1).join('/')}`, existing: true };
+      return { folderPath: `/${firstParentParts.slice(0, eventFolderIndex + 1).join('/')}`, existing: true };
     }
     const parentParts = existingPaths.map((sourcePath) => path.posix.dirname(sourcePath).split('/').filter(Boolean));
-    const commonParts = firstParts.filter((_part, index) => parentParts.every((parts) => parts[index] === firstParts[index]));
+    const commonParts = firstParentParts.filter((_part, index) => parentParts.every((parts) => parts[index] === firstParentParts[index]));
     return {
       folderPath: commonParts.length ? `/${commonParts.join('/')}` : path.posix.dirname(existingPaths[0]),
       existing: true,

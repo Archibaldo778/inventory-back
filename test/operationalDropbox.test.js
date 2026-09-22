@@ -28,3 +28,22 @@ test('events without source files receive a dated Dropbox folder', () => {
     existing: false,
   });
 });
+
+test('a date in the file name is never mistaken for the event folder', () => {
+  assert.deepEqual(resolveOperationalDropboxFolder({
+    event: {
+      date: '2026-09-23',
+      title: 'Duo Tasting',
+      documents: [{
+        sourceProvider: 'dropbox',
+        sourcePath: '/Proposals/2026/September/09-28-26 Parent Event/09-23-26 Duo Tasting KM.docx',
+      }, {
+        sourceProvider: 'dropbox',
+        sourcePath: '/Proposals/2026/September/09-28-26 Parent Event/Leadership File/Kitchen/09-23-26 Duo Tasting KPO.docx',
+      }],
+    },
+  }), {
+    folderPath: '/Proposals/2026/September/09-28-26 Parent Event',
+    existing: true,
+  });
+});

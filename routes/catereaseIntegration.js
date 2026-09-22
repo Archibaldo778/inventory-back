@@ -51,12 +51,17 @@ import {
   selectLatestCatereaseFiles,
 } from '../utils/catereaseFiles.js';
 import {
+  buildDropboxPathDateRangePattern,
   findDropboxEventMatch,
   inferDropboxPathDate,
   nyToday,
   selectLatestDropboxFileRevisions,
 } from '../utils/dropboxDocuments.js';
-import { buildOperationalDocumentStatus, isStaffRequestNotApplicable } from '../utils/operationalDocumentStatus.js';
+import {
+  buildOperationalDocumentStatus,
+  isStaffRequestNotApplicable,
+  STAFF_REQUEST_FILE_PATTERN,
+} from '../utils/operationalDocumentStatus.js';
 import { buildCatereaseFinancialPreview, buildCatereaseKitchenCatalog } from '../utils/catereaseKitchen.js';
 import {
   buildCatereaseOperationalSnapshot,
@@ -1154,11 +1159,20 @@ router.get('/calendar', requireAuth, requireWorkspaceAccess, viewSyncRateLimit, 
       title: String(row?.PartyName || '').trim(),
       date: String(row?.EvtDate || '').slice(0, 10),
     }));
+    const legacyStaffRequestPathPattern = buildDropboxPathDateRangePattern(from, to);
     const dropboxDocuments = await DropboxDocument.find({
       status: { $ne: 'deleted' },
       $or: [
         ...(externalIds.length ? [{ eventId: { $in: externalIds } }] : []),
         { inferredDate: { $gte: from, $lte: to } },
+        // Older ignored XLS/XLSX Staff Requests were indexed before inferred
+        // dates were stored. Include operationally named files and infer their
+        // event date from the Dropbox path during matching below.
+        ...(legacyStaffRequestPathPattern ? [{
+          inferredDate: '',
+          name: STAFF_REQUEST_FILE_PATTERN,
+          path: legacyStaffRequestPathPattern,
+        }] : []),
       ],
     })
       .select('dropboxId path name revisionNumber revisionLabel inferredDate eventId serverModifiedAt clientModifiedAt lastSeenAt status')

@@ -19,6 +19,12 @@ test('operational leadership documents remain visible', () => {
   assert.equal(isFinancialEventDocument('Rental Order.xlsx'), false);
   assert.equal(isFinancialEventDocument('Tape Key.pdf'), false);
   assert.equal(isFinancialEventDocument('Staff Request.xlsx'), false);
+  assert.equal(isFinancialEventDocument(
+    '/Operations/Proposals (1)/2026/09 September/09-23-26 Event/Leadership File/Kitchen/Event KM.docx'
+  ), false);
+  assert.equal(isFinancialEventDocument(
+    '/Operations/Proposals (1)/2026/09 September/09-23-26 Event/Proposals/Event Proposal.pdf'
+  ), true);
 });
 
 test('event files hide insurance documents and videos', () => {

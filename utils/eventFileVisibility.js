@@ -19,7 +19,14 @@ const FINANCIAL_WORDS = new Set([
 ]);
 
 export const isFinancialEventDocument = (value) => {
-  const raw = String(value || '').normalize('NFKD').toLowerCase();
+  const raw = String(value || '')
+    .normalize('NFKD')
+    .toLowerCase()
+    .split(/[\\/]/)
+    // Dropbox's company-wide source folder is named "Proposals (1)". It is a
+    // container, not an event proposal, so it must not hide every file below it.
+    .filter((part) => !/^proposals?\s*\(\d+\)$/.test(part.trim()))
+    .join('/');
   if (!raw) return false;
   if (/(?:invoice|proposal)/i.test(raw)) return true;
   const words = raw.replace(/[^a-z0-9]+/g, ' ').trim().split(/\s+/).filter(Boolean);

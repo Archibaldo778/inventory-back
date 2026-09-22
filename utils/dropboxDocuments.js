@@ -360,6 +360,23 @@ export const inferDropboxPathDate = (path) => {
   return '';
 };
 
+export const buildDropboxPathDateRangePattern = (from, to) => {
+  const valid = /^\d{4}-\d{2}-\d{2}$/;
+  if (!valid.test(clean(from)) || !valid.test(clean(to)) || from > to) return null;
+  const cursor = new Date(`${from}T12:00:00Z`);
+  const end = new Date(`${to}T12:00:00Z`);
+  if (!Number.isFinite(cursor.getTime()) || !Number.isFinite(end.getTime())) return null;
+  const patterns = [];
+  while (cursor <= end && patterns.length <= 370) {
+    const year = String(cursor.getUTCFullYear());
+    const month = String(cursor.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(cursor.getUTCDate()).padStart(2, '0');
+    patterns.push(`(?:${year}[-_./]${month}[-_./]${day}|${month}[-_.]${day}[-_.](?:${year}|${year.slice(-2)}))`);
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return patterns.length ? new RegExp(patterns.join('|'), 'i') : null;
+};
+
 const inferYearMonth = (path) => {
   const parts = clean(path).split('/').filter(Boolean);
   let year = '';

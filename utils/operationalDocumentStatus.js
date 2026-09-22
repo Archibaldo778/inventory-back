@@ -2,6 +2,8 @@ import { inferDropboxRevision } from './dropboxDocuments.js';
 
 const clean = (value) => String(value ?? '').replace(/\s+/g, ' ').trim();
 
+export const STAFF_REQUEST_FILE_PATTERN = /(?:\bstaff(?:ing)?\s*(?:request|req)(?:\s*form)?\b|\bsr\b)/i;
+
 export const inferOperationalStatusType = (value) => {
   const name = clean(value).replace(/[\\/_-]+/g, ' ');
   if (/\b(?:staff(?:ing)?\s*(?:request|req)(?:\s*form)?|sr)\b/i.test(name)) return 'sr';

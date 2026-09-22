@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  buildDropboxPathDateRangePattern,
   classifyDropboxEntry,
   buildDropboxRevisionPlan,
   findDropboxEventMatch,
@@ -15,6 +16,13 @@ import {
   selectLatestDropboxFileRevisions,
   shouldReplaceDropboxEventDocument,
 } from '../utils/dropboxDocuments.js';
+
+test('Dropbox date-range pattern finds only paths inside the requested calendar range', () => {
+  const pattern = buildDropboxPathDateRangePattern('2026-09-23', '2026-09-24');
+  assert.equal(pattern.test('/2026/09 September/09-23-26 Event/SR/Event SR.xlsx'), true);
+  assert.equal(pattern.test('/2026/09 September/2026-09-24 Event/KM.docx'), true);
+  assert.equal(pattern.test('/2026/09 September/09-25-26 Event/PO.docx'), false);
+});
 
 test('Dropbox document names identify PO and Kitchen Menu files conservatively', () => {
   assert.equal(inferDropboxDocumentType('E22500 PO.docx'), 'po');

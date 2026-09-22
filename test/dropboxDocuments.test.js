@@ -84,6 +84,22 @@ test('Dropbox documents match the event folder even when the filename is abbrevi
   assert.equal(match.event._id, 'two');
 });
 
+test('an operational file in the next-day parent folder matches its setup event by filename date and title', () => {
+  const path = '/Proposals (1)/2026/09 September/09 Olivier/09-23-26 Chanel Breakfast/Leadership File/09-22-26 Chanel Breakfast Setup SR REV1.xlsx';
+  const document = {
+    name: '09-22-26 Chanel Breakfast Setup SR REV1.xlsx',
+    path,
+    inferredDate: inferDropboxPathDate(path),
+  };
+  assert.equal(document.inferredDate, '2026-09-22');
+  const match = findDropboxEventMatch(document, [
+    { _id: 'setup', externalId: 'E22656 - S62015', title: 'Chanel Breakfast Setup', date: '2026-09-22' },
+    { _id: 'breakfast', externalId: 'E22657 - S62018', title: 'Chanel Breakfast', date: '2026-09-23' },
+  ]);
+  assert.equal(match.status, 'matched');
+  assert.equal(match.event._id, 'setup');
+});
+
 test('duplicate base event ids are resolved by the exact document title', () => {
   const match = findDropboxEventMatch({
     name: '09-14-26 Heyvaert Private Boat Cocktail KM.docx',

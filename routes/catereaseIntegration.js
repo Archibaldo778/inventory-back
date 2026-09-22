@@ -59,6 +59,7 @@ import {
 } from '../utils/dropboxDocuments.js';
 import {
   buildOperationalDocumentStatus,
+  inferOperationalStatusType,
   isStaffRequestNotApplicable,
   RENTAL_FILE_PATTERN,
   RENTAL_FOLDER_PATTERN,
@@ -1692,6 +1693,43 @@ const dropboxFileContentType = (fileName) => {
   })[extension] || 'application/octet-stream';
 };
 
+const indexedOperationalFileMatchesEvent = (document, event) => {
+  const identity = String(document?.path || document?.name || '').trim();
+  if (!identity || !inferOperationalStatusType(identity) || isRestrictedEventDocument(identity)) return false;
+  const match = findDropboxEventMatch({
+    ...document,
+    inferredDate: String(document?.inferredDate || '').trim() || inferDropboxPathDate(identity),
+  }, [event]);
+  return match.status === 'matched' && String(match.event?._id || '') === String(event?._id || '');
+};
+
+const findIndexedOperationalEventFiles = async (event) => {
+  const eventDate = String(event?.date || '').slice(0, 10);
+  const externalId = String(event?.externalId || '').trim();
+  const baseExternalId = normalizeCatereaseEventId(externalId);
+  const pathDatePattern = eventDate ? buildDropboxPathDateRangePattern(eventDate, eventDate) : null;
+  const candidates = await DropboxDocument.find({
+    status: { $ne: 'deleted' },
+    $or: [
+      { importedEventId: event._id },
+      ...([externalId, baseExternalId].filter(Boolean).length ? [{ eventId: { $in: [...new Set([externalId, baseExternalId].filter(Boolean))] } }] : []),
+      ...(eventDate ? [{ inferredDate: eventDate }] : []),
+      ...(pathDatePattern ? [{ path: pathDatePattern }] : []),
+    ],
+  })
+    .select('dropboxId path name rev size inferredDate eventId revisionNumber serverModifiedAt clientModifiedAt importedEventId')
+    .limit(2500)
+    .lean();
+  return candidates.filter((document) => indexedOperationalFileMatchesEvent(document, event));
+};
+
+const findAuthorizedIndexedOperationalFile = async (event, filePath) => {
+  const document = await DropboxDocument.findOne({ path: filePath, status: { $ne: 'deleted' } })
+    .select('dropboxId path name rev size inferredDate eventId revisionNumber serverModifiedAt clientModifiedAt importedEventId')
+    .lean();
+  return document && indexedOperationalFileMatchesEvent(document, event) ? document : null;
+};
+
 router.get('/operations/events/:id/dropbox-files', requireAuth, dropboxFileRateLimit, async (req, res) => {
   try {
     const event = await loadAuthorizedOperationalEvent(req, res);
@@ -1706,9 +1744,10 @@ router.get('/operations/events/:id/dropbox-files', requireAuth, dropboxFileRateL
       });
     } catch (error) {
       if (Number(error?.statusCode) === 409 && /not_found|path\/not_found/i.test(String(error?.message || ''))) {
-        return res.json({ folderPath, files: [] });
+        page = null;
+      } else {
+        throw error;
       }
-      throw error;
     }
     const files = [];
     while (page) {
@@ -1735,6 +1774,24 @@ router.get('/operations/events/:id/dropbox-files', requireAuth, dropboxFileRateL
         namespaceId: integration.namespaceId || '',
       }) : null;
     }
+    const existingIds = new Set(files.flatMap((file) => [String(file.id || ''), String(file.path || '').toLowerCase()]).filter(Boolean));
+    const indexedFiles = await findIndexedOperationalEventFiles(event);
+    indexedFiles.forEach((document) => {
+      const filePath = String(document.path || '');
+      const id = String(document.dropboxId || filePath);
+      if (!filePath || existingIds.has(id) || existingIds.has(filePath.toLowerCase())) return;
+      files.push({
+        id,
+        name: String(document.name || 'Dropbox file'),
+        path: filePath,
+        relativePath: `Matched Files/${String(document.name || 'Dropbox file')}`,
+        size: Number(document.size || 0),
+        rev: String(document.rev || ''),
+        modifiedAt: document.serverModifiedAt || document.clientModifiedAt || null,
+        contentType: dropboxFileContentType(document.name),
+        downloadUrl: `/api/integrations/caterease/operations/events/${encodeURIComponent(event._id)}/dropbox-file?path=${encodeURIComponent(filePath)}`,
+      });
+    });
     const latestFiles = selectLatestDropboxFileRevisions(files);
     latestFiles.sort((left, right) => String(left.relativePath || left.name).localeCompare(String(right.relativePath || right.name), undefined, { numeric: true }));
     return res.json({ folderPath, files: latestFiles });
@@ -1754,10 +1811,11 @@ router.get('/operations/events/:id/dropbox-file', requireAuth, dropboxFileRateLi
     const { integration, accessToken } = await loadOperationalDropboxAccess();
     const { folderPath } = resolveOperationalDropboxFolder({ event, integration });
     const filePath = String(req.query?.path || '').trim();
-    if (!dropboxPathInsideFolder(filePath, folderPath)) {
+    const insideEventFolder = dropboxPathInsideFolder(filePath, folderPath);
+    if (!insideEventFolder && !(await findAuthorizedIndexedOperationalFile(event, filePath))) {
       return res.status(400).json({ error: 'The requested file is outside this event folder' });
     }
-    const relativePath = filePath.slice(String(folderPath).length).replace(/^\/+/, '');
+    const relativePath = insideEventFolder ? filePath.slice(String(folderPath).length).replace(/^\/+/, '') : filePath;
     if (isRestrictedEventDocument(relativePath)) {
       return res.status(404).json({ error: 'The requested event file is not available' });
     }
@@ -1794,10 +1852,11 @@ router.post('/operations/events/:id/leadership-print.pdf', requireAuth, leadersh
     let totalBytes = 0;
     for (const requestedFile of requested) {
       const filePath = String(requestedFile?.path || '').trim();
-      if (!dropboxPathInsideFolder(filePath, folderPath)) {
+      const insideEventFolder = dropboxPathInsideFolder(filePath, folderPath);
+      if (!insideEventFolder && !(await findAuthorizedIndexedOperationalFile(event, filePath))) {
         return res.status(400).json({ error: 'A requested file is outside this event folder' });
       }
-      const relativePath = filePath.slice(String(folderPath).length).replace(/^\/+/, '');
+      const relativePath = insideEventFolder ? filePath.slice(String(folderPath).length).replace(/^\/+/, '') : filePath;
       if (isRestrictedEventDocument(relativePath)) {
         return res.status(404).json({ error: 'A requested event file is not available' });
       }

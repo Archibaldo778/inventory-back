@@ -23,15 +23,21 @@ export const buildDecorPackoutCanvas = (canvasValue, packoutValue) => {
 
   const items = Array.isArray(packoutValue?.items) ? packoutValue.items : [];
   const expected = new Map(items.map((item) => [idOf(item), item]).filter(([itemId]) => itemId));
+  const expectedByBoardItemId = new Map(items
+    .map((item) => [text(item?.boardItemId), idOf(item)])
+    .filter(([boardItemId, itemId]) => boardItemId && itemId));
   let changed = false;
   const images = [];
 
   (Array.isArray(canvas.images) ? canvas.images : []).forEach((image) => {
-    if (text(image?.decorPackoutId) !== packoutId) {
+    const linkedPackoutId = text(image?.decorPackoutId);
+    let itemId = text(image?.decorPackoutItemId);
+    if (!linkedPackoutId && expectedByBoardItemId.has(text(image?.id))) {
+      itemId = expectedByBoardItemId.get(text(image?.id));
+    } else if (linkedPackoutId !== packoutId) {
       images.push(image);
       return;
     }
-    const itemId = text(image?.decorPackoutItemId);
     const item = expected.get(itemId);
     if (!item) {
       changed = true;
@@ -46,6 +52,8 @@ export const buildDecorPackoutCanvas = (canvasValue, packoutValue) => {
       productId: idOf(item.productId),
       inventoryCode: text(item.inventoryCode).toUpperCase(),
       inventoryType: text(item.inventoryType) || 'decor',
+      decorPackoutId: packoutId,
+      decorPackoutItemId: itemId,
       name: text(item.name) || 'Inventory item',
       initialName: text(item.name) || 'Inventory item',
       description: text(item.description),

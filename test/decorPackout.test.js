@@ -105,3 +105,20 @@ test('decor board sync updates quantities, removes deleted rows and supports pro
   assert.equal(result.canvas.images[1].src, '/old.png');
   assert.match(result.canvas.images[2].src, /^data:image\/svg\+xml/);
 });
+
+test('decor board sync adopts an existing Canvas product instead of adding a duplicate', () => {
+  const packoutId = objectId();
+  const itemId = objectId();
+  const result = buildDecorPackoutCanvas({ images: [
+    { id: 'canvas-product-1', productId: String(objectId()), name: 'Stage vase', quantity: 4, x: 320, y: 180 },
+  ] }, {
+    _id: packoutId,
+    items: [{ _id: itemId, boardItemId: 'canvas-product-1', name: 'Stage vase', quantity: 4 }],
+  });
+
+  assert.equal(result.canvas.images.length, 1);
+  assert.equal(result.canvas.images[0].id, 'canvas-product-1');
+  assert.equal(result.canvas.images[0].x, 320);
+  assert.equal(result.canvas.images[0].decorPackoutId, String(packoutId));
+  assert.equal(result.canvas.images[0].decorPackoutItemId, String(itemId));
+});

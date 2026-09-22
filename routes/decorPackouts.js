@@ -58,11 +58,12 @@ const loadPackout = (id) => (
   isObjectId(id) ? DecorPackout.findById(id) : null
 );
 
-const syncPackoutToBoard = async (packout) => {
+const syncPackoutPage = async (packout, pageId, items) => {
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const page = await Page.findOne({ _id: packout.pageId, deckId: packout.deckId, deletedAt: null }).lean();
+    const page = await Page.findOne({ _id: pageId, deletedAt: null }).lean();
     if (!page) return false;
-    const next = buildDecorPackoutCanvas(page.canvas, packout);
+    const packoutValue = typeof packout?.toObject === 'function' ? packout.toObject() : packout;
+    const next = buildDecorPackoutCanvas(page.canvas, { ...packoutValue, items });
     if (!next.changed) return true;
     const revision = Math.max(0, Number(page.revision) || 0);
     const revisionFilter = revision === 0
@@ -78,6 +79,29 @@ const syncPackoutToBoard = async (packout) => {
   return false;
 };
 
+const syncPackoutToBoard = async (packout) => {
+  const decks = await Deck.find({ eventId: packout.eventId, type: 'decor' }).select('_id').lean();
+  const deckIds = decks.map((deck) => deck._id);
+  const pages = deckIds.length
+    ? await Page.find({ deckId: { $in: deckIds }, deletedAt: null }).select('_id').lean()
+    : [];
+  const fallbackPageId = String(packout.pageId || '');
+  const itemsByPage = new Map();
+  (packout.items || []).forEach((item) => {
+    const pageId = String(item.pageId || fallbackPageId);
+    if (!pageId) return;
+    const entries = itemsByPage.get(pageId) || [];
+    entries.push(item);
+    itemsByPage.set(pageId, entries);
+  });
+  const pageIds = new Set([...pages.map((page) => String(page._id)), ...itemsByPage.keys()]);
+  let synced = true;
+  for (const pageId of pageIds) {
+    if (!await syncPackoutPage(packout, pageId, itemsByPage.get(pageId) || [])) synced = false;
+  }
+  return synced;
+};
+
 const syncPackoutToBoardSafely = async (packout) => {
   try {
     const synced = await syncPackoutToBoard(packout);
@@ -85,6 +109,152 @@ const syncPackoutToBoardSafely = async (packout) => {
   } catch (error) {
     console.error('Decor packout board sync failed:', error);
   }
+};
+
+const resolvePackoutItemTarget = async (packout, requestedDeckId, requestedPageId) => {
+  if (isObjectId(requestedDeckId)) {
+    const { deck, page } = await resolvePackoutTarget(packout.eventId, requestedDeckId, requestedPageId);
+    return { deck, page, zone: String(deck.title || '').trim() || 'Decor' };
+  }
+  const deck = await Deck.findOne({ _id: packout.deckId, eventId: packout.eventId, type: 'decor' });
+  const page = await Page.findOne({ _id: packout.pageId, deckId: packout.deckId, deletedAt: null });
+  if (deck && page) return { deck, page, zone: String(deck.title || '').trim() || 'Decor' };
+  const fallback = await resolvePackoutTarget(packout.eventId);
+  return { ...fallback, zone: String(fallback.deck.title || '').trim() || 'Decor' };
+};
+
+const canvasQuantity = (item) => {
+  const raw = String(item?.quantityText ?? item?.quantity ?? 1).trim().replace(',', '.');
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.min(10000, Math.max(1, Math.floor(parsed))) : 1;
+};
+
+const canvasImageUrl = (value) => {
+  const image = String(value || '').trim();
+  if (!image || image.length > 2048 || /^data:/i.test(image)) return '';
+  return image;
+};
+
+const isCanvasPackoutItem = (item, packoutId) => {
+  if (!item || ['text', 'link', 'table', 'staff'].includes(String(item.type || '').toLowerCase())) return false;
+  if (String(item.boardItemType || '').toLowerCase() === 'staff') return false;
+  return Boolean(
+    String(item.decorPackoutId || '') === String(packoutId || '')
+    || isObjectId(item.productId)
+    || parseDecorInventoryCode(String(item.inventoryCode || '').trim().toUpperCase())
+  );
+};
+
+const mergePackoutItemsFromEventBoards = async (packout) => {
+  const decks = await Deck.find({ eventId: packout.eventId, type: 'decor' }).sort({ createdAt: 1 }).lean();
+  const deckIds = decks.map((deck) => deck._id);
+  const pages = deckIds.length
+    ? await Page.find({ deckId: { $in: deckIds }, deletedAt: null }).sort({ deckId: 1, index: 1, createdAt: 1 }).lean()
+    : [];
+  const candidates = [];
+  pages.forEach((page) => {
+    const deck = decks.find((entry) => String(entry._id) === String(page.deckId));
+    const zone = String(deck?.title || '').trim() || 'Decor';
+    (Array.isArray(page?.canvas?.images) ? page.canvas.images : []).forEach((item) => {
+      if (isCanvasPackoutItem(item, packout._id)) candidates.push({ item, deck, page, zone });
+    });
+  });
+
+  const productIds = [...new Set(candidates.map(({ item }) => String(item.productId || '')).filter(isObjectId))];
+  const inventoryCodes = [...new Set(candidates
+    .map(({ item }) => String(item.inventoryCode || '').trim().toUpperCase())
+    .filter((code) => parseDecorInventoryCode(code)))];
+  const productQuery = [];
+  if (productIds.length) productQuery.push({ _id: { $in: productIds } });
+  if (inventoryCodes.length) productQuery.push({ inventoryCode: { $in: inventoryCodes } });
+  const products = productQuery.length ? await Product.find({ $or: productQuery }).lean() : [];
+  const productById = new Map(products.map((product) => [String(product._id), product]));
+  const productByCode = new Map(products.map((product) => [String(product.inventoryCode || '').toUpperCase(), product]));
+  const grouped = new Map();
+
+  candidates.forEach(({ item, deck, page, zone }) => {
+    const code = String(item.inventoryCode || '').trim().toUpperCase();
+    const product = productById.get(String(item.productId || '')) || productByCode.get(code) || null;
+    if (product && TAPE_LIBRARY_PATTERN.test(String(product.category || ''))) return;
+    const productId = String(product?._id || item.productId || '');
+    const inventoryCode = String(product?.inventoryCode || code).trim().toUpperCase();
+    const name = String(product?.name || item.name || item.initialName || '').trim();
+    if (!name) return;
+    const deckId = String(deck?._id || packout.deckId || '');
+    const identity = productId || inventoryCode || name.toLowerCase();
+    const key = `${deckId}:${identity}`;
+    const current = grouped.get(key);
+    if (current) {
+      current.quantity = Math.min(10000, current.quantity + canvasQuantity(item));
+      return;
+    }
+    grouped.set(key, {
+      product,
+      productId,
+      inventoryCode,
+      name,
+      image: canvasImageUrl(product?.image || product?.imageUrl || product?.images?.[0] || item.src),
+      category: String(product?.category || item.category || '').trim(),
+      description: String(item.description || product?.description || '').trim(),
+      location: String(product?.location || '').trim(),
+      quantity: canvasQuantity(item),
+      zone,
+      deckId: deck?._id || packout.deckId,
+      pageId: page?._id || packout.pageId,
+      boardItemId: String(item.id || '').trim(),
+    });
+  });
+
+  grouped.forEach((value) => {
+    const existing = (packout.items || []).find((item) => {
+      const itemDeckId = String(item.deckId || packout.deckId || '');
+      if (itemDeckId !== String(value.deckId || '')) return false;
+      if (value.productId && String(item.productId || '') === value.productId) return true;
+      if (value.inventoryCode && String(item.inventoryCode || '').toUpperCase() === value.inventoryCode) return true;
+      return !value.productId && !value.inventoryCode && String(item.name || '').trim().toLowerCase() === value.name.toLowerCase();
+    });
+    if (existing) {
+      existing.productId = isObjectId(value.productId) ? value.productId : null;
+      existing.inventoryCode = parseDecorInventoryCode(value.inventoryCode) ? value.inventoryCode : '';
+      existing.source = value.product ? 'inventory' : existing.source;
+      existing.inventoryType = value.product?.inventoryType === 'disposable' ? 'disposable' : (existing.inventoryType || 'decor');
+      existing.name = value.name;
+      existing.image = value.image || existing.image;
+      existing.category = value.category || existing.category;
+      existing.description = value.description || existing.description;
+      existing.location = value.location || existing.location;
+      existing.quantity = value.quantity;
+      existing.zone = value.zone;
+      existing.deckId = value.deckId;
+      existing.pageId = value.pageId;
+      existing.boardItemId = value.boardItemId;
+      existing.updatedAt = new Date();
+      return;
+    }
+    if (packout.items.length >= MAX_PACKOUT_TYPES) {
+      throw Object.assign(new Error(`Packout is limited to ${MAX_PACKOUT_TYPES} item types`), { statusCode: 413 });
+    }
+    packout.items.push({
+      productId: isObjectId(value.productId) ? value.productId : null,
+      inventoryCode: parseDecorInventoryCode(value.inventoryCode) ? value.inventoryCode : '',
+      source: value.product ? 'inventory' : 'event',
+      inventoryType: value.product?.inventoryType === 'disposable' ? 'disposable' : 'decor',
+      name: value.name,
+      image: value.image,
+      category: value.category,
+      description: value.description,
+      location: value.location,
+      quantity: value.quantity,
+      zone: value.zone,
+      deckId: value.deckId,
+      pageId: value.pageId,
+      boardItemId: value.boardItemId,
+    });
+  });
+  await packout.save();
+  await syncPackoutToBoardSafely(packout);
+  clearCaches();
+  return packout;
 };
 
 router.get('/', async (req, res) => {
@@ -152,6 +322,20 @@ router.get('/:id', async (req, res) => {
   }
 });
 
+router.post('/:id/sync-board', async (req, res) => {
+  try {
+    const packout = await loadPackout(req.params.id);
+    if (!packout) return res.status(404).json({ error: 'Packout not found' });
+    if (packout.status !== 'draft') return res.status(409).json({ error: 'Reopen this packout before syncing the Decor Board' });
+    return res.json(await mergePackoutItemsFromEventBoards(packout));
+  } catch (error) {
+    return sendApiError(res, error, {
+      context: 'Decor Board packout sync failed',
+      fallbackMessage: 'Failed to sync Decor Board items into the packout',
+    });
+  }
+});
+
 router.get('/:id/export', requireAuth, async (req, res) => {
   try {
     const packout = await loadPackout(req.params.id);
@@ -161,7 +345,7 @@ router.get('/:id/export', requireAuth, async (req, res) => {
     const rows = (packout.items || []).map((item) => ({
       itemName: item.name,
       quantity: item.quantity,
-      menuGroup: item.category || 'DECOR',
+      menuGroup: item.zone || item.category || 'DECOR',
       notes: [item.inventoryCode, item.location, item.description].filter(Boolean).join(' · '),
     }));
     const [brandLogoSvg, decorImages] = await Promise.all([
@@ -215,9 +399,16 @@ router.post('/:id/scan', async (req, res) => {
       return res.status(404).json({ error: 'Inventory item not found' });
     }
 
-    const existing = packout.items.find((item) => String(item.productId) === String(product._id));
+    const target = await resolvePackoutItemTarget(packout, req.body?.deckId, req.body?.pageId);
+    const existing = packout.items.find((item) => (
+      String(item.productId) === String(product._id)
+      && String(item.deckId || packout.deckId) === String(target.deck._id)
+    ));
     if (existing) {
       existing.quantity = Math.min(10000, Number(existing.quantity || 0) + quantity);
+      existing.zone = target.zone;
+      existing.deckId = target.deck._id;
+      existing.pageId = target.page._id;
       existing.updatedAt = new Date();
       existing.scannedBy = actorName(req.auth);
     } else {
@@ -234,6 +425,9 @@ router.post('/:id/scan', async (req, res) => {
         category: product.category || '',
         location: product.location || '',
         quantity,
+        zone: target.zone,
+        deckId: target.deck._id,
+        pageId: target.page._id,
         scannedBy: actorName(req.auth),
       });
     }
@@ -271,6 +465,7 @@ router.post('/:id/items', async (req, res) => {
       return res.status(413).json({ error: `Packout is limited to ${MAX_PACKOUT_TYPES} item types` });
     }
 
+    const target = await resolvePackoutItemTarget(packout, req.body?.deckId, req.body?.pageId);
     packout.items.push({
       productId: null,
       inventoryCode: '',
@@ -280,6 +475,9 @@ router.post('/:id/items', async (req, res) => {
       category: category || 'Disposable / event purchase',
       description,
       quantity,
+      zone: target.zone,
+      deckId: target.deck._id,
+      pageId: target.page._id,
       scannedBy: actorName(req.auth),
     });
     await packout.save();

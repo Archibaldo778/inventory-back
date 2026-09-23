@@ -24,6 +24,7 @@ const userSchema = new mongoose.Schema(
         'bar admin',
         'bar captain',
         'bartender',
+        'packer',
       ],
       default: 'user',
     },

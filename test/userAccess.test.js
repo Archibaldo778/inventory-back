@@ -2,8 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   requireAdmin,
+  requireInventoryManager,
   requireProposalAccess,
   requireWorkspaceAccess,
+  requireWorkspaceEditor,
 } from '../middleware/auth.js';
 import { resolveUsersGuard } from '../server.js';
 
@@ -65,6 +67,7 @@ test('workspace guard blocks bar-only accounts from workspace APIs', () => {
   assert.equal(runGuard('manager').next, true);
   assert.equal(runGuard('sales rep').next, true);
   assert.equal(runGuard('bar admin').next, true);
+  assert.equal(runGuard('packer').next, true);
   assert.equal(runGuard('admin').next, true);
   assert.equal(runGuard('super admin').next, true);
   assert.deepEqual(runGuard('bar captain'), {
@@ -73,4 +76,33 @@ test('workspace guard blocks bar-only accounts from workspace APIs', () => {
     next: false,
   });
   assert.equal(runGuard('bartender').status, 403);
+});
+
+test('packer can manage inventory but cannot edit the general workspace', () => {
+  const runGuard = (guard, role) => {
+    const result = { status: null, body: null, next: false };
+    const res = {
+      status(code) {
+        result.status = code;
+        return this;
+      },
+      json(body) {
+        result.body = body;
+        return this;
+      },
+    };
+    guard({ auth: { role } }, res, () => {
+      result.next = true;
+    });
+    return result;
+  };
+
+  assert.equal(runGuard(requireInventoryManager, 'packer').next, true);
+  assert.equal(runGuard(requireInventoryManager, 'user').status, 403);
+  assert.equal(runGuard(requireWorkspaceEditor, 'user').next, true);
+  assert.deepEqual(runGuard(requireWorkspaceEditor, 'packer'), {
+    status: 403,
+    body: { message: 'Workspace editing access required' },
+    next: false,
+  });
 });

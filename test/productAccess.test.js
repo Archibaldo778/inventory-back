@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { requireAdmin, requireWorkspaceAccess } from '../middleware/auth.js';
+import { requireInventoryManager, requireWorkspaceAccess } from '../middleware/auth.js';
 import { resolveProductMutationGuard, resolveProductWorkspaceGuard } from '../server.js';
 
-test('workspace users may create disposable inventory but not permanent decor', () => {
+test('inventory mutations require an inventory manager while preserving disposable intake', () => {
   assert.equal(resolveProductMutationGuard({ method: 'POST', path: '/disposable' }), null);
-  assert.equal(resolveProductMutationGuard({ method: 'POST', path: '/' }), requireAdmin);
-  assert.equal(resolveProductMutationGuard({ method: 'PATCH', path: '/abc123' }), requireAdmin);
+  assert.equal(resolveProductMutationGuard({ method: 'POST', path: '/' }), requireInventoryManager);
+  assert.equal(resolveProductMutationGuard({ method: 'PATCH', path: '/abc123' }), requireInventoryManager);
 });
 
 test('all workspace product catalog reads remain safe', () => {

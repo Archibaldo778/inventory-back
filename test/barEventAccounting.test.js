@@ -236,4 +236,5 @@ test('bar roles are valid user roles', () => {
   assert.ok(rolePath.enumValues.includes('bar admin'));
   assert.ok(rolePath.enumValues.includes('bar captain'));
   assert.ok(rolePath.enumValues.includes('bartender'));
+  assert.ok(rolePath.enumValues.includes('packer'));
 });

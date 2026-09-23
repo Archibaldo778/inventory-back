@@ -17,6 +17,7 @@ import {
   requireAdmin,
   requireAuth,
   requireWorkspaceAccess,
+  requireWorkspaceEditor,
 } from '../middleware/auth.js';
 import { createMemoryRateLimiter } from '../middleware/rateLimit.js';
 import { sendApiError } from '../utils/apiErrors.js';
@@ -161,6 +162,12 @@ const listAllCatereaseCalendarEvents = async (from, to) => {
 };
 
 export const loadAuthorizedOperationalEvent = async (req, res, { mutable = false } = {}) => {
+  const role = String(req.auth?.role || '').trim().toLowerCase();
+  if (role === 'packer') {
+    res.status(403).json({ error: 'Operational event access is not available for packers' });
+    return null;
+  }
+
   const query = Event.findById(req.params.id)
     .select('externalId title date client managerId meta documents documentHistory catereaseOperations catereaseManualAdditions updatedAt');
   const event = mutable ? await query : await query.lean();
@@ -169,7 +176,6 @@ export const loadAuthorizedOperationalEvent = async (req, res, { mutable = false
     return null;
   }
 
-  const role = String(req.auth?.role || '').trim().toLowerCase();
   if (OPERATIONAL_EVENT_RESTRICTED_ROLES.has(role)) {
     const barEvent = await BarEvent.findOne({ linkedEventId: event._id })
       .select('assignedUserIds')
@@ -1140,7 +1146,7 @@ router.get('/operations/preview/:eventId', ...requireCatereaseAdmin, async (req,
   }
 });
 
-router.get('/calendar', requireAuth, requireWorkspaceAccess, viewSyncRateLimit, async (req, res) => {
+router.get('/calendar', requireAuth, requireWorkspaceEditor, viewSyncRateLimit, async (req, res) => {
   try {
     const from = String(req.query?.from || '').trim();
     const to = String(req.query?.to || '').trim();
@@ -1228,7 +1234,7 @@ router.get('/calendar', requireAuth, requireWorkspaceAccess, viewSyncRateLimit, 
   }
 });
 
-router.patch('/calendar/:eventKey/status', requireAuth, requireWorkspaceAccess, viewSyncRateLimit, async (req, res) => {
+router.patch('/calendar/:eventKey/status', requireAuth, requireWorkspaceEditor, viewSyncRateLimit, async (req, res) => {
   try {
     const eventKey = String(req.params.eventKey || '').trim();
     const field = String(req.body?.field || '').trim().toLowerCase();

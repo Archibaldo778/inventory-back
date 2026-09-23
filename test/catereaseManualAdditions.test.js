@@ -148,3 +148,19 @@ test('an unassigned bar captain receives the operational-event 403 guard', async
   assert.equal(response.statusCode, 403);
   assert.deepEqual(response.body, { error: 'This event is not assigned to your account' });
 });
+
+test('a packer cannot open Caterease operational event tools', async () => {
+  const response = {
+    statusCode: 200,
+    body: null,
+    status(code) { this.statusCode = code; return this; },
+    json(body) { this.body = body; return this; },
+  };
+  const result = await loadAuthorizedOperationalEvent({
+    params: { id: '66f000000000000000000010' },
+    auth: { userId: 'packer-one', role: 'packer' },
+  }, response);
+  assert.equal(result, null);
+  assert.equal(response.statusCode, 403);
+  assert.deepEqual(response.body, { error: 'Operational event access is not available for packers' });
+});

@@ -9,6 +9,12 @@ export const WORKSPACE_ROLES = Object.freeze([
   'admin',
   'super admin',
   'bar admin',
+  'packer',
+]);
+
+export const INVENTORY_MANAGER_ROLES = Object.freeze(['admin', 'super admin', 'packer']);
+export const WORKSPACE_EDITOR_ROLES = Object.freeze([
+  'user', 'manager', 'sales rep', 'admin', 'super admin', 'bar admin',
 ]);
 
 const ADMIN_ROLE_SET = new Set(ADMIN_ROLES);
@@ -112,6 +118,7 @@ const buildAuthContext = (payload) => {
 
 export const isAdminAuth = (auth) => ADMIN_ROLE_SET.has(normalizeRole(auth?.role));
 export const canAccessWorkspace = (auth) => WORKSPACE_ROLE_SET.has(normalizeRole(auth?.role));
+export const canManageInventory = (auth) => INVENTORY_MANAGER_ROLES.includes(normalizeRole(auth?.role));
 
 export const canAccessProposals = (auth) => isAdminAuth(auth) || resolveSeeProposals(auth);
 export const canSeeBarFinancials = (auth) => (
@@ -204,6 +211,16 @@ export const requireAdmin = createAccessGuard(
 export const requireWorkspaceAccess = createAccessGuard(
   (auth) => canAccessWorkspace(auth),
   'Workspace access required'
+);
+
+export const requireInventoryManager = createAccessGuard(
+  (auth) => canManageInventory(auth),
+  'Inventory management access required'
+);
+
+export const requireWorkspaceEditor = createAccessGuard(
+  (auth) => WORKSPACE_EDITOR_ROLES.includes(normalizeRole(auth?.role)),
+  'Workspace editing access required'
 );
 
 export const requireProposalAccess = createAccessGuard(

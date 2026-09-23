@@ -18,10 +18,13 @@ import {
   requireAdmin,
   requireAdminForMutations,
   requireAuth,
+  requireGuardForMutations,
   requireMethodGuards,
+  requireInventoryManager,
   requireProposalAccess,
   requireRoles,
   requireWorkspaceAccess,
+  requireWorkspaceEditor,
 } from './middleware/auth.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -110,9 +113,10 @@ export const resolveProductMutationGuard = (req) => {
   const method = String(req.method || '').toUpperCase();
   if (['GET', 'HEAD', 'OPTIONS'].includes(method)) return null;
   if (method === 'POST' && /^\/disposable\/?$/i.test(String(req.path || ''))) return null;
-  return requireAdmin;
+  return requireInventoryManager;
 };
 const requireProductMutationAccess = requireMethodGuards(resolveProductMutationGuard);
+const requireWorkspaceEditorForMutations = requireGuardForMutations(requireWorkspaceEditor);
 
 export const resolveProductWorkspaceGuard = (req) => {
   const method = String(req.method || '').toUpperCase();
@@ -461,11 +465,11 @@ app.use('/api/public/products', publicProductRoutes);
 app.use('/api/products', requireAuth, requireProductWorkspaceAccess, requireProductMutationAccess, productRoutes);
 app.use('/api/users', requireAuth, requireUsersAccess, userRoutes);
 app.use('/users', requireAuth, requireUsersAccess, userRoutes);
-app.use('/api/events', requireAuth, requireWorkspaceAccess, eventRoutes);
+app.use('/api/events', requireAuth, requireWorkspaceAccess, requireWorkspaceEditorForMutations, eventRoutes);
 app.use('/api/notifications', requireAuth, notificationRoutes);
 app.use('/api/decor-packouts', requireAuth, requireWorkspaceAccess, decorPackoutRoutes);
-app.use('/api/decks', requireAuth, requireWorkspaceAccess, deckRoutes);
-app.use('/api/pages', requireAuth, requireWorkspaceAccess, pageRoutes);
+app.use('/api/decks', requireAuth, requireWorkspaceAccess, requireWorkspaceEditorForMutations, deckRoutes);
+app.use('/api/pages', requireAuth, requireWorkspaceAccess, requireWorkspaceEditorForMutations, pageRoutes);
 app.use('/api/staff', requireAuth, requireWorkspaceAccess, requireAdminForMutations, staffRoutes);
 app.use('/api/kitchen-items', requireAuth, requireWorkspaceAccess, requireAdminForMutations, kitchenRoutes);
 app.use('/api/kitchen-prep', requireAuth, requireWorkspaceAccess, kitchenPrepRoutes);

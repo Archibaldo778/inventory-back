@@ -101,7 +101,7 @@ const normalizeSeason = (value) => {
   if (value === undefined || value === null) return undefined;
   const season = String(value).trim();
   if (!season) return '';
-  if (season === 'fall_winter' || season === 'spring_summer') return season;
+  if (season === 'fall_winter' || season === 'spring_summer' || season === 'custom') return season;
   return '';
 };
 

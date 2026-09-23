@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { PDFDocument } from 'pdf-lib';
 import {
+  createBoardPreviewsPdf,
   convertLeadershipFileToPdf,
   isLeadershipPrintFileSupported,
   mergeLeadershipPrintPdfs,
@@ -81,6 +82,24 @@ test('leadership PDFs preserve file order and requested copy counts', async () =
   assert.equal(merged.getPageCount(), 3);
   assert.deepEqual(merged.getPages().map((page) => page.getSize()), [
     { width: 792, height: 612 },
+    { width: 792, height: 612 },
+    { width: 792, height: 612 },
+  ]);
+});
+
+test('Kitchen Board previews become landscape Leadership File pages', async () => {
+  // Use a tiny valid PNG fixture for the saved board preview.
+  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+  const output = await createBoardPreviewsPdf({
+    pages: [
+      { preview: `data:image/png;base64,${png}` },
+      { preview: 'not-an-image' },
+      { preview: `data:image/png;base64,${png}` },
+    ],
+  });
+  const merged = await PDFDocument.load(output);
+  assert.equal(merged.getPageCount(), 2);
+  assert.deepEqual(merged.getPages().map((page) => page.getSize()), [
     { width: 792, height: 612 },
     { width: 792, height: 612 },
   ]);

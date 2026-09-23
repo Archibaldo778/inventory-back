@@ -6,6 +6,8 @@ import CalendarReportStatus from '../models/CalendarReportStatus.js';
 import Event from '../models/Event.js';
 import BarEvent from '../models/BarEvent.js';
 import DecorPackout from '../models/DecorPackout.js';
+import Deck from '../models/Deck.js';
+import Page from '../models/Page.js';
 import KitchenIngredient from '../models/KitchenIngredient.js';
 import KitchenIngredientUnit from '../models/KitchenIngredientUnit.js';
 import KitchenRecipe from '../models/KitchenRecipe.js';
@@ -114,6 +116,7 @@ import {
   loadCloudinaryWordImages,
 } from '../utils/operationalDocumentAssets.js';
 import {
+  createBoardPreviewsPdf,
   isLeadershipPrintFileSupported,
   mergeLeadershipPrintPdfs,
 } from '../utils/leadershipPrintPdf.js';
@@ -1826,12 +1829,39 @@ router.post('/operations/events/:id/leadership-print.pdf', requireAuth, leadersh
     const totalCopies = requested.reduce((sum, file) => sum + Math.max(1, Math.min(99, Math.trunc(Number(file?.copies) || 1))), 0);
     if (totalCopies > 100) return res.status(400).json({ error: 'The print job is limited to 100 document copies' });
 
-    const { integration, accessToken } = await loadOperationalDropboxAccess();
-    const { folderPath } = await resolveOperationalDropboxFolderForEvent({ event, integration });
     const documents = [];
     let totalBytes = 0;
+    const dropboxRequested = requested.filter((file) => String(file?.source || '').trim() !== 'kitchen_board');
+    const dropboxAccess = dropboxRequested.length
+      ? await loadOperationalDropboxAccess()
+      : null;
+    const dropboxFolder = dropboxAccess
+      ? await resolveOperationalDropboxFolderForEvent({ event, integration: dropboxAccess.integration })
+      : null;
     for (const requestedFile of requested) {
+      const copies = Math.max(1, Math.min(99, Math.trunc(Number(requestedFile?.copies) || 1)));
+      if (String(requestedFile?.source || '').trim() === 'kitchen_board') {
+        const kitchenDecks = await Deck.find({ eventId: event._id, type: 'kitchen' })
+          .select('_id')
+          .sort({ createdAt: 1 })
+          .lean();
+        const pages = kitchenDecks.length
+          ? await Page.find({
+              deckId: { $in: kitchenDecks.map((deck) => deck._id) },
+              deletedAt: null,
+            }).select('preview index createdAt').sort({ index: 1, createdAt: 1 }).lean()
+          : [];
+        const buffer = await createBoardPreviewsPdf({ pages });
+        totalBytes += buffer.length;
+        if (totalBytes > 80 * 1024 * 1024) {
+          return res.status(413).json({ error: 'The selected files are too large for one print job' });
+        }
+        documents.push({ fileName: 'Kitchen Board Photos.pdf', buffer, copies });
+        continue;
+      }
+
       const filePath = String(requestedFile?.path || '').trim();
+      const folderPath = dropboxFolder?.folderPath || '';
       if (!dropboxPathInsideFolder(filePath, folderPath)) {
         return res.status(400).json({ error: 'A requested file is outside this event folder' });
       }
@@ -1843,8 +1873,8 @@ router.post('/operations/events/:id/leadership-print.pdf', requireAuth, leadersh
       if (!isLeadershipPrintFileSupported(fileName)) {
         return res.status(400).json({ error: `${fileName} cannot be converted to PDF` });
       }
-      const buffer = await downloadDropboxFile(accessToken, filePath, {
-        namespaceId: integration.namespaceId || '',
+      const buffer = await downloadDropboxFile(dropboxAccess.accessToken, filePath, {
+        namespaceId: dropboxAccess.integration.namespaceId || '',
       });
       totalBytes += buffer.length;
       if (buffer.length > 25 * 1024 * 1024 || totalBytes > 80 * 1024 * 1024) {
@@ -1853,7 +1883,7 @@ router.post('/operations/events/:id/leadership-print.pdf', requireAuth, leadersh
       documents.push({
         fileName,
         buffer,
-        copies: Math.max(1, Math.min(99, Math.trunc(Number(requestedFile?.copies) || 1))),
+        copies,
       });
     }
 

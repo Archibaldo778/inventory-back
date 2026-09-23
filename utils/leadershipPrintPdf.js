@@ -180,3 +180,41 @@ export const mergeLeadershipPrintPdfs = async ({ documents, convert = convertLea
   }
   return Buffer.from(await output.save());
 };
+
+const parseBoardPreview = (value) => {
+  const match = String(value || '').trim().match(/^data:(image\/(?:png|jpe?g));base64,([a-z0-9+/=\s]+)$/i);
+  if (!match) return null;
+  const buffer = Buffer.from(match[2].replace(/\s/g, ''), 'base64');
+  if (!buffer.length || buffer.length > 8 * 1024 * 1024) return null;
+  return { mimeType: match[1].toLowerCase(), buffer };
+};
+
+export const createBoardPreviewsPdf = async ({ pages }) => {
+  const previews = (Array.isArray(pages) ? pages : [])
+    .map((page) => parseBoardPreview(page?.preview))
+    .filter(Boolean);
+  if (!previews.length) throw httpError(404, 'Kitchen Board has no printable page images yet');
+
+  const output = await PDFDocument.create();
+  const target = { width: 792, height: 612 };
+  const margin = 18;
+  for (const preview of previews) {
+    const image = preview.mimeType === 'image/png'
+      ? await output.embedPng(preview.buffer)
+      : await output.embedJpg(preview.buffer);
+    const scale = Math.min(
+      (target.width - (margin * 2)) / image.width,
+      (target.height - (margin * 2)) / image.height,
+    );
+    const width = image.width * scale;
+    const height = image.height * scale;
+    const page = output.addPage([target.width, target.height]);
+    page.drawImage(image, {
+      x: (target.width - width) / 2,
+      y: (target.height - height) / 2,
+      width,
+      height,
+    });
+  }
+  return Buffer.from(await output.save());
+};

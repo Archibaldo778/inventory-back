@@ -68,7 +68,24 @@ const EVENT_FILE_CONTAINER_FOLDERS = new Set([
   'kitchen', 'km', 'kitchen menu', 'kitchen menus', 'akm', 'annotated kitchen menu', 'annotated kitchen menus',
   'po', 'purchase order', 'purchase orders', 'pack out', 'pack outs', 'packout', 'packouts', 'kpo', 'kpos',
   'sr', 'staff request', 'staff requests',
+  'rental', 'rentals', 'rental order', 'rental orders',
 ]);
+
+const eventFileLeadershipPriority = (file) => {
+  const identity = clean(file?.relativePath || file?.path || file?.name).replace(/\\/g, '/');
+  const folders = identity.split('/').filter(Boolean).slice(0, -1).map((part) => inferDropboxDocumentFamily(part));
+  const leadershipIndex = folders.findIndex((part) => part === 'leadership file' || part === 'leadership files');
+  if (leadershipIndex < 0) return 0;
+  // A file placed directly in Leadership File is the curated final copy. Files
+  // in Leadership File/Kitchen (and similar subfolders) are intermediate copies.
+  return leadershipIndex === folders.length - 1 ? 2 : 1;
+};
+
+const compareEventFileCandidates = (left, right) => (
+  eventFileLeadershipPriority(right.file) - eventFileLeadershipPriority(left.file)
+  || eventFileModifiedAt(right.file) - eventFileModifiedAt(left.file)
+  || clean(right.file?.id).localeCompare(clean(left.file?.id))
+);
 
 const eventFileRevisionFamily = (value) => {
   const parts = clean(value).replace(/\\/g, '/').split('/').filter(Boolean);
@@ -104,13 +121,13 @@ export const selectLatestDropboxFileRevisions = (files) => {
   groups.forEach((group) => {
     const numbered = group.filter((row) => row.revisionNumber !== null);
     if (!numbered.length) {
-      group.forEach((row) => included.add(row.index));
+      const latest = [...group].sort(compareEventFileCandidates)[0];
+      included.add(latest.index);
       return;
     }
     const latest = [...numbered].sort((left, right) => (
       right.revisionNumber - left.revisionNumber
-      || eventFileModifiedAt(right.file) - eventFileModifiedAt(left.file)
-      || clean(right.file?.id).localeCompare(clean(left.file?.id))
+      || compareEventFileCandidates(left, right)
     ))[0];
     included.add(latest.index);
   });

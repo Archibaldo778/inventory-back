@@ -253,6 +253,54 @@ test('event file listing does not collapse unrelated unnumbered files', () => {
   assert.deepEqual(selectLatestDropboxFileRevisions(files), files);
 });
 
+test('event file listing prefers a curated Leadership File copy over later legacy copies without revision labels', () => {
+  const files = [
+    {
+      id: 'kitchen-copy',
+      relativePath: 'Leadership File/Kitchen/09-22-26 Ralph Lauren 888 Book Launch KM.docx',
+      contentHash: 'old-content',
+      modifiedAt: '2026-09-19T13:47:07Z',
+    },
+    {
+      id: 'leadership-final',
+      relativePath: 'Leadership File/09-22-26 Ralph Lauren 888 Book Launch KM.docx',
+      contentHash: 'updated-content',
+      modifiedAt: '2026-09-21T15:38:04Z',
+    },
+    {
+      id: 'legacy-copy-made-later',
+      relativePath: 'KM/09-22-26 Ralph Lauren 888 Book Launch KM.docx',
+      contentHash: 'old-content',
+      modifiedAt: '2026-09-21T16:15:00Z',
+    },
+  ];
+  assert.deepEqual(
+    selectLatestDropboxFileRevisions(files).map((file) => file.id),
+    ['leadership-final'],
+  );
+});
+
+test('event file listing collapses an unnumbered rental copied into Leadership File', () => {
+  const files = [
+    {
+      id: 'rental-source',
+      relativePath: 'Rentals/09-21-26 RL Book Launch Bfast PRL Order.pdf',
+      contentHash: 'same-rental',
+      modifiedAt: '2026-09-21T14:38:34Z',
+    },
+    {
+      id: 'rental-leadership',
+      relativePath: 'Leadership File/09-21-26 RL Book Launch Bfast PRL Order.pdf',
+      contentHash: 'same-rental',
+      modifiedAt: '2026-09-21T14:56:28Z',
+    },
+  ];
+  assert.deepEqual(
+    selectLatestDropboxFileRevisions(files).map((file) => file.id),
+    ['rental-leadership'],
+  );
+});
+
 test('event file revisions collapse across legacy and Leadership File container folders', () => {
   const files = [
     { id: 'legacy-km', relativePath: 'KM/09-21-26 Chanel Climate Week - US Circularity Event KM.docx' },

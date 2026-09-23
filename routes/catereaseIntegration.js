@@ -1766,6 +1766,7 @@ router.get('/operations/events/:id/dropbox-files', requireAuth, dropboxFileRateL
           relativePath,
           size: Number(entry.size || 0),
           rev: String(entry.rev || ''),
+          contentHash: String(entry.content_hash || ''),
           modifiedAt: entry.server_modified || entry.client_modified || null,
           contentType: dropboxFileContentType(entry.name),
           downloadUrl: `/api/integrations/caterease/operations/events/${encodeURIComponent(event._id)}/dropbox-file?path=${encodeURIComponent(filePath)}`,

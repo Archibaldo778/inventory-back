@@ -119,6 +119,32 @@ test('multi-day series files use the file date instead of the shared Day 1 folde
   assert.equal(inferDropboxEventFolderPath(match.event && '/Proposals/2026/09 September/09 Olivier/09-24-26 Hermes American Dream FW26 WRTW Trunkshow/SR/09-25-26 Hermes American Dream FW26 WRTW Trunkshow SR_DAY 2.xlsx'), '/Proposals/2026/09 September/09 Olivier/09-24-26 Hermes American Dream FW26 WRTW Trunkshow');
 });
 
+test('multi-day series files do not require a DAY marker when the base event title matches', () => {
+  const match = findDropboxFolderEventMatch({
+    name: '09-25-26 Hermes American Dream FW26 WRTW Trunkshow Staff Request.xlsx',
+    path: '/Proposals/2026/09 September/09 Olivier/09-24-26 Hermes American Dream FW26 WRTW Trunkshow/SR/09-25-26 Hermes American Dream FW26 WRTW Trunkshow Staff Request.xlsx',
+    inferredDate: '2026-09-25',
+  }, [
+    { _id: 'day-one', title: 'Hermes American Dream FW26 WRTW Trunkshow - Day 1', date: '2026-09-24' },
+    { _id: 'day-two', title: 'Hermes American Dream FW26 WRTW Trunkshow - Day 2', date: '2026-09-25' },
+  ]);
+  assert.equal(match.status, 'matched');
+  assert.equal(match.event._id, 'day-two');
+});
+
+test('a dated Setup file still belongs to its physical main-event folder', () => {
+  const match = findDropboxFolderEventMatch({
+    name: '09-22-26 Chanel Breakfast Setup Staff Request.xlsx',
+    path: '/Proposals/2026/09 September/09 Olivier/09-23-26 Chanel Breakfast/SR/09-22-26 Chanel Breakfast Setup Staff Request.xlsx',
+    inferredDate: '2026-09-22',
+  }, [
+    { _id: 'setup', title: 'Chanel Breakfast Setup', date: '2026-09-22' },
+    { _id: 'breakfast', title: 'Chanel Breakfast', date: '2026-09-23' },
+  ]);
+  assert.equal(match.status, 'matched');
+  assert.equal(match.event._id, 'breakfast');
+});
+
 test('duplicate base event ids are resolved by the exact document title', () => {
   const match = findDropboxEventMatch({
     name: '09-14-26 Heyvaert Private Boat Cocktail KM.docx',

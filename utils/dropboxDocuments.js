@@ -151,6 +151,11 @@ const normalizedEventName = (value) => clean(value)
   .replace(/\s+/g, ' ')
   .trim();
 
+const normalizedSeriesEventName = (value) => normalizedEventName(inferDropboxEventTitle(value))
+  .replace(/\bday\s*\d+\s*$/i, '')
+  .replace(/\s+/g, ' ')
+  .trim();
+
 const normalizedEventNumber = (value) => clean(value).toUpperCase().replace(/[^A-Z0-9]/g, '');
 const baseEventNumber = (value) => normalizedEventNumber(value).match(/^E\d+/)?.[0] || normalizedEventNumber(value);
 const DERIVATIVE_EVENT_WORDS = /\b(?:invoice|menu|pack out|staffing|setup|set up|load out|rental check in)\b/;
@@ -254,6 +259,22 @@ export const findDropboxFolderEventMatch = (document, events = []) => {
     return { ...seriesMatch, reason: `series_${seriesMatch.reason}` };
   }
   const folder = inferDropboxEventFolder(documentPath);
+  const fileDate = inferDropboxPathDate(fileName) || clean(document?.inferredDate);
+  const folderDate = inferDropboxPathDate(folder);
+  // A series folder can hold one dated file per event without using DAY labels.
+  // Treat the file date as authoritative only when the event's base title is
+  // the same as the folder's base title. This deliberately excludes derivative
+  // events such as "Setup" or "Load Out" stored under a main-event folder.
+  if (folder && fileDate && folderDate && fileDate !== folderDate) {
+    const folderSeries = normalizedSeriesEventName(folder);
+    const datedSeriesEvents = (Array.isArray(events) ? events : []).filter((event) => (
+      clean(event?.date).slice(0, 10) === fileDate
+      && normalizedSeriesEventName(event?.title || event?.name) === folderSeries
+    ));
+    if (folderSeries && datedSeriesEvents.length === 1) {
+      return { status: 'matched', event: datedSeriesEvents[0], reason: 'series_folder_file_date' };
+    }
+  }
   if (folder) {
     const folderMatch = findDropboxEventMatch({
       ...document,

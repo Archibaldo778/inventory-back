@@ -2,7 +2,10 @@ import { inferDropboxRevision } from './dropboxDocuments.js';
 
 const clean = (value) => String(value ?? '').replace(/\s+/g, ' ').trim();
 
-export const STAFF_REQUEST_FILE_PATTERN = /(?:\bstaff(?:ing)?\s*(?:request|req)(?:\s*form)?\b|\bsr\b)/i;
+// Dropbox names commonly use underscores (for example `SR_DAY 2.xlsx`).
+// JavaScript/Mongo word boundaries treat `_` as a word character, so `\bsr\b`
+// misses those files. Match on non-alphanumeric separators instead.
+export const STAFF_REQUEST_FILE_PATTERN = /(?:\bstaff(?:ing)?[\s_-]*(?:request|req)(?:[\s_-]*form)?\b|(?:^|[^a-z0-9])sr(?:$|[^a-z0-9]))/i;
 export const RENTAL_FILE_PATTERN = /(?:^|[^a-z0-9])(?:prl|rental(?:s|\s*order)?)(?=$|[^a-z0-9])/i;
 export const RENTAL_FOLDER_PATTERN = /[\\/]rentals?[\\/]/i;
 

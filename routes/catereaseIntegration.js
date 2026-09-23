@@ -53,6 +53,7 @@ import {
 import {
   buildDropboxPathDateRangePattern,
   findDropboxFolderEventMatch,
+  inferDropboxEventFolderPath,
   inferDropboxPathDate,
   nyToday,
   selectLatestDropboxFileRevisions,
@@ -1677,6 +1678,36 @@ const dropboxPathInsideFolder = (filePath, folderPath) => {
   return Boolean(file && folder && file.startsWith(`${folder}/`));
 };
 
+const resolveOperationalDropboxFolderForEvent = async ({ event, integration }) => {
+  const resolved = resolveOperationalDropboxFolder({ event, integration });
+  if (resolved.existing) return resolved;
+  const eventDate = String(event?.date || '').slice(0, 10);
+  const datePattern = buildDropboxPathDateRangePattern(eventDate, eventDate);
+  const candidates = await DropboxDocument.find({
+    status: { $ne: 'deleted' },
+    $or: [
+      ...(eventDate ? [{ inferredDate: eventDate }] : []),
+      ...(datePattern ? [{ path: datePattern }] : []),
+    ],
+  }).select('path name eventId inferredDate').limit(1000).lean();
+  const eventCandidate = {
+    _id: event?._id,
+    externalId: event?.externalId,
+    title: event?.title,
+    date: eventDate,
+  };
+  for (const document of candidates) {
+    const match = findDropboxFolderEventMatch({
+      ...document,
+      inferredDate: document.inferredDate || inferDropboxPathDate(document.path),
+    }, [eventCandidate]);
+    if (match.status !== 'matched') continue;
+    const folderPath = inferDropboxEventFolderPath(document.path);
+    if (folderPath) return { folderPath, existing: true };
+  }
+  return resolved;
+};
+
 const dropboxFileContentType = (fileName) => {
   const extension = String(fileName || '').trim().toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] || '';
   return ({
@@ -1697,7 +1728,7 @@ router.get('/operations/events/:id/dropbox-files', requireAuth, dropboxFileRateL
     const event = await loadAuthorizedOperationalEvent(req, res);
     if (!event) return undefined;
     const { integration, accessToken } = await loadOperationalDropboxAccess();
-    const { folderPath } = resolveOperationalDropboxFolder({ event, integration });
+    const { folderPath } = await resolveOperationalDropboxFolderForEvent({ event, integration });
     let page;
     try {
       page = await listDropboxFolder(accessToken, {
@@ -1753,7 +1784,7 @@ router.get('/operations/events/:id/dropbox-file', requireAuth, dropboxFileRateLi
     const event = await loadAuthorizedOperationalEvent(req, res);
     if (!event) return undefined;
     const { integration, accessToken } = await loadOperationalDropboxAccess();
-    const { folderPath } = resolveOperationalDropboxFolder({ event, integration });
+    const { folderPath } = await resolveOperationalDropboxFolderForEvent({ event, integration });
     const filePath = String(req.query?.path || '').trim();
     if (!dropboxPathInsideFolder(filePath, folderPath)) {
       return res.status(400).json({ error: 'The requested file is outside this event folder' });
@@ -1790,7 +1821,7 @@ router.post('/operations/events/:id/leadership-print.pdf', requireAuth, leadersh
     if (totalCopies > 100) return res.status(400).json({ error: 'The print job is limited to 100 document copies' });
 
     const { integration, accessToken } = await loadOperationalDropboxAccess();
-    const { folderPath } = resolveOperationalDropboxFolder({ event, integration });
+    const { folderPath } = await resolveOperationalDropboxFolderForEvent({ event, integration });
     const documents = [];
     let totalBytes = 0;
     for (const requestedFile of requested) {
@@ -1854,7 +1885,7 @@ router.post('/operations/events/:id/dropbox', requireAuth, dropboxSaveRateLimit,
     }
 
     const accessToken = await refreshDropboxAccessToken(decryptDropboxSecret(integration.refreshToken));
-    const { folderPath, existing } = resolveOperationalDropboxFolder({ event, integration });
+    const { folderPath, existing } = await resolveOperationalDropboxFolderForEvent({ event, integration });
     if (!existing) await ensureOperationalDropboxFolder(accessToken, folderPath, integration.namespaceId || '');
     const { attachments } = await buildRequestedEmailAttachments(event, requested);
     const savedAt = new Date();

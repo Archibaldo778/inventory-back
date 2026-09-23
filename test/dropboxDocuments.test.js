@@ -10,6 +10,7 @@ import {
   inferDropboxEventId,
   inferDropboxEventTitle,
   inferDropboxEventTitles,
+  inferDropboxEventFolderPath,
   inferDropboxDocumentSeries,
   inferDropboxPathDate,
   inferDropboxRevision,
@@ -100,6 +101,22 @@ test('an operational file belongs to its physical event folder instead of a setu
   ]);
   assert.equal(match.status, 'matched');
   assert.equal(match.event._id, 'breakfast');
+});
+
+test('multi-day series files use the file date instead of the shared Day 1 folder date', () => {
+  const events = [
+    { _id: 'day-one', externalId: 'E22900 - S62832', title: 'Hermes American Dream FW26 WRTW Trunkshow - Day 1', date: '2026-09-24' },
+    { _id: 'day-two', externalId: 'E22904 - S62838', title: 'Hermes American Dream FW26 WRTW Trunkshow - Day 2', date: '2026-09-25' },
+    { _id: 'day-three', externalId: 'E22905 - S62840', title: 'Hermes American Dream FW26 WRTW Trunkshow - Day 3', date: '2026-09-26' },
+  ];
+  const match = findDropboxFolderEventMatch({
+    name: '09-25-26 Hermes American Dream FW26 WRTW Trunkshow SR_DAY 2.xlsx',
+    path: '/Proposals/2026/09 September/09 Olivier/09-24-26 Hermes American Dream FW26 WRTW Trunkshow/SR/09-25-26 Hermes American Dream FW26 WRTW Trunkshow SR_DAY 2.xlsx',
+    inferredDate: '2026-09-25',
+  }, events);
+  assert.equal(match.status, 'matched');
+  assert.equal(match.event._id, 'day-two');
+  assert.equal(inferDropboxEventFolderPath(match.event && '/Proposals/2026/09 September/09 Olivier/09-24-26 Hermes American Dream FW26 WRTW Trunkshow/SR/09-25-26 Hermes American Dream FW26 WRTW Trunkshow SR_DAY 2.xlsx'), '/Proposals/2026/09 September/09 Olivier/09-24-26 Hermes American Dream FW26 WRTW Trunkshow');
 });
 
 test('duplicate base event ids are resolved by the exact document title', () => {

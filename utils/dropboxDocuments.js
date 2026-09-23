@@ -228,8 +228,32 @@ export const inferDropboxEventFolder = (value) => {
   return clean(containerIndex > 0 ? folders[containerIndex - 1] : folders.at(-1));
 };
 
+export const inferDropboxEventFolderPath = (value) => {
+  const parts = clean(value).replace(/\\/g, '/').split('/').filter(Boolean);
+  if (parts.length < 2) return '';
+  const folders = parts.slice(0, -1);
+  const containerIndex = folders.findIndex((part) => (
+    DROPBOX_EVENT_FILE_CONTAINERS.has(inferDropboxDocumentFamily(part))
+  ));
+  if (containerIndex <= 0) return '';
+  return `/${folders.slice(0, containerIndex).join('/')}`;
+};
+
 export const findDropboxFolderEventMatch = (document, events = []) => {
-  const folder = inferDropboxEventFolder(document?.path || document?.path_display || document?.path_lower);
+  const documentPath = document?.path || document?.path_display || document?.path_lower;
+  const fileName = clean(document?.name) || clean(documentPath).replace(/\\/g, '/').split('/').filter(Boolean).at(-1) || '';
+  // Multi-day series are often stored in one folder dated for Day 1, while
+  // each file carries its own date and DAY number. In that case the file is
+  // the authoritative owner; otherwise every document would attach to Day 1.
+  if (/(?:^|[^a-z0-9])day[\s_-]*\d+\b/i.test(fileName)) {
+    const seriesMatch = findDropboxEventMatch({
+      ...document,
+      inferredDate: inferDropboxPathDate(fileName) || document?.inferredDate,
+    }, events);
+    if (seriesMatch.status === 'matched') return { ...seriesMatch, reason: `series_${seriesMatch.reason}` };
+    return { ...seriesMatch, reason: `series_${seriesMatch.reason}` };
+  }
+  const folder = inferDropboxEventFolder(documentPath);
   if (folder) {
     const folderMatch = findDropboxEventMatch({
       ...document,
@@ -240,7 +264,12 @@ export const findDropboxFolderEventMatch = (document, events = []) => {
     }, events);
     if (folderMatch.status === 'matched') return folderMatch;
   }
-  if (normalizedEventNumber(document?.eventId)) return findDropboxEventMatch(document, events);
+  // A shared series folder can be outside the requested day's date range.
+  // If the physical folder does not identify one of the candidates, fall back
+  // to the individual file's date/title even when the index has no eventId.
+  const documentMatch = findDropboxEventMatch(document, events);
+  if (documentMatch.status === 'matched') return documentMatch;
+  if (normalizedEventNumber(document?.eventId)) return documentMatch;
   return { status: 'unmatched', events: [], reason: 'event_folder' };
 };
 

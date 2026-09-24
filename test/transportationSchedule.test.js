@@ -6,6 +6,8 @@ test('transportation routes retain spreadsheet planning fields and derive assign
   const [route] = normalizeTransportationRoutes([{
     eventId: 'event-1',
     eventTitle: 'Prada Day 1',
+    taskType: 'pickup',
+    cargoType: 'Dry goods',
     driverSource: 'operations',
     driverId: 'driver-72',
     driverName: 'Oleksandr Stupak',
@@ -18,8 +20,16 @@ test('transportation routes retain spreadsheet planning fields and derive assign
     address: '724 Fifth Ave',
   }]);
   assert.equal(route.status, 'assigned');
+  assert.equal(route.taskType, 'pickup');
+  assert.equal(route.cargoType, 'Dry goods');
   assert.equal(route.vehicle, 'Edge (N19)');
   assert.equal(route.onSiteTime, '10:00');
+});
+
+test('legacy transportation rows become delivery tasks', () => {
+  const [route] = normalizeTransportationRoutes([{ eventTitle: 'Legacy event' }]);
+  assert.equal(route.taskType, 'delivery');
+  assert.equal(route.cargoType, '');
 });
 
 test('transportation routes may be saved before a driver is assigned', () => {

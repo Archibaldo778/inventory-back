@@ -6,6 +6,8 @@ const transportationRouteSchema = new mongoose.Schema({
   eventNumber: { type: String, default: '', trim: true },
   eventVenue: { type: String, default: '', trim: true },
   deliveryRequired: { type: Boolean, default: true },
+  taskType: { type: String, enum: ['delivery', 'pickup', 'return', 'other'], default: 'delivery' },
+  cargoType: { type: String, default: '', trim: true },
   driverSource: { type: String, enum: ['', 'staff', 'operations', 'nowsta'], default: '' },
   driverId: { type: String, default: '', trim: true },
   driverName: { type: String, default: '', trim: true },

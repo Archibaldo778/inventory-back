@@ -460,6 +460,8 @@ import notificationRoutes from './routes/notifications.js';
 import nowstaScheduleRoutes from './routes/nowstaSchedule.js';
 import operationsRoutes from './routes/operations.js';
 import transportationRoutes from './routes/transportation.js';
+import slackIntegrationRoutes from './routes/slackIntegration.js';
+import { runSlackEventChannelSync } from './utils/slackEventChannels.js';
 import { getCatereaseConfig } from './utils/catereaseApi.js';
 
 app.use('/api/auth', authRoutes);
@@ -491,6 +493,7 @@ app.use('/api/public/bar-returns', publicBarReturnsRoutes);
 app.use('/api/bar', requireAuth, barRoutes);
 app.use('/api/integrations/dropbox', dropboxIntegrationRoutes);
 app.use('/api/integrations/caterease', catereaseIntegrationRoutes);
+app.use('/api/integrations/slack', slackIntegrationRoutes);
 
 // подключение к Mongo
 const configuredMongoUri = String(process.env.MONGO_URI || '').trim();
@@ -698,6 +701,28 @@ export const startServer = async () => {
     console.log('Dropbox automatic discovery disabled because Caterease operational sync is enabled');
   }
 
+  let slackSyncTimer = null;
+  let slackStartupTimer = null;
+  if (
+    String(process.env.SLACK_BOT_TOKEN || '').trim()
+    && /^(?:1|true|yes|on)$/i.test(String(process.env.SLACK_EVENT_CHANNELS_ENABLED || '').trim())
+  ) {
+    const configuredMinutes = Number(process.env.SLACK_SYNC_INTERVAL_MINUTES);
+    const intervalMinutes = Number.isFinite(configuredMinutes)
+      ? Math.max(5, Math.min(60, Math.trunc(configuredMinutes)))
+      : 15;
+    const syncSlack = () => runSlackEventChannelSync().then((summary) => {
+      console.log('✅ Slack event channel sync completed', summary);
+    }).catch((error) => {
+      console.error('Slack event channel sync failed:', error?.message || error);
+    });
+    slackStartupTimer = setTimeout(syncSlack, 60_000);
+    slackStartupTimer.unref?.();
+    slackSyncTimer = setInterval(syncSlack, intervalMinutes * 60_000);
+    slackSyncTimer.unref?.();
+    console.log(`Slack event channel sync enabled every ${intervalMinutes} minutes`);
+  }
+
   let shuttingDown = false;
   const shutdown = (signal) => {
     if (shuttingDown) return;
@@ -711,6 +736,8 @@ export const startServer = async () => {
     if (catereaseSyncTimer) clearInterval(catereaseSyncTimer);
     if (catereaseOperationalStartupTimer) clearTimeout(catereaseOperationalStartupTimer);
     if (catereaseOperationalSyncTimer) clearInterval(catereaseOperationalSyncTimer);
+    if (slackStartupTimer) clearTimeout(slackStartupTimer);
+    if (slackSyncTimer) clearInterval(slackSyncTimer);
 
     const forceExit = setTimeout(() => {
       console.error('Forced shutdown after timeout');

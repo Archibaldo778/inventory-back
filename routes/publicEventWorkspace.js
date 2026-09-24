@@ -10,6 +10,7 @@ import { isRestrictedEventDocument } from '../utils/eventFileVisibility.js';
 import { buildDropboxPathDateRangePattern, findDropboxFolderEventMatch, inferDropboxEventFolderPath, inferDropboxPathDate, selectLatestDropboxFileRevisions } from '../utils/dropboxDocuments.js';
 import { decryptDropboxSecret, downloadDropboxFile, listDropboxFolder, refreshDropboxAccessToken } from '../utils/dropboxApi.js';
 import { resolveOperationalDropboxFolder } from '../utils/operationalDropbox.js';
+import { convertLeadershipFileToPdf, isLeadershipPrintFileSupported } from '../utils/leadershipPrintPdf.js';
 
 const router = Router();
 const limiter = createMemoryRateLimiter({ windowMs: 60 * 1000, max: 120, message: 'Too many event file requests' });
@@ -84,6 +85,7 @@ const operationalFiles = async (event, token) => {
         id: clean(entry.id || entry.path_lower || path), name: clean(entry.name || 'Event file'), relativePath,
         size: Number(entry.size || 0), modifiedAt: entry.server_modified || entry.client_modified || null,
         downloadUrl: `/api/public/event-workspace/${event._id}/file?path=${encodeURIComponent(path)}&token=${encodeURIComponent(token)}`,
+        previewUrl: `/api/public/event-workspace/${event._id}/preview?path=${encodeURIComponent(path)}&token=${encodeURIComponent(token)}`,
       });
     }
     page = page.has_more ? await listDropboxFolder(accessToken, { cursor: page.cursor, namespaceId: integration.namespaceId || '' }) : null;
@@ -125,6 +127,36 @@ router.get('/:eventId/file', limiter, requireViewAccess, async (req, res) => {
     res.type(fileType(name)); res.attachment(name); return res.send(buffer);
   } catch (error) {
     return sendApiError(res, error, { context: 'Public event file failed', defaultStatus: 502, fallbackMessage: 'Could not download this file' });
+  }
+});
+
+router.get('/:eventId/preview', limiter, requireViewAccess, async (req, res) => {
+  try {
+    const event = await Event.findById(req.params.eventId).select('externalId title date').lean();
+    if (!event) return res.status(404).json({ message: 'Event not found' });
+    const { integration, accessToken } = await loadDropbox();
+    const folder = await resolveFolder(event, integration);
+    const path = clean(req.query?.path);
+    const relativePath = path.slice(folder.length).replace(/^\/+/, '');
+    if (!inside(path, folder) || isRestrictedEventDocument(relativePath)) return res.status(404).json({ message: 'File not available' });
+    const name = path.split('/').filter(Boolean).at(-1) || 'event-file';
+    const mime = fileType(name);
+    const source = await downloadDropboxFile(accessToken, path, { namespaceId: integration.namespaceId || '' });
+    if (source.length > 25 * 1024 * 1024) return res.status(413).json({ message: 'This file is too large to preview' });
+    res.setHeader('Cache-Control', 'private, no-store');
+    if (mime.startsWith('image/')) {
+      res.setHeader('Content-Type', mime);
+      res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(name)}`);
+      return res.send(source);
+    }
+    if (!isLeadershipPrintFileSupported(name)) return res.status(415).json({ message: 'Preview is not available for this file type' });
+    const pdf = await convertLeadershipFileToPdf({ fileName: name, buffer: source });
+    const previewName = `${name.replace(/\.[^.]+$/, '')}.pdf`;
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(previewName)}`);
+    return res.send(pdf);
+  } catch (error) {
+    return sendApiError(res, error, { context: 'Public event preview failed', defaultStatus: 502, fallbackMessage: 'Could not prepare this preview' });
   }
 });
 

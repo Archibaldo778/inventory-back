@@ -12,6 +12,12 @@ import {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const clean = (value) => String(value || '').trim();
+const DEFAULT_EVENT_LEADERSHIP_TEAMS = [
+  { managers: ['Olivier Cheng', 'Oliver Cheng'], assistants: ['Ashley', 'Sebastian', 'Heidi'] },
+  { managers: ['George'], assistants: ['Megan'] },
+  { managers: ['Guillaume'], assistants: [] },
+  { managers: ['Emma'], assistants: [] },
+];
 export const slackEventChannelsEnabled = () => /^(?:1|true|yes|on)$/i.test(clean(process.env.SLACK_EVENT_CHANNELS_ENABLED));
 const normalize = (value) => clean(value)
   .normalize('NFKD')
@@ -32,6 +38,7 @@ export const slackEventChannelName = (event = {}) => {
 const slackUserIndexes = (users = []) => {
   const byEmail = new Map();
   const byName = new Map();
+  const byFirstName = new Map();
   users.forEach((user) => {
     if (user?.deleted || user?.is_bot || user?.id === 'USLACKBOT') return;
     const email = clean(user?.profile?.email).toLowerCase();
@@ -43,30 +50,74 @@ const slackUserIndexes = (users = []) => {
         const current = byName.get(name) || [];
         current.push(user);
         byName.set(name, current);
+        const firstName = name.split(' ')[0];
+        const firstNameMatches = byFirstName.get(firstName) || [];
+        if (!firstNameMatches.some((item) => item.id === user.id)) firstNameMatches.push(user);
+        byFirstName.set(firstName, firstNameMatches);
       });
   });
-  return { byEmail, byName };
+  return { byEmail, byName, byFirstName };
 };
 
-export const matchSlackEventWorkers = ({ schedule, slackUsers }) => {
-  const { byEmail, byName } = slackUserIndexes(slackUsers);
+const matchSlackPeople = ({ people = [], slackUsers = [] }) => {
+  const { byEmail, byName, byFirstName } = slackUserIndexes(slackUsers);
   const matched = new Map();
   const unmatched = new Map();
-  (Array.isArray(schedule?.shifts) ? schedule.shifts : []).forEach((shift) => {
-    (Array.isArray(shift?.workers) ? shift.workers : []).forEach((worker) => {
-      const status = clean(worker?.status).toLowerCase();
-      if (status && !['assigned', 'confirmed'].includes(status)) return;
-      const email = clean(worker?.email).toLowerCase();
-      const name = clean(worker?.name);
-      const emailMatch = email ? byEmail.get(email) : null;
-      const nameMatches = byName.get(normalize(name)) || [];
-      const match = emailMatch || (nameMatches.length === 1 ? nameMatches[0] : null);
-      if (match?.id) matched.set(match.id, { id: match.id, name, email });
-      else if (name || email) unmatched.set(`${normalize(name)}:${email}`, { name, email });
-    });
+  people.forEach((person) => {
+    const email = clean(person?.email).toLowerCase();
+    const name = clean(person?.name);
+    const normalizedName = normalize(name);
+    const exactNameMatches = byName.get(normalizedName) || [];
+    const firstNameMatches = normalizedName && !normalizedName.includes(' ')
+      ? (byFirstName.get(normalizedName) || [])
+      : [];
+    const match = (email ? byEmail.get(email) : null)
+      || (exactNameMatches.length === 1 ? exactNameMatches[0] : null)
+      || (firstNameMatches.length === 1 ? firstNameMatches[0] : null);
+    if (match?.id) matched.set(match.id, { id: match.id, name, email });
+    else if (name || email) unmatched.set(`${normalizedName}:${email}`, { name, email });
   });
   return { matched: [...matched.values()], unmatched: [...unmatched.values()] };
 };
+
+const eventManagerName = (event = {}) => clean(
+  event.managerId
+  || event?.meta?.salesRep
+  || event?.meta?.managerName
+  || event?.meta?.salesRepName
+  || event?.meta?.manager
+  || event?.meta?.sales
+);
+
+export const eventLeadershipPeople = (event = {}) => {
+  const managerName = eventManagerName(event);
+  if (!managerName) return [];
+  const normalizedManager = normalize(managerName);
+  const team = DEFAULT_EVENT_LEADERSHIP_TEAMS.find(({ managers }) => managers.some((candidate) => {
+    const normalizedCandidate = normalize(candidate);
+    return normalizedManager === normalizedCandidate
+      || normalizedManager.startsWith(`${normalizedCandidate} `)
+      || normalizedCandidate.startsWith(`${normalizedManager} `);
+  }));
+  return [managerName, ...(team?.assistants || [])].map((name) => ({ name }));
+};
+
+export const matchSlackEventWorkers = ({ schedule, slackUsers }) => {
+  const people = (Array.isArray(schedule?.shifts) ? schedule.shifts : []).flatMap((shift) => (
+    (Array.isArray(shift?.workers) ? shift.workers : []).flatMap((worker) => {
+      const status = clean(worker?.status).toLowerCase();
+      return status && !['assigned', 'confirmed'].includes(status)
+        ? []
+        : [{ name: clean(worker?.name), email: clean(worker?.email).toLowerCase() }];
+    })
+  ));
+  return matchSlackPeople({ people, slackUsers });
+};
+
+const mergeSlackMatches = (...groups) => ({
+  matched: [...new Map(groups.flatMap((group) => group.matched).map((person) => [person.id, person])).values()],
+  unmatched: [...new Map(groups.flatMap((group) => group.unmatched).map((person) => [`${normalize(person.name)}:${clean(person.email).toLowerCase()}`, person])).values()],
+});
 
 const frontendBaseUrl = () => clean(
   process.env.FRONTEND_URL || process.env.FRONTEND_ORIGIN || process.env.CLIENT_URL || process.env.APP_URL || 'https://ocdecks.com'
@@ -154,7 +205,10 @@ export const runSlackEventChannelSync = async ({ now = new Date(), eventId = '',
         created = true;
       }
 
-      const workers = matchSlackEventWorkers({ schedule, slackUsers });
+      const workers = mergeSlackMatches(
+        matchSlackEventWorkers({ schedule, slackUsers }),
+        matchSlackPeople({ people: eventLeadershipPeople(event), slackUsers })
+      );
       const previouslyInvited = new Set(Array.isArray(stored.invitedUserIds) ? stored.invitedUserIds.map(clean) : []);
       const inviteIds = workers.matched.map((worker) => worker.id).filter((id) => !previouslyInvited.has(id));
       if (inviteIds.length) await inviteSlackUsers(channel.id, inviteIds);

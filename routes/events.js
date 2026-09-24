@@ -582,6 +582,7 @@ const applyNowstaApiRows = async (sourceRows, actor = {}) => {
           title: String(existing.title || ''),
           date: String(existing.date || ''),
           client: String(existing.client || ''),
+          managerId: String(existing.managerId || ''),
           nowsta: existing.meta?.nowsta || {},
           venue: String(existing.meta?.venue || ''),
           address: String(existing.meta?.address || ''),
@@ -594,6 +595,7 @@ const applyNowstaApiRows = async (sourceRows, actor = {}) => {
           title: event.title,
           date: event.date,
           client: event.client,
+          managerId: event.managerId || currentComparable.managerId,
           nowsta: incomingNowsta,
           venue: meta?.venue || '',
           address: meta?.address || '',
@@ -620,6 +622,10 @@ const applyNowstaApiRows = async (sourceRows, actor = {}) => {
       };
       if (meta?.guestCount !== null && meta?.guestCount !== undefined) {
         setFields['meta.guestCount'] = meta.guestCount;
+      }
+      if (event.managerId) {
+        setFields.managerId = event.managerId;
+        setFields['meta.salesRep'] = event.managerId;
       }
       const result = await Event.updateOne(
         existing ? { _id: existing._id } : { externalId: event.externalId },

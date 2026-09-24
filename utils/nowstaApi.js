@@ -150,6 +150,40 @@ const personEmail = (person) => clean(
   240
 ).toLowerCase();
 
+export const nowstaEventSalesperson = (event = {}, people = new Map()) => {
+  const direct = clean(
+    event.salesperson_name
+    || event.sales_person_name
+    || event.sales_rep_name
+    || event.sales_representative_name
+    || event.account_manager_name,
+    240
+  );
+  if (direct) return direct;
+  const nested = event.salesperson
+    || event.sales_person
+    || event.sales_rep
+    || event.sales_representative
+    || event.account_manager;
+  if (typeof nested === 'string') return clean(nested, 240);
+  if (nested && typeof nested === 'object') {
+    const nestedName = personName(nested) || clean(nested.full_name || nested.name || nested.display_name, 240);
+    if (nestedName) return nestedName;
+  }
+  const personId = String(
+    event.salesperson_id
+    ?? event.sales_person_id
+    ?? event.sales_rep_id
+    ?? event.salesperson_company_user_id
+    ?? event.sales_person_company_user_id
+    ?? event.account_manager_id
+    ?? nested?.id
+    ?? nested?.company_user_id
+    ?? ''
+  );
+  return personName(people.get(personId));
+};
+
 const venueMap = (venues = []) => new Map((Array.isArray(venues) ? venues : [])
   .map((venue) => [String(venue?.id ?? venue?.venue_id ?? ''), venue])
   .filter(([id]) => id));
@@ -305,16 +339,18 @@ export const buildNowstaImportRows = ({ events = [], shifts = [], companyUsers =
       ].filter(Boolean).join(' – ');
       const assigned = eventShifts.reduce((total, shift) => total + shift.workers.length, 0);
       const unfilled = eventShifts.reduce((total, shift) => total + shift.unfilled, 0);
+      const salesperson = nowstaEventSalesperson(event, people);
       return {
         externalId,
         title: clean(event.name, 300),
         date: zonedDate(event.occurs_at, event.time_zone),
         client: clean(event.client_name, 300),
-        managerId: '',
+        managerId: salesperson,
         status: 'draft',
         importSource: 'nowsta',
         meta: {
           guestCount: Number.isFinite(Number(event.number_of_guests)) ? Number(event.number_of_guests) : null,
+          salesRep: salesperson,
           venue,
           address,
           eventTime,

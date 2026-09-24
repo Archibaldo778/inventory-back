@@ -7,6 +7,7 @@ import {
   classifyNowstaSourceEvents,
   createNowstaClient,
   isNowstaOperationalEventTitle,
+  nowstaEventSalesperson,
   resolveNowstaSyncRange,
 } from '../utils/nowstaApi.js';
 import { uniqueNowstaTitleDateMatch } from '../routes/events.js';
@@ -35,6 +36,7 @@ test('Nowsta API rows preserve stable IDs and include assigned workers', () => {
       primary_external_id: 'E22554',
       external_id: 'S61715',
       number_of_guests: 150,
+      salesperson_id: 15,
     }],
     shifts: [{
       event_id: 91,
@@ -46,7 +48,10 @@ test('Nowsta API rows preserve stable IDs and include assigned workers', () => {
       open_count: 1,
       event_workers: [{ company_user_id: 12, status: 'confirmed' }],
     }],
-    companyUsers: [{ id: 12, first_name: 'Aidan', last_name: 'Collis', phone_number: '+1 917 555 0100' }],
+    companyUsers: [
+      { id: 12, first_name: 'Aidan', last_name: 'Collis', phone_number: '+1 917 555 0100' },
+      { id: 15, first_name: 'Oliver', last_name: 'Cheng' },
+    ],
   });
 
   assert.equal(rows.length, 1);
@@ -56,6 +61,15 @@ test('Nowsta API rows preserve stable IDs and include assigned workers', () => {
   assert.equal(rows[0].meta.nowsta.shifts[0].workers[0].name, 'Aidan Collis');
   assert.equal(rows[0].meta.nowsta.shifts[0].workers[0].phone, '+1 917 555 0100');
   assert.equal(rows[0].meta.nowsta.shifts[0].unfilled, 1);
+  assert.equal(rows[0].managerId, 'Oliver Cheng');
+  assert.equal(rows[0].meta.salesRep, 'Oliver Cheng');
+});
+
+test('Nowsta salesperson accepts names, nested people, and company user ids', () => {
+  const people = new Map([['15', { id: 15, first_name: 'Oliver', last_name: 'Cheng' }]]);
+  assert.equal(nowstaEventSalesperson({ salesperson_name: 'Oliver Cheng' }, people), 'Oliver Cheng');
+  assert.equal(nowstaEventSalesperson({ salesperson: { first_name: 'George', last_name: 'Smith' } }, people), 'George Smith');
+  assert.equal(nowstaEventSalesperson({ salesperson_id: 15 }, people), 'Oliver Cheng');
 });
 
 test('Nowsta rows resolve addresses from a referenced venue', () => {

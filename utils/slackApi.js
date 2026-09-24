@@ -76,6 +76,11 @@ export const createSlackPrivateChannel = async (name) => {
   return result.channel;
 };
 
+export const renameSlackChannel = async (channel, name) => {
+  const result = await slackRequest('conversations.rename', { channel, name });
+  return result.channel;
+};
+
 export const inviteSlackUsers = async (channel, userIds = []) => {
   const unique = [...new Set(userIds.map(clean).filter(Boolean))];
   if (!unique.length) return null;

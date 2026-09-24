@@ -36,6 +36,20 @@ test('Slack event series share one channel based on the first date', () => {
   }), '09-23-dieter-van-beneden-dinner');
 });
 
+test('Setup Day and the main event share the setup date and main event channel name', () => {
+  const schedules = [
+    { _id: 'setup', nowstaEventId: 'setup', date: '2026-09-25', title: 'Setup Day - Nicky Reinhard Plans a Wedding' },
+    { _id: 'main', nowstaEventId: 'main', date: '2026-09-26', title: 'Nicky Reinhard Plans a Wedding' },
+  ];
+  assert.equal(slackEventSeriesKey(schedules[0].title), slackEventSeriesKey(schedules[1].title));
+  const series = slackScheduleSeries(schedules[1], schedules);
+  assert.deepEqual(series.map((schedule) => schedule.nowstaEventId), ['setup', 'main']);
+  assert.equal(slackEventChannelName({ title: schedules[0].title }, {
+    startDate: series[0].date,
+    title: series[0].title,
+  }), '09-25-nicky-reinhard-plans-a-wedding');
+});
+
 test('event leadership includes the sales manager and configured assistants', () => {
   assert.deepEqual(
     eventLeadershipPeople({ managerId: 'Olivier Cheng' }).map((person) => person.name),

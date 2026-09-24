@@ -8,6 +8,7 @@ import {
   listSlackUsers,
   pinSlackMessage,
   postSlackMessage,
+  renameSlackChannel,
   slackAuthTest,
   updateSlackMessage,
 } from './slackApi.js';
@@ -33,6 +34,8 @@ const normalize = (value) => clean(value)
 
 export const slackEventSeriesTitle = (value) => clean(value)
   .replace(/^\s*(?:20\d{2}[-/.])?\d{1,2}[-/.]\d{1,2}(?:[-/.]\d{2,4})?\s*[-–—:]?\s*/i, '')
+  .replace(/^\s*setup\s*(?:day)?\s*[-–—:]?\s*/i, '')
+  .replace(/\s*[-–—:,]?\s*setup\s*(?:day)?\s*$/i, '')
   .replace(/\s*[-–—:,]?\s*day\s*#?\s*\d+\s*$/i, '')
   .replace(/\s+/g, ' ')
   .trim();
@@ -315,16 +318,23 @@ export const runSlackEventChannelSync = async ({ now = new Date(), eventId = '',
       const seriesDates = scheduleSeries.map((item) => clean(item.date)).filter(Boolean).sort();
       const seriesStartDate = seriesDates[0] || clean(event.date);
       const seriesEndDate = seriesDates.at(-1) || seriesStartDate;
-      const channelName = clean(stored.channelName) || slackEventChannelName(event, {
+      const channelName = slackEventChannelName(event, {
         startDate: seriesStartDate,
         title: scheduleSeries[0]?.title || event.title,
       });
-      let channel = clean(stored.channelId) ? { id: clean(stored.channelId), name: channelName } : channelsByName.get(channelName);
+      let channel = clean(stored.channelId)
+        ? { id: clean(stored.channelId), name: clean(stored.channelName) || channelName }
+        : channelsByName.get(channelName);
       let created = false;
       if (!channel?.id) {
         channel = await createSlackPrivateChannel(channelName);
         channelsByName.set(channelName, channel);
         created = true;
+      } else if (clean(channel.name) !== channelName) {
+        const oldName = clean(channel.name);
+        channel = await renameSlackChannel(channel.id, channelName);
+        if (oldName) channelsByName.delete(oldName);
+        channelsByName.set(channelName, channel);
       }
 
       const groupMembers = slackEventUserGroupMembers({ event, userGroups: slackUserGroups });
@@ -347,7 +357,8 @@ export const runSlackEventChannelSync = async ({ now = new Date(), eventId = '',
       if (inviteIds.length) await inviteSlackUsers(channel.id, inviteIds);
 
       let messageTs = clean(stored.messageTs);
-      const currentMessage = eventMessage(event, schedule, scheduleSeries);
+      const primaryEvent = seriesEvents.find((seriesEvent) => !/^\s*setup\s*(?:day)?\b/i.test(clean(seriesEvent?.title))) || event;
+      const currentMessage = eventMessage(primaryEvent, schedule, scheduleSeries);
       if (!messageTs) {
         const posted = await postSlackMessage({ channel: channel.id, ...currentMessage });
         messageTs = clean(posted?.ts);

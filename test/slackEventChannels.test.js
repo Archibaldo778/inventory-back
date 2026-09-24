@@ -5,6 +5,8 @@ import {
   eventLeadershipPeople,
   matchSlackEventWorkers,
   slackEventChannelName,
+  slackEventSeriesKey,
+  slackScheduleSeries,
   slackEventUserGroupMembers,
 } from '../utils/slackEventChannels.js';
 
@@ -14,8 +16,24 @@ test('Slack event channel names are stable, valid, and short', () => {
     title: 'Prada Donna & Uomo Appointments — DAY 1',
     externalId: 'E22847-S62831',
   });
-  assert.equal(name, '0924-prada-donna-uomo-appointments-day-1-e22847-s62831');
+  assert.equal(name, '09-24-prada-donna-uomo-appointments');
   assert.match(name, /^[a-z0-9_-]{1,80}$/);
+});
+
+test('Slack event series share one channel based on the first date', () => {
+  const schedules = [
+    { _id: 'one', nowstaEventId: 'one', date: '2026-09-23', title: 'Dieter Van Beneden Dinner - Day 1' },
+    { _id: 'two', nowstaEventId: 'two', date: '2026-09-24', title: 'Dieter Van Beneden Dinner - Day 2' },
+    { _id: 'three', nowstaEventId: 'three', date: '2026-09-25', title: 'Dieter Van Beneden Dinner - Day 3' },
+    { _id: 'later', nowstaEventId: 'later', date: '2027-09-23', title: 'Dieter Van Beneden Dinner - Day 1' },
+  ];
+  assert.equal(slackEventSeriesKey(schedules[0].title), 'dieter van beneden dinner');
+  const series = slackScheduleSeries(schedules[1], schedules);
+  assert.deepEqual(series.map((schedule) => schedule.nowstaEventId), ['one', 'two', 'three']);
+  assert.equal(slackEventChannelName({ title: schedules[1].title }, {
+    startDate: series[0].date,
+    title: series[0].title,
+  }), '09-23-dieter-van-beneden-dinner');
 });
 
 test('event leadership includes the sales manager and configured assistants', () => {

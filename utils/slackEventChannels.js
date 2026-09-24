@@ -30,12 +30,44 @@ const normalize = (value) => clean(value)
   .trim()
   .replace(/\s+/g, ' ');
 
-export const slackEventChannelName = (event = {}) => {
-  const date = clean(event.date).match(/^\d{4}-(\d{2})-(\d{2})$/);
-  const prefix = date ? `${date[1]}${date[2]}` : 'event';
-  const title = normalize(event.title).replace(/\s+/g, '-').slice(0, 48).replace(/-+$/g, '') || 'event';
-  const eventNumber = normalize(event.externalId).replace(/\s+/g, '-').slice(-16);
-  return [prefix, title, eventNumber].filter(Boolean).join('-').slice(0, 80).replace(/-+$/g, '');
+export const slackEventSeriesTitle = (value) => clean(value)
+  .replace(/^\s*(?:20\d{2}[-/.])?\d{1,2}[-/.]\d{1,2}(?:[-/.]\d{2,4})?\s*[-–—:]?\s*/i, '')
+  .replace(/\s*[-–—:,]?\s*day\s*#?\s*\d+\s*$/i, '')
+  .replace(/\s+/g, ' ')
+  .trim();
+
+export const slackEventSeriesKey = (value) => normalize(slackEventSeriesTitle(value));
+
+const isoDateMs = (value) => {
+  const match = clean(value).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return match ? Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])) : Number.NaN;
+};
+
+export const slackScheduleSeries = (targetSchedule, schedules = []) => {
+  const targetKey = slackEventSeriesKey(targetSchedule?.title);
+  const targetDateMs = isoDateMs(targetSchedule?.date);
+  if (!targetKey || !Number.isFinite(targetDateMs)) return [targetSchedule].filter(Boolean);
+  const candidates = (Array.isArray(schedules) ? schedules : [])
+    .filter((schedule) => slackEventSeriesKey(schedule?.title) === targetKey && Number.isFinite(isoDateMs(schedule?.date)))
+    .sort((left, right) => isoDateMs(left.date) - isoDateMs(right.date));
+  const targetIndex = candidates.findIndex((schedule) => (
+    clean(schedule?._id) && clean(schedule?._id) === clean(targetSchedule?._id)
+  ) || (
+    clean(schedule?.nowstaEventId) && clean(schedule?.nowstaEventId) === clean(targetSchedule?.nowstaEventId)
+  ));
+  if (targetIndex < 0) return [targetSchedule];
+  let first = targetIndex;
+  let last = targetIndex;
+  while (first > 0 && isoDateMs(candidates[first].date) - isoDateMs(candidates[first - 1].date) <= 7 * DAY_MS) first -= 1;
+  while (last < candidates.length - 1 && isoDateMs(candidates[last + 1].date) - isoDateMs(candidates[last].date) <= 7 * DAY_MS) last += 1;
+  return candidates.slice(first, last + 1);
+};
+
+export const slackEventChannelName = (event = {}, { startDate = '', title = '' } = {}) => {
+  const date = clean(startDate || event.date).match(/^\d{4}-(\d{2})-(\d{2})$/);
+  const prefix = date ? `${date[1]}-${date[2]}` : 'event';
+  const channelTitle = normalize(slackEventSeriesTitle(title || event.title)).replace(/\s+/g, '-').slice(0, 64).replace(/-+$/g, '') || 'event';
+  return `${prefix}-${channelTitle}`.slice(0, 80).replace(/-+$/g, '');
 };
 
 const slackUserIndexes = (users = []) => {
@@ -158,14 +190,27 @@ const frontendBaseUrl = () => clean(
 
 const eventUrl = (event) => `${frontendBaseUrl()}/events/${encodeURIComponent(String(event._id))}`;
 
-const eventMessage = (event, schedule) => {
+const formatSeriesDateRange = (startDate, endDate) => {
+  const startMs = isoDateMs(startDate);
+  const endMs = isoDateMs(endDate);
+  if (!Number.isFinite(startMs)) return clean(startDate);
+  const start = new Date(startMs);
+  const end = new Date(Number.isFinite(endMs) ? endMs : startMs);
+  const monthDay = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', month: 'long', day: 'numeric' });
+  const endLabel = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', month: 'long', day: 'numeric', year: 'numeric' }).format(end);
+  return startMs === end.getTime() ? endLabel : `${monthDay.format(start)} – ${endLabel}`;
+};
+
+const eventMessage = (event, schedule, series = []) => {
   const url = eventUrl(event);
   const time = [schedule?.shifts?.[0]?.startTime, schedule?.shifts?.at(-1)?.endTime].filter(Boolean).join(' – ');
-  const details = [clean(event.date), time, clean(schedule?.venue || event?.meta?.venue)].filter(Boolean).join(' · ');
+  const dates = (Array.isArray(series) && series.length ? series : [schedule]).map((item) => clean(item?.date)).filter(Boolean).sort();
+  const dateRange = formatSeriesDateRange(dates[0] || event.date, dates.at(-1) || event.date);
+  const details = [dateRange, time, clean(schedule?.venue || event?.meta?.venue)].filter(Boolean).join(' · ');
   return {
-    text: `${event.title} — event workspace: ${url}`,
+    text: `${slackEventSeriesTitle(event.title) || event.title} — ${dateRange} — event workspace: ${url}`,
     blocks: [
-      { type: 'header', text: { type: 'plain_text', text: clean(event.title).slice(0, 150), emoji: true } },
+      { type: 'header', text: { type: 'plain_text', text: clean(slackEventSeriesTitle(event.title) || event.title).slice(0, 150), emoji: true } },
       ...(details ? [{ type: 'context', elements: [{ type: 'mrkdwn', text: details }] }] : []),
       { type: 'section', text: { type: 'mrkdwn', text: 'Open the event workspace for current KM, PO, KPO, Staff Request, boards, and operational updates.' } },
       { type: 'actions', elements: [{ type: 'button', text: { type: 'plain_text', text: 'Open event files' }, url, action_id: 'open_event_files' }] },
@@ -214,6 +259,15 @@ export const runSlackEventChannelSync = async ({ now = new Date(), eventId = '',
       return { configured: true, enabled: slackEventChannelsEnabled(), processed: 0, created: 0, updated: 0, skipped: 0 };
     }
 
+    const seriesSchedules = await NowstaScheduleEntry.find({
+      entryType: 'event',
+      archived: false,
+      date: {
+        $gte: new Date(now.getTime() - 370 * DAY_MS).toISOString().slice(0, 10),
+        $lte: new Date(now.getTime() + 370 * DAY_MS).toISOString().slice(0, 10),
+      },
+    }).sort({ date: 1, startsAt: 1 }).lean();
+
     const [auth, slackUsers, slackChannels, slackUserGroups] = await Promise.all([
       slackAuthTest(),
       listSlackUsers(),
@@ -229,8 +283,23 @@ export const runSlackEventChannelSync = async ({ now = new Date(), eventId = '',
         summary.skipped += 1;
         continue;
       }
-      const stored = event?.meta?.slack && typeof event.meta.slack === 'object' ? event.meta.slack : {};
-      const channelName = clean(stored.channelName) || slackEventChannelName(event);
+      const scheduleSeries = slackScheduleSeries(schedule, seriesSchedules);
+      const seriesEvents = (await Promise.all(scheduleSeries.map((seriesSchedule) => (
+        clean(seriesSchedule.nowstaEventId) === clean(schedule.nowstaEventId)
+          ? event
+          : findEventForSchedule(seriesSchedule)
+      )))).filter(Boolean);
+      const storedEvent = seriesEvents.find((seriesEvent) => clean(seriesEvent?.meta?.slack?.channelId));
+      const stored = storedEvent?.meta?.slack && typeof storedEvent.meta.slack === 'object'
+        ? storedEvent.meta.slack
+        : (event?.meta?.slack && typeof event.meta.slack === 'object' ? event.meta.slack : {});
+      const seriesDates = scheduleSeries.map((item) => clean(item.date)).filter(Boolean).sort();
+      const seriesStartDate = seriesDates[0] || clean(event.date);
+      const seriesEndDate = seriesDates.at(-1) || seriesStartDate;
+      const channelName = clean(stored.channelName) || slackEventChannelName(event, {
+        startDate: seriesStartDate,
+        title: scheduleSeries[0]?.title || event.title,
+      });
       let channel = clean(stored.channelId) ? { id: clean(stored.channelId), name: channelName } : channelsByName.get(channelName);
       let created = false;
       if (!channel?.id) {
@@ -260,23 +329,29 @@ export const runSlackEventChannelSync = async ({ now = new Date(), eventId = '',
 
       let messageTs = clean(stored.messageTs);
       if (!messageTs) {
-        const posted = await postSlackMessage({ channel: channel.id, ...eventMessage(event, schedule) });
+        const posted = await postSlackMessage({ channel: channel.id, ...eventMessage(event, schedule, scheduleSeries) });
         messageTs = clean(posted?.ts);
         if (messageTs) await pinSlackMessage(channel.id, messageTs);
       }
       const invitedUserIds = [...new Set([...previouslyInvited, ...workers.matched.map((worker) => worker.id)])];
-      await Event.updateOne({ _id: event._id }, { $set: {
+      const slackMeta = {
+        channelId: clean(channel.id),
+        channelName: clean(channel.name) || channelName,
+        channelUrl: `https://slack.com/app_redirect?channel=${encodeURIComponent(clean(channel.id))}`,
+        messageTs,
+        invitedUserIds,
+        unmatchedWorkers: workers.unmatched,
+        includedSlackGroups: groupMembers.matchedGroups,
+        missingSlackGroups: groupMembers.missingGroups,
+        seriesStartDate,
+        seriesEndDate,
+        seriesEventIds: seriesEvents.map((seriesEvent) => String(seriesEvent._id)),
+        createdAt: stored.createdAt || new Date(),
+        lastSyncedAt: new Date(),
+      };
+      await Event.updateMany({ _id: { $in: seriesEvents.map((seriesEvent) => seriesEvent._id) } }, { $set: {
         'meta.slack': {
-          channelId: clean(channel.id),
-          channelName: clean(channel.name) || channelName,
-          channelUrl: `https://slack.com/app_redirect?channel=${encodeURIComponent(clean(channel.id))}`,
-          messageTs,
-          invitedUserIds,
-          unmatchedWorkers: workers.unmatched,
-          includedSlackGroups: groupMembers.matchedGroups,
-          missingSlackGroups: groupMembers.missingGroups,
-          createdAt: stored.createdAt || new Date(),
-          lastSyncedAt: new Date(),
+          ...slackMeta,
         },
       } });
       summary.processed += 1;
@@ -292,6 +367,9 @@ export const runSlackEventChannelSync = async ({ now = new Date(), eventId = '',
         unmatched: workers.unmatched,
         includedSlackGroups: groupMembers.matchedGroups,
         missingSlackGroups: groupMembers.missingGroups,
+        seriesStartDate,
+        seriesEndDate,
+        seriesEvents: seriesEvents.length,
       });
     }
     return summary;

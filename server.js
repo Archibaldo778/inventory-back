@@ -450,6 +450,7 @@ import proposalTemplateRoutes from './routes/proposalTemplates.js';
 import toolsRoutes from './routes/tools.js';
 import barRoutes from './routes/bar.js';
 import publicBarReturnsRoutes from './routes/publicBarReturns.js';
+import publicEventWorkspaceRoutes from './routes/publicEventWorkspace.js';
 import dropboxIntegrationRoutes, { runDropboxDiscoverySync } from './routes/dropboxIntegration.js';
 import catereaseIntegrationRoutes, {
   runCatereaseFileSync,
@@ -490,6 +491,7 @@ app.use('/api/proposals', requireAuth, requireProposalAccess, proposalRoutes);
 app.use('/api/proposal-templates', requireAuth, requireProposalTemplateAccess, proposalTemplateRoutes);
 app.use('/api/tools', requireAuth, requireAdmin, toolsRoutes);
 app.use('/api/public/bar-returns', publicBarReturnsRoutes);
+app.use('/api/public/event-workspace', publicEventWorkspaceRoutes);
 app.use('/api/bar', requireAuth, barRoutes);
 app.use('/api/integrations/dropbox', dropboxIntegrationRoutes);
 app.use('/api/integrations/caterease', catereaseIntegrationRoutes);

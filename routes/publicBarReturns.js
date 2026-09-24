@@ -24,6 +24,7 @@ import {
   readGuestBarSession,
   verifyGuestBarSession,
 } from '../utils/guestBarAccess.js';
+import { verifyEventGuestAccess } from '../utils/eventGuestAccess.js';
 
 const router = Router();
 const WINDOW_MS = 10 * 60 * 1000;
@@ -265,6 +266,10 @@ const loadEditableEvent = async (req, res) => {
     res.status(404).json({ message: 'Event not found' });
     return null;
   }
+  if (req.guestAccess?.eventId && String(req.guestAccess.eventId) !== String(event._id)) {
+    res.status(403).json({ message: 'This captain link is for a different event' });
+    return null;
+  }
   if (['submitted', 'reviewed', 'closed'].includes(event.status)) {
     res.status(409).json({ message: 'Returns for this event have already been submitted' });
     return null;
@@ -334,12 +339,29 @@ router.post('/verify-pin', requirePin, (req, res) => {
     return sendApiError(res, error, { context: 'Guest session creation failed', fallbackMessage: 'Could not start guest session' });
   }
 });
+router.post('/event-access', async (req, res) => {
+  try {
+    const dashboardEventId = clean(req.body?.eventId, 80);
+    verifyEventGuestAccess(clean(req.body?.accessToken, 4096), dashboardEventId, 'bar:returns');
+    const dashboardEvent = await Event.findOne({ _id: dashboardEventId, status: { $not: /^deleted$/i } })
+      .select('title date client meta externalId');
+    if (!dashboardEvent) return res.status(404).json({ message: 'Event not found' });
+    const event = await syncDashboardEvent(dashboardEvent);
+    const session = issueGuestBarSession({ eventId: String(event._id) });
+    logGuestSecurityEvent(req, 'captain_link_verified', { eventId: String(event._id) });
+    return res.json({ ok: true, sessionToken: session.token, expiresIn: session.expiresIn, event: publicEvent(event) });
+  } catch (error) {
+    logGuestSecurityEvent(req, 'captain_link_rejected');
+    return res.status(401).json({ message: 'This captain link is invalid or expired' });
+  }
+});
 router.post('/verify-session', requireGuestSession, (_req, res) => res.json({ ok: true }));
 router.use(requireGuestSession);
 
 router.post('/offline-events', async (req, res) => {
   try {
     const eventId = clean(req.body?.eventId, 80);
+    if (req.guestAccess?.eventId && String(req.guestAccess.eventId) !== eventId) return res.json({ events: [] });
     if (!isObjectId(eventId)) return res.json({ events: [] });
     const report = await BarEvent.findOne({
       _id: eventId,
@@ -361,6 +383,7 @@ router.post('/offline-events', async (req, res) => {
 
 // The date must be exact. An ambiguous name returns the day's choices after PIN verification.
 router.post('/find-event', async (req, res) => {
+  if (req.guestAccess?.eventId) return res.status(403).json({ message: 'Use the event included in your captain link' });
   try {
     const name = clean(req.body?.name, 240);
     const eventDate = normalizeBarEventDate(req.body?.eventDate);
@@ -405,6 +428,7 @@ router.post('/find-event', async (req, res) => {
 });
 
 router.post('/select-event', async (req, res) => {
+  if (req.guestAccess?.eventId) return res.status(403).json({ message: 'Use the event included in your captain link' });
   try {
     const id = clean(req.body?.id, 80);
     const source = clean(req.body?.source, 20);
@@ -437,6 +461,7 @@ router.post('/select-event', async (req, res) => {
 });
 
 router.post('/pending', pendingReportRateLimit, async (req, res) => {
+  if (req.guestAccess?.eventId) return res.status(403).json({ message: 'This captain link cannot create another event' });
   try {
     const name = clean(req.body?.name, 240);
     const eventDate = normalizeBarEventDate(req.body?.eventDate);

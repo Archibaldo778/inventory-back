@@ -27,10 +27,10 @@ const accessFingerprint = () => {
     .slice(0, 24);
 };
 
-export const issueGuestBarSession = () => {
+export const issueGuestBarSession = ({ eventId = '' } = {}) => {
   const expiresIn = sessionTtlSeconds();
   const token = jwt.sign(
-    { tokenType: TOKEN_TYPE, accessVersion: accessFingerprint() },
+    { tokenType: TOKEN_TYPE, accessVersion: accessFingerprint(), ...(eventId ? { eventId: clean(eventId, 80) } : {}) },
     getJwtSecret(),
     { expiresIn, issuer: TOKEN_ISSUER, audience: TOKEN_AUDIENCE, subject: TOKEN_TYPE }
   );

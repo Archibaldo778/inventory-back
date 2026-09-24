@@ -27,6 +27,7 @@ const DEFAULT_EVENT_LEADERSHIP_TEAMS = [
 const ALWAYS_INCLUDED_SLACK_GROUPS = [{ label: 'Leadership Team', names: ['Leadership Team', 'leadershipTeam'] }];
 const EVENT_LEADERSHIP_POSITION = /(?:captain|floor\s+lead|lead\s+chef|ma[iî]tre(?:\s*['’]?\s*d)?|driver)/i;
 export const slackEventChannelsEnabled = () => /^(?:1|true|yes|on)$/i.test(clean(process.env.SLACK_EVENT_CHANNELS_ENABLED));
+export const slackEventReportsEnabled = () => /^(?:1|true|yes|on)$/i.test(clean(process.env.SLACK_EVENT_REPORTS_ENABLED));
 const normalize = (value) => clean(value)
   .normalize('NFKD')
   .replace(/[\u0300-\u036f]/g, '')
@@ -472,35 +473,37 @@ export const runSlackEventChannelSync = async ({ now = new Date(), eventId = '',
           }
         }
 
-        const reporters = matchSlackEventReporters({ schedules: [seriesSchedule], slackUsers, linkedSlackByNowstaId });
-        for (const reporter of reporters.matched) {
-          const requestKey = `${seriesEvent._id}:${reporter.id}`;
-          const report = await EventReport.findOneAndUpdate(
-            { eventId: seriesEvent._id, slackUserId: reporter.id },
-            { $setOnInsert: {
-              nowstaEventId: clean(seriesSchedule.nowstaEventId), eventTitle: clean(seriesEvent.title), eventDate: clean(seriesSchedule.date),
-              eventEndsAt: new Date(eventEndsAt), slackUserId: reporter.id, reporterName: reporter.name,
-              reporterEmail: reporter.email, position: clean(reporter.position), status: 'pending',
-              nextReminderAt: new Date(new Date(eventEndsAt).getTime() + DAY_MS),
-            } },
-            { upsert: true, new: true, setDefaultsOnInsert: true }
-          );
-          if (report.status === 'submitted' || report.requestSentAt || reportRequestKeys.has(requestKey)) continue;
-          const reportUrl = eventReportUrl(seriesEvent, reporter.id, eventEndsAt);
-          try {
-            await postSlackMessage({
-              channel: reporter.id,
-              text: `Event report for ${seriesEvent.title}: ${reportUrl}`,
-              blocks: [
-                { type: 'section', text: { type: 'mrkdwn', text: `*Event Report*\n${seriesEvent.title} · ${formatSeriesDateRange(seriesSchedule.date, seriesSchedule.date)}\nPlease complete your report after the event.` } },
-                { type: 'actions', elements: [{ type: 'button', text: { type: 'plain_text', text: 'Complete Event Report' }, url: reportUrl, action_id: 'open_event_report' }] },
-              ],
-            });
-            report.requestSentAt = new Date();
-            await report.save();
-            reportRequestKeys.add(requestKey);
-          } catch (error) {
-            console.warn(`Slack event report link could not be sent to ${reporter.id}: ${error?.slackCode || error?.message || 'unknown error'}`);
+        if (slackEventReportsEnabled()) {
+          const reporters = matchSlackEventReporters({ schedules: [seriesSchedule], slackUsers, linkedSlackByNowstaId });
+          for (const reporter of reporters.matched) {
+            const requestKey = `${seriesEvent._id}:${reporter.id}`;
+            const report = await EventReport.findOneAndUpdate(
+              { eventId: seriesEvent._id, slackUserId: reporter.id },
+              { $setOnInsert: {
+                nowstaEventId: clean(seriesSchedule.nowstaEventId), eventTitle: clean(seriesEvent.title), eventDate: clean(seriesSchedule.date),
+                eventEndsAt: new Date(eventEndsAt), slackUserId: reporter.id, reporterName: reporter.name,
+                reporterEmail: reporter.email, position: clean(reporter.position), status: 'pending',
+                nextReminderAt: new Date(new Date(eventEndsAt).getTime() + DAY_MS),
+              } },
+              { upsert: true, new: true, setDefaultsOnInsert: true }
+            );
+            if (report.status === 'submitted' || report.requestSentAt || reportRequestKeys.has(requestKey)) continue;
+            const reportUrl = eventReportUrl(seriesEvent, reporter.id, eventEndsAt);
+            try {
+              await postSlackMessage({
+                channel: reporter.id,
+                text: `Event report for ${seriesEvent.title}: ${reportUrl}`,
+                blocks: [
+                  { type: 'section', text: { type: 'mrkdwn', text: `*Event Report*\n${seriesEvent.title} · ${formatSeriesDateRange(seriesSchedule.date, seriesSchedule.date)}\nPlease complete your report after the event.` } },
+                  { type: 'actions', elements: [{ type: 'button', text: { type: 'plain_text', text: 'Complete Event Report' }, url: reportUrl, action_id: 'open_event_report' }] },
+                ],
+              });
+              report.requestSentAt = new Date();
+              await report.save();
+              reportRequestKeys.add(requestKey);
+            } catch (error) {
+              console.warn(`Slack event report link could not be sent to ${reporter.id}: ${error?.slackCode || error?.message || 'unknown error'}`);
+            }
           }
         }
       }
@@ -556,7 +559,7 @@ export const runSlackEventChannelSync = async ({ now = new Date(), eventId = '',
 };
 
 export const runSlackEventReportReminders = async ({ now = new Date() } = {}) => {
-  if (!clean(process.env.SLACK_BOT_TOKEN)) return { configured: false, sent: 0, failed: 0 };
+  if (!slackEventReportsEnabled() || !clean(process.env.SLACK_BOT_TOKEN)) return { configured: false, sent: 0, failed: 0 };
   const pending = await EventReport.find({
     status: 'pending', requestSentAt: { $ne: null }, nextReminderAt: { $ne: null, $lte: now },
   }).sort({ nextReminderAt: 1 }).limit(200);

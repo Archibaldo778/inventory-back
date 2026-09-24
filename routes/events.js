@@ -16,6 +16,7 @@ import BarTask from '../models/BarTask.js';
 import BeverageItem from '../models/BeverageItem.js';
 import ImportRun from '../models/ImportRun.js';
 import DocumentImportRun from '../models/DocumentImportRun.js';
+import NowstaScheduleEntry from '../models/NowstaScheduleEntry.js';
 import { requireAdmin, requireRoles } from '../middleware/auth.js';
 import { createMemoryRateLimiter } from '../middleware/rateLimit.js';
 import { clearApiCacheGroups, createGroupedApiCache } from '../utils/apiCache.js';
@@ -728,6 +729,16 @@ export const runNowstaSync = async ({ from, to, actor } = {}) => {
   nowstaSyncPromise = (async () => {
     const fetched = await fetchNowstaImportRows({ from, to });
     const result = await applyNowstaApiRows(fetched.events, actor);
+    if (fetched.scheduleEvents.length) {
+      const syncedAt = new Date();
+      await NowstaScheduleEntry.bulkWrite(fetched.scheduleEvents.map((entry) => ({
+        updateOne: {
+          filter: { nowstaEventId: entry.nowstaEventId },
+          update: { $set: { ...entry, lastSyncedAt: syncedAt } },
+          upsert: true,
+        },
+      })), { ordered: false });
+    }
     const excludedResult = await markExcludedNowstaEvents(fetched.excludedEvents);
     clearRelatedCaches();
     lastNowstaSyncError = '';

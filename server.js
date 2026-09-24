@@ -457,6 +457,7 @@ import catereaseIntegrationRoutes, {
 } from './routes/catereaseIntegration.js';
 import brotherLabelRoutes from './routes/brotherLabels.js';
 import notificationRoutes from './routes/notifications.js';
+import nowstaScheduleRoutes from './routes/nowstaSchedule.js';
 import { getCatereaseConfig } from './utils/catereaseApi.js';
 
 app.use('/api/auth', authRoutes);
@@ -467,6 +468,7 @@ app.use('/api/users', requireAuth, requireUsersAccess, userRoutes);
 app.use('/users', requireAuth, requireUsersAccess, userRoutes);
 app.use('/api/events', requireAuth, requireWorkspaceAccess, requireWorkspaceEditorForMutations, eventRoutes);
 app.use('/api/notifications', requireAuth, notificationRoutes);
+app.use('/api/nowsta-schedule', requireAuth, requireWorkspaceAccess, nowstaScheduleRoutes);
 app.use('/api/decor-packouts', requireAuth, requireWorkspaceAccess, decorPackoutRoutes);
 app.use('/api/decks', requireAuth, requireWorkspaceAccess, requireWorkspaceEditorForMutations, deckRoutes);
 app.use('/api/pages', requireAuth, requireWorkspaceAccess, requireWorkspaceEditorForMutations, pageRoutes);

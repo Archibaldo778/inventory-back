@@ -34,6 +34,17 @@ const userSchema = new mongoose.Schema(
       seeProposals: { type: Boolean, default: false },
       seeBarFinancials: { type: Boolean, default: false },
     },
+    schedulePreferences: {
+      initialized: { type: Boolean, default: false },
+      departments: { type: [String], default: [] },
+      entryTypes: { type: [String], default: ['event'] },
+      staffingProgress: {
+        type: [String],
+        default: ['fully_staffed', 'incomplete', 'declined', 'empty'],
+      },
+      showArchived: { type: Boolean, default: false },
+      updatedAt: { type: Date, default: null },
+    },
     // Важно: именно "password", и скрываем по умолчанию при выборке
     password: { type: String, required: true, select: false },
     isActive: { type: Boolean, default: true },

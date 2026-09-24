@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildNowstaImportRows,
+  buildNowstaScheduleRows,
   classifyNowstaSourceEvents,
   createNowstaClient,
   isNowstaOperationalEventTitle,
@@ -122,4 +123,61 @@ test('Nowsta classifier excludes service, archived, missing-ID, and recurring sc
       8: 'archived',
     }
   );
+});
+
+test('Nowsta company schedule keeps operational events and booked drivers', () => {
+  const rows = buildNowstaScheduleRows({
+    events: [{
+      id: 22,
+      company_id: 7,
+      name: 'Deliveries',
+      occurs_at: '2026-09-24T12:00:00Z',
+      ends_at: '2026-09-24T20:00:00Z',
+      time_zone: 'America/New_York',
+      department_id: 13,
+    }],
+    shifts: [{
+      id: 501,
+      event_id: 22,
+      position_name: 'Driver',
+      starts_at: '2026-09-24T12:00:00Z',
+      ends_at: '2026-09-24T20:00:00Z',
+      time_zone: 'America/New_York',
+      quantity: 1,
+      event_workers: [{ company_user_id: 91, status: 'confirmed' }],
+    }],
+    companyUsers: [{
+      id: 91,
+      first_name: 'Test',
+      last_name: 'Driver',
+      email: 'driver@example.com',
+      phone_number: '2125550100',
+    }],
+    departments: [{ id: 13, name: 'Event Drivers' }],
+  });
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].title, 'Deliveries');
+  assert.equal(rows[0].departmentName, 'Event Drivers');
+  assert.equal(rows[0].defaultVisible, false);
+  assert.equal(rows[0].staffingProgress, 'fully_staffed');
+  assert.equal(rows[0].shifts[0].workers[0].name, 'Test Driver');
+  assert.equal(rows[0].shifts[0].workers[0].email, 'driver@example.com');
+});
+
+test('Nowsta company schedule can keep current customer departments visible by default', () => {
+  const rows = buildNowstaScheduleRows({
+    events: [{
+      id: 23,
+      name: 'Client Dinner',
+      occurs_at: '2026-09-24T22:00:00Z',
+      time_zone: 'America/New_York',
+      department: { name: 'Staffing and Service' },
+    }],
+    defaultVisibleIds: new Set(['23']),
+  });
+
+  assert.equal(rows[0].defaultVisible, true);
+  assert.equal(rows[0].departmentName, 'Staffing and Service');
+  assert.equal(rows[0].staffingProgress, 'empty');
 });

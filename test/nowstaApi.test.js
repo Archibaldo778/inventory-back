@@ -58,6 +58,22 @@ test('Nowsta API rows preserve stable IDs and include assigned workers', () => {
   assert.equal(rows[0].meta.nowsta.shifts[0].unfilled, 1);
 });
 
+test('Nowsta rows resolve addresses from a referenced venue', () => {
+  const [row] = buildNowstaScheduleRows({
+    events: [{
+      id: 92,
+      name: 'Venue-backed event',
+      occurs_at: '2026-09-24T21:30:00Z',
+      ends_at: '2026-09-25T04:00:00Z',
+      time_zone: 'America/New_York',
+      venue_id: 44,
+    }],
+    venues: [{ id: 44, name: 'FoundRae', address1: '176 Duane St', address2: '2', city: 'New York', state: 'NY', zip: '10013' }],
+  });
+  assert.equal(row.venue, 'FoundRae');
+  assert.equal(row.address, '176 Duane St, 2, New York, NY, 10013');
+});
+
 test('Nowsta client sends the access key only as a bearer header', async () => {
   let captured;
   const client = createNowstaClient({

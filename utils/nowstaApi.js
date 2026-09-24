@@ -150,13 +150,47 @@ const personEmail = (person) => clean(
   240
 ).toLowerCase();
 
-const eventAddress = (event) => clean([
-  event?.address1,
-  event?.address2,
-  event?.city,
-  event?.state,
-  event?.zip,
-].filter(Boolean).join(', '), 600);
+const venueMap = (venues = []) => new Map((Array.isArray(venues) ? venues : [])
+  .map((venue) => [String(venue?.id ?? venue?.venue_id ?? ''), venue])
+  .filter(([id]) => id));
+
+const eventVenueRecord = (event, venuesById = new Map()) => (
+  event?.venue && typeof event.venue === 'object' ? event.venue : venuesById.get(String(event?.venue_id ?? ''))
+) || {};
+
+const eventVenueName = (event, venuesById = new Map()) => clean(
+  event?.venue_name || eventVenueRecord(event, venuesById)?.name || eventVenueRecord(event, venuesById)?.venue_name,
+  300
+);
+
+const eventAddress = (event, venuesById = new Map()) => {
+  const venue = eventVenueRecord(event, venuesById);
+  const source = [event, venue].find((candidate) => clean([
+    candidate?.address1 || candidate?.address_line_1 || candidate?.street,
+    candidate?.address2 || candidate?.address_line_2,
+    candidate?.city,
+    candidate?.state,
+    candidate?.zip || candidate?.postal_code,
+  ].filter(Boolean).join(', '))) || event;
+  const structured = clean([
+    source?.address1 || source?.address_line_1 || source?.street,
+    source?.address2 || source?.address_line_2,
+    source?.city,
+    source?.state,
+    source?.zip || source?.postal_code,
+  ].filter(Boolean).join(', '), 600);
+  if (structured) return structured;
+  const loose = source?.address;
+  if (typeof loose === 'string') return clean(loose, 600);
+  if (loose && typeof loose === 'object') return clean([
+    loose.line1 || loose.address1 || loose.street,
+    loose.line2 || loose.address2,
+    loose.city,
+    loose.state,
+    loose.zip || loose.postal_code,
+  ].filter(Boolean).join(', '), 600);
+  return '';
+};
 
 export const isNowstaOperationalEventTitle = (value) => {
   const title = clean(value, 300);
@@ -223,8 +257,9 @@ export const classifyNowstaSourceEvents = (events = []) => {
   return { included, excluded };
 };
 
-export const buildNowstaImportRows = ({ events = [], shifts = [], companyUsers = [] } = {}) => {
+export const buildNowstaImportRows = ({ events = [], shifts = [], companyUsers = [], venues = [] } = {}) => {
   const people = new Map(companyUsers.map((person) => [String(person?.id ?? ''), person]));
+  const venuesById = venueMap(venues);
   const shiftsByEvent = new Map();
   shifts.forEach((shift) => {
     const eventId = String(shift?.event_id ?? '');
@@ -262,8 +297,8 @@ export const buildNowstaImportRows = ({ events = [], shifts = [], companyUsers =
       const apiEventId = String(event.id ?? '');
       const eventShifts = shiftsByEvent.get(apiEventId) || [];
       const externalId = nowstaExternalId(event);
-      const venue = clean(event.venue_name, 300);
-      const address = eventAddress(event);
+      const venue = eventVenueName(event, venuesById);
+      const address = eventAddress(event, venuesById);
       const eventTime = [
         zonedTime(event.occurs_at, event.time_zone),
         zonedTime(event.ends_at, event.time_zone),
@@ -343,12 +378,14 @@ export const buildNowstaScheduleRows = ({
   shifts = [],
   companyUsers = [],
   departments = [],
+  venues = [],
   defaultVisibleIds = new Set(),
 } = {}) => {
   const people = new Map((Array.isArray(companyUsers) ? companyUsers : []).map((person) => [
     String(person?.id ?? ''),
     person,
   ]));
+  const venuesById = venueMap(venues);
   const shiftsByEvent = new Map();
   const departmentsById = new Map((Array.isArray(departments) ? departments : []).map((department) => [
     String(department?.id ?? ''),
@@ -421,8 +458,8 @@ export const buildNowstaScheduleRows = ({
         staffingProgress,
         archived: Boolean(event.archived_at),
         defaultVisible: defaultVisibleIds.has(nowstaEventId),
-        venue: clean(event.venue_name, 300),
-        address: eventAddress(event),
+        venue: eventVenueName(event, venuesById),
+        address: eventAddress(event, venuesById),
         guestCount: Number.isFinite(rawGuestCount) && rawGuestCount >= 0 ? rawGuestCount : null,
         notes: clean(event.admin_notes || event.supervisor_notes, 2_000),
         shifts: eventShifts,
@@ -435,7 +472,7 @@ export const buildNowstaScheduleRows = ({
 export const fetchNowstaImportRows = async ({ from, to, fetchImpl, apiKey } = {}) => {
   const range = resolveNowstaSyncRange({ from, to });
   const client = createNowstaClient({ fetchImpl, apiKey });
-  const [events, shifts, companyUsers, departments] = await Promise.all([
+  const [events, shifts, companyUsers, departments, venues] = await Promise.all([
     client.listAll('/v2/events', { starts_after: range.from, starts_before: range.to }),
     client.listAll('/v2/shifts', {
       starts_at: range.from,
@@ -445,14 +482,15 @@ export const fetchNowstaImportRows = async ({ from, to, fetchImpl, apiKey } = {}
     }),
     client.listAll('/v2/company_users', { include_archived: false }),
     client.listAll('/v2/departments').catch(() => []),
+    client.listAll('/v2/venues').catch(() => []),
   ]);
   const classified = classifyNowstaSourceEvents(events);
   const defaultVisibleIds = new Set(classified.included.map((event) => String(event?.id ?? '')).filter(Boolean));
   return {
     range,
-    counts: { events: events.length, shifts: shifts.length, companyUsers: companyUsers.length, departments: departments.length },
-    events: buildNowstaImportRows({ events: classified.included, shifts, companyUsers }),
-    scheduleEvents: buildNowstaScheduleRows({ events, shifts, companyUsers, departments, defaultVisibleIds }),
+    counts: { events: events.length, shifts: shifts.length, companyUsers: companyUsers.length, departments: departments.length, venues: venues.length },
+    events: buildNowstaImportRows({ events: classified.included, shifts, companyUsers, venues }),
+    scheduleEvents: buildNowstaScheduleRows({ events, shifts, companyUsers, departments, venues, defaultVisibleIds }),
     scheduleDepartments: buildNowstaDepartmentRows(departments),
     excludedEvents: classified.excluded,
   };

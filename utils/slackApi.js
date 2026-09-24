@@ -66,6 +66,11 @@ export const listSlackChannels = async () => {
   return channels;
 };
 
+export const listSlackUserGroups = async () => {
+  const result = await slackGet('usergroups.list', { include_users: true, include_disabled: false });
+  return Array.isArray(result.usergroups) ? result.usergroups : [];
+};
+
 export const createSlackPrivateChannel = async (name) => {
   const result = await slackRequest('conversations.create', { name, is_private: true });
   return result.channel;

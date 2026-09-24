@@ -4,6 +4,7 @@ import {
   createSlackPrivateChannel,
   inviteSlackUsers,
   listSlackChannels,
+  listSlackUserGroups,
   listSlackUsers,
   pinSlackMessage,
   postSlackMessage,
@@ -13,11 +14,13 @@ import {
 const DAY_MS = 24 * 60 * 60 * 1000;
 const clean = (value) => String(value || '').trim();
 const DEFAULT_EVENT_LEADERSHIP_TEAMS = [
-  { managers: ['Olivier Cheng', 'Oliver Cheng'], assistants: ['Ashley', 'Sebastian', 'Heidi'] },
-  { managers: ['George'], assistants: ['Megan'] },
-  { managers: ['Guillaume'], assistants: [] },
-  { managers: ['Emma'], assistants: [] },
+  { managers: ['Olivier Cheng', 'Oliver Cheng'], slackGroupNames: ['Team OC'], assistants: ['Ashley', 'Sebastian', 'Heidi'] },
+  { managers: ['George'], slackGroupNames: ['Team George'], assistants: ['Megan'] },
+  { managers: ['Guillaume'], slackGroupNames: ['Team Guillaume', 'Guillaume'], assistants: [] },
+  { managers: ['Emma'], slackGroupNames: [], assistants: [] },
 ];
+const ALWAYS_INCLUDED_SLACK_GROUPS = ['Leadership Team'];
+const EVENT_LEADERSHIP_POSITION = /(?:captain|lead\s+chef|ma[iî]tre\s*d|driver)/i;
 export const slackEventChannelsEnabled = () => /^(?:1|true|yes|on)$/i.test(clean(process.env.SLACK_EVENT_CHANNELS_ENABLED));
 const normalize = (value) => clean(value)
   .normalize('NFKD')
@@ -102,11 +105,41 @@ export const eventLeadershipPeople = (event = {}) => {
   return [managerName, ...(team?.assistants || [])].map((name) => ({ name }));
 };
 
+const eventLeadershipTeam = (event = {}) => {
+  const normalizedManager = normalize(eventManagerName(event));
+  return DEFAULT_EVENT_LEADERSHIP_TEAMS.find(({ managers }) => managers.some((candidate) => {
+    const normalizedCandidate = normalize(candidate);
+    return normalizedManager === normalizedCandidate
+      || normalizedManager.startsWith(`${normalizedCandidate} `)
+      || normalizedCandidate.startsWith(`${normalizedManager} `);
+  })) || null;
+};
+
+export const slackEventUserGroupMembers = ({ event, userGroups = [] }) => {
+  const requestedNames = [...ALWAYS_INCLUDED_SLACK_GROUPS, ...(eventLeadershipTeam(event)?.slackGroupNames || [])];
+  const requested = new Set(requestedNames.map(normalize));
+  const matchedGroups = [];
+  const userIds = [];
+  userGroups.forEach((group) => {
+    const names = [group?.name, group?.handle].map(normalize).filter(Boolean);
+    if (!names.some((name) => requested.has(name))) return;
+    matchedGroups.push(clean(group?.name || group?.handle));
+    userIds.push(...(Array.isArray(group?.users) ? group.users.map(clean).filter(Boolean) : []));
+  });
+  return {
+    userIds: [...new Set(userIds)],
+    matchedGroups,
+    missingGroups: requestedNames.filter((name) => !matchedGroups.some((matched) => normalize(matched) === normalize(name))),
+  };
+};
+
 export const matchSlackEventWorkers = ({ schedule, slackUsers }) => {
   const people = (Array.isArray(schedule?.shifts) ? schedule.shifts : []).flatMap((shift) => (
     (Array.isArray(shift?.workers) ? shift.workers : []).flatMap((worker) => {
       const status = clean(worker?.status).toLowerCase();
-      return status && !['assigned', 'confirmed'].includes(status)
+      const position = clean(shift?.position);
+      const relevantPosition = !position || EVENT_LEADERSHIP_POSITION.test(position);
+      return !relevantPosition || (status && !['assigned', 'confirmed'].includes(status))
         ? []
         : [{ name: clean(worker?.name), email: clean(worker?.email).toLowerCase() }];
     })
@@ -181,10 +214,11 @@ export const runSlackEventChannelSync = async ({ now = new Date(), eventId = '',
       return { configured: true, enabled: slackEventChannelsEnabled(), processed: 0, created: 0, updated: 0, skipped: 0 };
     }
 
-    const [auth, slackUsers, slackChannels] = await Promise.all([
+    const [auth, slackUsers, slackChannels, slackUserGroups] = await Promise.all([
       slackAuthTest(),
       listSlackUsers(),
       listSlackChannels(),
+      listSlackUserGroups(),
     ]);
     const channelsByName = new Map(slackChannels.map((channel) => [clean(channel?.name), channel]));
     const summary = { configured: true, enabled: slackEventChannelsEnabled(), manual: Boolean(targetEvent), team: clean(auth?.team), processed: 0, created: 0, updated: 0, skipped: 0, unmatched: 0, events: [] };
@@ -205,9 +239,20 @@ export const runSlackEventChannelSync = async ({ now = new Date(), eventId = '',
         created = true;
       }
 
+      const groupMembers = slackEventUserGroupMembers({ event, userGroups: slackUserGroups });
+      const slackUsersById = new Map(slackUsers.map((user) => [clean(user?.id), user]));
+      const groupMatches = {
+        matched: groupMembers.userIds.map((id) => ({
+          id,
+          name: clean(slackUsersById.get(id)?.profile?.real_name || slackUsersById.get(id)?.real_name || slackUsersById.get(id)?.name),
+          email: clean(slackUsersById.get(id)?.profile?.email).toLowerCase(),
+        })),
+        unmatched: [],
+      };
       const workers = mergeSlackMatches(
-        matchSlackEventWorkers({ schedule, slackUsers }),
-        matchSlackPeople({ people: eventLeadershipPeople(event), slackUsers })
+        groupMatches,
+        matchSlackPeople({ people: eventLeadershipPeople(event), slackUsers }),
+        matchSlackEventWorkers({ schedule, slackUsers })
       );
       const previouslyInvited = new Set(Array.isArray(stored.invitedUserIds) ? stored.invitedUserIds.map(clean) : []);
       const inviteIds = workers.matched.map((worker) => worker.id).filter((id) => !previouslyInvited.has(id));
@@ -228,6 +273,8 @@ export const runSlackEventChannelSync = async ({ now = new Date(), eventId = '',
           messageTs,
           invitedUserIds,
           unmatchedWorkers: workers.unmatched,
+          includedSlackGroups: groupMembers.matchedGroups,
+          missingSlackGroups: groupMembers.missingGroups,
           createdAt: stored.createdAt || new Date(),
           lastSyncedAt: new Date(),
         },
@@ -243,6 +290,8 @@ export const runSlackEventChannelSync = async ({ now = new Date(), eventId = '',
         channelUrl: `https://slack.com/app_redirect?channel=${encodeURIComponent(clean(channel.id))}`,
         invited: inviteIds.length,
         unmatched: workers.unmatched,
+        includedSlackGroups: groupMembers.matchedGroups,
+        missingSlackGroups: groupMembers.missingGroups,
       });
     }
     return summary;

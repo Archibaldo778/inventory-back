@@ -1,7 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { eventLeadershipPeople, matchSlackEventWorkers, slackEventChannelName } from '../utils/slackEventChannels.js';
+import {
+  eventLeadershipPeople,
+  matchSlackEventWorkers,
+  slackEventChannelName,
+  slackEventUserGroupMembers,
+} from '../utils/slackEventChannels.js';
 
 test('Slack event channel names are stable, valid, and short', () => {
   const name = slackEventChannelName({
@@ -37,6 +42,20 @@ test('unique first names can match Slack users for configured assistants', () =>
   assert.equal(result.unmatched.length, 0);
 });
 
+test('Slack group membership includes Leadership Team and the sales manager team', () => {
+  const result = slackEventUserGroupMembers({
+    event: { managerId: 'Olivier Cheng' },
+    userGroups: [
+      { name: 'Leadership Team', users: ['U1', 'U2'] },
+      { name: 'Team OC', users: ['U2', 'U3'] },
+      { name: 'Team George', users: ['U4'] },
+    ],
+  });
+  assert.deepEqual(result.userIds, ['U1', 'U2', 'U3']);
+  assert.deepEqual(result.matchedGroups, ['Leadership Team', 'Team OC']);
+  assert.deepEqual(result.missingGroups, []);
+});
+
 test('Slack event workers match by email first and unique name second', () => {
   const result = matchSlackEventWorkers({
     schedule: {
@@ -54,4 +73,26 @@ test('Slack event workers match by email first and unique name second', () => {
   });
   assert.deepEqual(result.matched.map((worker) => worker.id), ['U1', 'U2']);
   assert.deepEqual(result.unmatched, [{ name: 'Missing Person', email: 'missing@example.com' }]);
+});
+
+test('Slack event workers include only operational leadership and drivers', () => {
+  const result = matchSlackEventWorkers({
+    schedule: {
+      shifts: [
+        { position: 'Captain', workers: [{ name: 'Captain One', status: 'confirmed' }] },
+        { position: 'Lead Chef', workers: [{ name: 'Chef One', status: 'assigned' }] },
+        { position: 'Maitre D', workers: [{ name: 'Maitre One', status: 'confirmed' }] },
+        { position: 'Driver', workers: [{ name: 'Driver One', status: 'confirmed' }] },
+        { position: 'Bartender', workers: [{ name: 'Bartender One', status: 'confirmed' }] },
+      ],
+    },
+    slackUsers: [
+      { id: 'U1', profile: { real_name: 'Captain One' } },
+      { id: 'U2', profile: { real_name: 'Chef One' } },
+      { id: 'U3', profile: { real_name: 'Maitre One' } },
+      { id: 'U4', profile: { real_name: 'Driver One' } },
+      { id: 'U5', profile: { real_name: 'Bartender One' } },
+    ],
+  });
+  assert.deepEqual(result.matched.map((worker) => worker.id), ['U1', 'U2', 'U3', 'U4']);
 });

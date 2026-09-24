@@ -461,7 +461,7 @@ import nowstaScheduleRoutes from './routes/nowstaSchedule.js';
 import operationsRoutes from './routes/operations.js';
 import transportationRoutes from './routes/transportation.js';
 import slackIntegrationRoutes from './routes/slackIntegration.js';
-import { runSlackEventChannelSync } from './utils/slackEventChannels.js';
+import { runSlackEventChannelSync, slackEventChannelsEnabled } from './utils/slackEventChannels.js';
 import { getCatereaseConfig } from './utils/catereaseApi.js';
 
 app.use('/api/auth', authRoutes);
@@ -703,15 +703,12 @@ export const startServer = async () => {
 
   let slackSyncTimer = null;
   let slackStartupTimer = null;
-  if (
-    String(process.env.SLACK_BOT_TOKEN || '').trim()
-    && /^(?:1|true|yes|on)$/i.test(String(process.env.SLACK_EVENT_CHANNELS_ENABLED || '').trim())
-  ) {
+  if (String(process.env.SLACK_BOT_TOKEN || '').trim()) {
     const configuredMinutes = Number(process.env.SLACK_SYNC_INTERVAL_MINUTES);
     const intervalMinutes = Number.isFinite(configuredMinutes)
       ? Math.max(5, Math.min(60, Math.trunc(configuredMinutes)))
       : 15;
-    const syncSlack = () => runSlackEventChannelSync().then((summary) => {
+    const syncSlack = () => runSlackEventChannelSync({ existingOnly: !slackEventChannelsEnabled() }).then((summary) => {
       console.log('✅ Slack event channel sync completed', summary);
     }).catch((error) => {
       console.error('Slack event channel sync failed:', error?.message || error);
@@ -720,7 +717,7 @@ export const startServer = async () => {
     slackStartupTimer.unref?.();
     slackSyncTimer = setInterval(syncSlack, intervalMinutes * 60_000);
     slackSyncTimer.unref?.();
-    console.log(`Slack event channel sync enabled every ${intervalMinutes} minutes`);
+    console.log(`Slack event channel sync enabled every ${intervalMinutes} minutes (${slackEventChannelsEnabled() ? 'all due events' : 'linked test channels only'})`);
   }
 
   let shuttingDown = false;

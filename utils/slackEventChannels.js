@@ -249,11 +249,11 @@ const findEventForSchedule = async (schedule) => Event.findOne({
 
 let activeSlackSync = null;
 
-export const runSlackEventChannelSync = async ({ now = new Date(), eventId = '', force = false } = {}) => {
+export const runSlackEventChannelSync = async ({ now = new Date(), eventId = '', force = false, existingOnly = false } = {}) => {
   if (activeSlackSync) return activeSlackSync;
   activeSlackSync = (async () => {
     if (!clean(process.env.SLACK_BOT_TOKEN)) return { configured: false, processed: 0, created: 0, updated: 0, skipped: 0 };
-    if (!slackEventChannelsEnabled() && !force) return { configured: true, enabled: false, processed: 0, created: 0, updated: 0, skipped: 0 };
+    if (!slackEventChannelsEnabled() && !force && !existingOnly) return { configured: true, enabled: false, processed: 0, created: 0, updated: 0, skipped: 0 };
     const from = new Date(now.getTime() - DAY_MS);
     const through = new Date(now.getTime() + DAY_MS);
     const targetEvent = clean(eventId) ? await Event.findById(clean(eventId)).lean() : null;
@@ -315,6 +315,10 @@ export const runSlackEventChannelSync = async ({ now = new Date(), eventId = '',
       const stored = storedEvent?.meta?.slack && typeof storedEvent.meta.slack === 'object'
         ? storedEvent.meta.slack
         : (event?.meta?.slack && typeof event.meta.slack === 'object' ? event.meta.slack : {});
+      if (existingOnly && !clean(stored.channelId)) {
+        summary.skipped += 1;
+        continue;
+      }
       const seriesDates = scheduleSeries.map((item) => clean(item.date)).filter(Boolean).sort();
       const seriesStartDate = seriesDates[0] || clean(event.date);
       const seriesEndDate = seriesDates.at(-1) || seriesStartDate;

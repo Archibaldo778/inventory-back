@@ -323,6 +323,21 @@ const nowstaDepartmentName = (event, departmentsById = new Map()) => clean(
   160
 );
 
+export const buildNowstaDepartmentRows = (departments = []) => {
+  const rowsById = new Map();
+  (Array.isArray(departments) ? departments : []).forEach((department) => {
+    const nowstaDepartmentId = clean(department?.id ?? department?.department_id, 120);
+    const name = clean(department?.name || department?.display_name, 160);
+    if (!nowstaDepartmentId || !name) return;
+    rowsById.set(nowstaDepartmentId, {
+      nowstaDepartmentId,
+      name,
+      archived: Boolean(department?.archived_at || department?.archived),
+    });
+  });
+  return [...rowsById.values()];
+};
+
 export const buildNowstaScheduleRows = ({
   events = [],
   shifts = [],
@@ -438,6 +453,7 @@ export const fetchNowstaImportRows = async ({ from, to, fetchImpl, apiKey } = {}
     counts: { events: events.length, shifts: shifts.length, companyUsers: companyUsers.length, departments: departments.length },
     events: buildNowstaImportRows({ events: classified.included, shifts, companyUsers }),
     scheduleEvents: buildNowstaScheduleRows({ events, shifts, companyUsers, departments, defaultVisibleIds }),
+    scheduleDepartments: buildNowstaDepartmentRows(departments),
     excludedEvents: classified.excluded,
   };
 };

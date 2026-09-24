@@ -17,6 +17,7 @@ import BeverageItem from '../models/BeverageItem.js';
 import ImportRun from '../models/ImportRun.js';
 import DocumentImportRun from '../models/DocumentImportRun.js';
 import NowstaScheduleEntry from '../models/NowstaScheduleEntry.js';
+import NowstaDepartment from '../models/NowstaDepartment.js';
 import { requireAdmin, requireRoles } from '../middleware/auth.js';
 import { createMemoryRateLimiter } from '../middleware/rateLimit.js';
 import { clearApiCacheGroups, createGroupedApiCache } from '../utils/apiCache.js';
@@ -735,6 +736,16 @@ export const runNowstaSync = async ({ from, to, actor } = {}) => {
         updateOne: {
           filter: { nowstaEventId: entry.nowstaEventId },
           update: { $set: { ...entry, lastSyncedAt: syncedAt } },
+          upsert: true,
+        },
+      })), { ordered: false });
+    }
+    if (fetched.scheduleDepartments.length) {
+      const syncedAt = new Date();
+      await NowstaDepartment.bulkWrite(fetched.scheduleDepartments.map((department) => ({
+        updateOne: {
+          filter: { nowstaDepartmentId: department.nowstaDepartmentId },
+          update: { $set: { ...department, lastSyncedAt: syncedAt } },
           upsert: true,
         },
       })), { ordered: false });

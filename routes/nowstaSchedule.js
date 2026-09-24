@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import NowstaScheduleEntry from '../models/NowstaScheduleEntry.js';
+import NowstaDepartment from '../models/NowstaDepartment.js';
 import User from '../models/Users.js';
 import { sendApiError } from '../utils/apiErrors.js';
 
@@ -93,14 +94,16 @@ router.get('/', async (req, res) => {
     const items = await NowstaScheduleEntry.find({ date: { $gte: from, $lte: to } })
       .sort({ date: 1, startsAt: 1, title: 1 })
       .lean();
-    const [departments, entryTypes] = await Promise.all([
+    const [catalogDepartments, entryDepartments, entryTypes] = await Promise.all([
+      NowstaDepartment.distinct('name', { archived: { $ne: true } }),
       NowstaScheduleEntry.distinct('departmentName'),
       NowstaScheduleEntry.distinct('entryType'),
     ]);
     return res.json({
       items,
       filters: {
-        departments: cleanList(departments).sort((left, right) => left.localeCompare(right)),
+        departments: cleanList([...catalogDepartments, ...entryDepartments])
+          .sort((left, right) => left.localeCompare(right)),
         entryTypes: cleanList(entryTypes, { maxItems: 30, maxLength: 80 }).sort(),
         staffingProgress: ['fully_staffed', 'incomplete', 'declined', 'empty'],
       },

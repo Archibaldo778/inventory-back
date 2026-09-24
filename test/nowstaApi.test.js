@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildNowstaImportRows,
+  buildNowstaDepartmentRows,
   buildNowstaScheduleRows,
   classifyNowstaSourceEvents,
   createNowstaClient,
@@ -79,6 +80,19 @@ test('Nowsta default sync range is bounded and valid', () => {
   assert.ok(range.from < range.to);
   assert.match(range.from, /^2026-/);
   assert.match(range.to, /^2027-/);
+});
+
+test('Nowsta department catalog includes departments without events', () => {
+  assert.deepEqual(buildNowstaDepartmentRows([
+    { id: 10, name: 'Event Drivers' },
+    { id: 20, name: 'Ops' },
+    { id: 20, name: 'Ops' },
+    { id: 30, display_name: 'Hand Deliveries' },
+  ]), [
+    { nowstaDepartmentId: '10', name: 'Event Drivers', archived: false },
+    { nowstaDepartmentId: '20', name: 'Ops', archived: false },
+    { nowstaDepartmentId: '30', name: 'Hand Deliveries', archived: false },
+  ]);
 });
 
 test('Nowsta operational schedule names are matched narrowly', () => {

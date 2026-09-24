@@ -18,11 +18,14 @@ import ImportRun from '../models/ImportRun.js';
 import DocumentImportRun from '../models/DocumentImportRun.js';
 import NowstaScheduleEntry from '../models/NowstaScheduleEntry.js';
 import NowstaDepartment from '../models/NowstaDepartment.js';
+import OperationsPerson from '../models/OperationsPerson.js';
+import Staff from '../models/Staff.js';
 import { requireAdmin, requireRoles } from '../middleware/auth.js';
 import { createMemoryRateLimiter } from '../middleware/rateLimit.js';
 import { clearApiCacheGroups, createGroupedApiCache } from '../utils/apiCache.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import { fetchNowstaImportRows, resolveNowstaSyncRange } from '../utils/nowstaApi.js';
+import { buildOperationsPeople, matchStaffByName } from '../utils/operationsRoster.js';
 import { runWithTransactionFallback } from '../utils/mongoTransaction.js';
 import {
   importedEventMatchesSnapshot,
@@ -749,6 +752,33 @@ export const runNowstaSync = async ({ from, to, actor } = {}) => {
           upsert: true,
         },
       })), { ordered: false });
+    }
+    const operationsPeople = buildOperationsPeople(fetched.scheduleEvents);
+    if (operationsPeople.length) {
+      const staff = await Staff.find({}).select('firstName lastName').lean();
+      const unmatchedPeople = operationsPeople.filter((person) => !matchStaffByName(person, staff));
+      if (unmatchedPeople.length) {
+        const lastSeenAt = new Date();
+        await OperationsPerson.bulkWrite(unmatchedPeople.map((person) => {
+          const { roles, email, phone, ...syncedPerson } = person;
+          return {
+            updateOne: {
+              filter: { nowstaCompanyUserId: person.nowstaCompanyUserId },
+              update: {
+                $set: {
+                  ...syncedPerson,
+                  sourceRoles: roles,
+                  sourceEmail: email,
+                  sourcePhone: phone,
+                  lastSeenAt,
+                },
+                $setOnInsert: { roles, email, phone, active: true },
+              },
+              upsert: true,
+            },
+          };
+        }), { ordered: false });
+      }
     }
     const excludedResult = await markExcludedNowstaEvents(fetched.excludedEvents);
     clearRelatedCaches();

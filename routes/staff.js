@@ -142,6 +142,10 @@ router.post('/', upload.single('photo'), async (req, res) => {
       pantsSize: sanitizeStr(body.pantsSize),
       shoeSize: sanitizeStr(body.shoeSize),
       jacketSize: sanitizeStr(body.jacketSize),
+      nowstaCompanyUserId: sanitizeStr(body.nowstaCompanyUserId),
+      nowstaName: sanitizeStr(body.nowstaName),
+      slackUserId: sanitizeStr(body.slackUserId),
+      slackName: sanitizeStr(body.slackName),
     };
     if (req.file) {
       try {
@@ -208,6 +212,10 @@ router.patch('/:id', upload.single('photo'), async (req, res) => {
     if (typeof body.pantsSize !== 'undefined') updates.pantsSize = sanitizeStr(body.pantsSize);
     if (typeof body.shoeSize !== 'undefined') updates.shoeSize = sanitizeStr(body.shoeSize);
     if (typeof body.jacketSize !== 'undefined') updates.jacketSize = sanitizeStr(body.jacketSize);
+    if (typeof body.nowstaCompanyUserId !== 'undefined') updates.nowstaCompanyUserId = sanitizeStr(body.nowstaCompanyUserId);
+    if (typeof body.nowstaName !== 'undefined') updates.nowstaName = sanitizeStr(body.nowstaName);
+    if (typeof body.slackUserId !== 'undefined') updates.slackUserId = sanitizeStr(body.slackUserId);
+    if (typeof body.slackName !== 'undefined') updates.slackName = sanitizeStr(body.slackName);
 
     if (req.file) {
       try {

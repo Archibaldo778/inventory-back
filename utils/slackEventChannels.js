@@ -1,4 +1,5 @@
 import Event from '../models/Event.js';
+import Staff from '../models/Staff.js';
 import NowstaScheduleEntry from '../models/NowstaScheduleEntry.js';
 import {
   createSlackPrivateChannel,
@@ -104,7 +105,7 @@ const slackUserIndexes = (users = []) => {
   return { byEmail, byName, byFirstName };
 };
 
-const matchSlackPeople = ({ people = [], slackUsers = [] }) => {
+const matchSlackPeople = ({ people = [], slackUsers = [], linkedSlackByNowstaId = new Map() }) => {
   const { byEmail, byName, byFirstName } = slackUserIndexes(slackUsers);
   const matched = new Map();
   const unmatched = new Map();
@@ -112,11 +113,13 @@ const matchSlackPeople = ({ people = [], slackUsers = [] }) => {
     const email = clean(person?.email).toLowerCase();
     const name = clean(person?.name);
     const normalizedName = normalize(name);
+    const linkedSlackId = linkedSlackByNowstaId.get(clean(person?.companyUserId));
     const exactNameMatches = byName.get(normalizedName) || [];
     const firstNameMatches = normalizedName && !normalizedName.includes(' ')
       ? (byFirstName.get(canonicalFirstName(normalizedName)) || [])
       : [];
-    const match = (email ? byEmail.get(email) : null)
+    const match = (linkedSlackId ? slackUsers.find((user) => clean(user?.id) === linkedSlackId) : null)
+      || (email ? byEmail.get(email) : null)
       || (exactNameMatches.length === 1 ? exactNameMatches[0] : null)
       || (firstNameMatches.length === 1 ? firstNameMatches[0] : null);
     if (match?.id) matched.set(match.id, { id: match.id, name, email });
@@ -193,7 +196,7 @@ export const slackEventUserGroupMembers = ({ event, userGroups = [] }) => {
   };
 };
 
-export const matchSlackEventWorkers = ({ schedule, schedules = [], slackUsers }) => {
+export const matchSlackEventWorkers = ({ schedule, schedules = [], slackUsers, linkedSlackByNowstaId = new Map() }) => {
   const sourceSchedules = Array.isArray(schedules) && schedules.length ? schedules : [schedule].filter(Boolean);
   const people = sourceSchedules.flatMap((sourceSchedule) => (Array.isArray(sourceSchedule?.shifts) ? sourceSchedule.shifts : []).flatMap((shift) => (
     (Array.isArray(shift?.workers) ? shift.workers : []).flatMap((worker) => {
@@ -202,13 +205,13 @@ export const matchSlackEventWorkers = ({ schedule, schedules = [], slackUsers })
       const relevantPosition = !position || EVENT_LEADERSHIP_POSITION.test(position);
       return !relevantPosition || (status && !['assigned', 'confirmed'].includes(status))
         ? []
-        : [{ name: clean(worker?.name), email: clean(worker?.email).toLowerCase() }];
+        : [{ companyUserId: clean(worker?.companyUserId), name: clean(worker?.name), email: clean(worker?.email).toLowerCase() }];
     })
   )));
-  return matchSlackPeople({ people, slackUsers });
+  return matchSlackPeople({ people, slackUsers, linkedSlackByNowstaId });
 };
 
-export const matchSlackEventCaptains = ({ schedules = [], slackUsers }) => {
+export const matchSlackEventCaptains = ({ schedules = [], slackUsers, linkedSlackByNowstaId = new Map() }) => {
   const people = (Array.isArray(schedules) ? schedules : []).flatMap((schedule) => (
     (Array.isArray(schedule?.shifts) ? schedule.shifts : []).flatMap((shift) => {
       if (!/captain/i.test(clean(shift?.position))) return [];
@@ -216,11 +219,11 @@ export const matchSlackEventCaptains = ({ schedules = [], slackUsers }) => {
         const status = clean(worker?.status).toLowerCase();
         return status && !['assigned', 'confirmed'].includes(status)
           ? []
-          : [{ name: clean(worker?.name), email: clean(worker?.email).toLowerCase() }];
+          : [{ companyUserId: clean(worker?.companyUserId), name: clean(worker?.name), email: clean(worker?.email).toLowerCase() }];
       });
     })
   ));
-  return matchSlackPeople({ people, slackUsers });
+  return matchSlackPeople({ people, slackUsers, linkedSlackByNowstaId });
 };
 
 const mergeSlackMatches = (...groups) => ({
@@ -324,12 +327,15 @@ export const runSlackEventChannelSync = async ({ now = new Date(), eventId = '',
       },
     }).sort({ date: 1, startsAt: 1 }).lean();
 
-    const [auth, slackUsers, slackChannels, slackUserGroups] = await Promise.all([
+    const [auth, slackUsers, slackChannels, slackUserGroups, linkedStaff] = await Promise.all([
       slackAuthTest(),
       listSlackUsers(),
       listSlackChannels(),
       listSlackUserGroups(),
+      Staff.find({ nowstaCompanyUserId: { $ne: '' }, slackUserId: { $ne: '' }, active: { $ne: false } })
+        .select('nowstaCompanyUserId slackUserId').lean(),
     ]);
+    const linkedSlackByNowstaId = new Map(linkedStaff.map((person) => [clean(person.nowstaCompanyUserId), clean(person.slackUserId)]));
     const channelsByName = new Map(slackChannels.map((channel) => [clean(channel?.name), channel]));
     const summary = { configured: true, enabled: slackEventChannelsEnabled(), manual: Boolean(targetEvent), team: clean(auth?.team), processed: 0, created: 0, updated: 0, skipped: 0, unmatched: 0, events: [] };
 
@@ -388,7 +394,7 @@ export const runSlackEventChannelSync = async ({ now = new Date(), eventId = '',
       const workers = mergeSlackMatches(
         groupMatches,
         matchSlackPeople({ people: eventLeadershipPeople(event), slackUsers }),
-        matchSlackEventWorkers({ schedules: scheduleSeries, slackUsers })
+        matchSlackEventWorkers({ schedules: scheduleSeries, slackUsers, linkedSlackByNowstaId })
       );
       const previouslyInvited = new Set(Array.isArray(stored.invitedUserIds) ? stored.invitedUserIds.map(clean) : []);
       const inviteIds = workers.matched.map((worker) => worker.id).filter((id) => !previouslyInvited.has(id));
@@ -404,7 +410,7 @@ export const runSlackEventChannelSync = async ({ now = new Date(), eventId = '',
       } else {
         await updateSlackMessage({ channel: channel.id, timestamp: messageTs, ...currentMessage });
       }
-      const captains = matchSlackEventCaptains({ schedules: scheduleSeries, slackUsers });
+      const captains = matchSlackEventCaptains({ schedules: scheduleSeries, slackUsers, linkedSlackByNowstaId });
       const captainLinksSent = new Set(Array.isArray(stored.captainLinksSentUserIds) ? stored.captainLinksSentUserIds.map(clean) : []);
       const newCaptains = captains.matched.filter((captain) => !captainLinksSent.has(captain.id));
       const barUrl = captainBarUrl(primaryEvent, seriesEvents, seriesEndDate);

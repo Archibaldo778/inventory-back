@@ -164,3 +164,15 @@ test('captain direct access goes only to confirmed or assigned captains', () => 
   });
   assert.deepEqual(result.matched.map((worker) => worker.id), ['U1', 'U2']);
 });
+
+test('saved Nowsta to Slack link overrides different email and display name', () => {
+  const result = matchSlackEventWorkers({
+    schedule: { shifts: [{ position: 'Floor Captain', workers: [{
+      companyUserId: 'nowsta-72', name: 'Zak', email: 'zak@nowsta.example', status: 'confirmed',
+    }] }] },
+    slackUsers: [{ id: 'U72', profile: { real_name: 'Z. Smith', email: 'different@slack.example' } }],
+    linkedSlackByNowstaId: new Map([['nowsta-72', 'U72']]),
+  });
+  assert.deepEqual(result.matched.map((worker) => worker.id), ['U72']);
+  assert.equal(result.unmatched.length, 0);
+});

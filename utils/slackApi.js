@@ -90,6 +90,13 @@ export const postSlackMessage = async ({ channel, text, blocks = [] }) => slackR
   unfurl_media: false,
 });
 
+export const updateSlackMessage = async ({ channel, timestamp, text, blocks = [] }) => slackRequest('chat.update', {
+  channel,
+  ts: timestamp,
+  text,
+  ...(blocks.length ? { blocks } : {}),
+});
+
 export const pinSlackMessage = (channel, timestamp) => slackRequest('pins.add', {
   channel,
   timestamp,

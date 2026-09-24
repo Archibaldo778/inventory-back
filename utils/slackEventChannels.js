@@ -9,6 +9,7 @@ import {
   pinSlackMessage,
   postSlackMessage,
   slackAuthTest,
+  updateSlackMessage,
 } from './slackApi.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -117,7 +118,9 @@ const matchSlackPeople = ({ people = [], slackUsers = [] }) => {
 
 const eventManagerName = (event = {}) => clean(
   event.managerId
+  || event?.catereaseOperations?.salesRep
   || event?.meta?.salesRep
+  || event?.meta?.catereaseOperations?.salesRep
   || event?.meta?.managerName
   || event?.meta?.salesRepName
   || event?.meta?.manager
@@ -185,8 +188,8 @@ const mergeSlackMatches = (...groups) => ({
 });
 
 const frontendBaseUrl = () => clean(
-  process.env.FRONTEND_URL || process.env.FRONTEND_ORIGIN || process.env.CLIENT_URL || process.env.APP_URL || 'https://ocdecks.com'
-).replace(/\/+$/g, '');
+  process.env.FRONTEND_URL || process.env.FRONTEND_ORIGIN || process.env.CLIENT_URL || process.env.APP_URL || 'https://occdecks.com'
+).replace(/^https:\/\/ocdecks\.com(?=\/|$)/i, 'https://occdecks.com').replace(/\/+$/g, '');
 
 const eventUrl = (event) => `${frontendBaseUrl()}/events/${encodeURIComponent(String(event._id))}`;
 
@@ -328,10 +331,13 @@ export const runSlackEventChannelSync = async ({ now = new Date(), eventId = '',
       if (inviteIds.length) await inviteSlackUsers(channel.id, inviteIds);
 
       let messageTs = clean(stored.messageTs);
+      const currentMessage = eventMessage(event, schedule, scheduleSeries);
       if (!messageTs) {
-        const posted = await postSlackMessage({ channel: channel.id, ...eventMessage(event, schedule, scheduleSeries) });
+        const posted = await postSlackMessage({ channel: channel.id, ...currentMessage });
         messageTs = clean(posted?.ts);
         if (messageTs) await pinSlackMessage(channel.id, messageTs);
+      } else {
+        await updateSlackMessage({ channel: channel.id, timestamp: messageTs, ...currentMessage });
       }
       const invitedUserIds = [...new Set([...previouslyInvited, ...workers.matched.map((worker) => worker.id)])];
       const slackMeta = {

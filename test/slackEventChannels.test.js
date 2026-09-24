@@ -47,6 +47,10 @@ test('event leadership includes the sales manager and configured assistants', ()
   );
   assert.deepEqual(eventLeadershipPeople({ managerId: 'Guillaume Darriet' }), [{ name: 'Guillaume Darriet' }]);
   assert.deepEqual(eventLeadershipPeople({ managerId: 'Emma' }), [{ name: 'Emma' }]);
+  assert.deepEqual(
+    eventLeadershipPeople({ catereaseOperations: { salesRep: 'Olivier Cheng' } }).map((person) => person.name),
+    ['Olivier Cheng', 'Ashley', 'Sebastian', 'Heidi']
+  );
 });
 
 test('unique first names can match Slack users for configured assistants', () => {

@@ -15,12 +15,12 @@ import {
 const DAY_MS = 24 * 60 * 60 * 1000;
 const clean = (value) => String(value || '').trim();
 const DEFAULT_EVENT_LEADERSHIP_TEAMS = [
-  { managers: ['Olivier Cheng', 'Oliver Cheng'], slackGroupNames: ['Team OC'], assistants: ['Ashley', 'Sebastian', 'Heidi'] },
-  { managers: ['George'], slackGroupNames: ['Team George'], assistants: ['Megan'] },
-  { managers: ['Guillaume'], slackGroupNames: ['Team Guillaume', 'Guillaume'], assistants: [] },
+  { managers: ['Olivier Cheng', 'Oliver Cheng'], slackGroupLabel: 'teamOC', slackGroupNames: ['teamOC', 'Team OC'], assistants: ['Ashley', 'Sebastian', 'Heidi'] },
+  { managers: ['George'], slackGroupLabel: 'team George', slackGroupNames: ['team George', 'teamGeorge'], assistants: ['Megan'] },
+  { managers: ['Guillaume'], slackGroupLabel: 'team Guillaume', slackGroupNames: ['team Guillaume', 'teamGuillaume', 'Guillaume'], assistants: [] },
   { managers: ['Emma'], slackGroupNames: [], assistants: [] },
 ];
-const ALWAYS_INCLUDED_SLACK_GROUPS = ['Leadership Team'];
+const ALWAYS_INCLUDED_SLACK_GROUPS = [{ label: 'Leadership Team', names: ['Leadership Team', 'leadershipTeam'] }];
 const EVENT_LEADERSHIP_POSITION = /(?:captain|lead\s+chef|ma[iî]tre\s*d|driver)/i;
 export const slackEventChannelsEnabled = () => /^(?:1|true|yes|on)$/i.test(clean(process.env.SLACK_EVENT_CHANNELS_ENABLED));
 const normalize = (value) => clean(value)
@@ -118,9 +118,15 @@ const matchSlackPeople = ({ people = [], slackUsers = [] }) => {
 
 const eventManagerName = (event = {}) => clean(
   event.managerId
+  || event.salesRep
+  || event.salesRepName
+  || event.managerName
   || event?.catereaseOperations?.salesRep
   || event?.meta?.salesRep
   || event?.meta?.catereaseOperations?.salesRep
+  || event?.meta?.catereaseSnapshot?.salesRep
+  || event?.meta?.caterease?.salesRep
+  || event?.meta?.calendar?.salesRep
   || event?.meta?.managerName
   || event?.meta?.salesRepName
   || event?.meta?.manager
@@ -151,20 +157,29 @@ const eventLeadershipTeam = (event = {}) => {
 };
 
 export const slackEventUserGroupMembers = ({ event, userGroups = [] }) => {
-  const requestedNames = [...ALWAYS_INCLUDED_SLACK_GROUPS, ...(eventLeadershipTeam(event)?.slackGroupNames || [])];
-  const requested = new Set(requestedNames.map(normalize));
+  const leadershipTeam = eventLeadershipTeam(event);
+  const requestedGroups = [
+    ...ALWAYS_INCLUDED_SLACK_GROUPS,
+    ...(leadershipTeam?.slackGroupNames?.length ? [{
+      label: leadershipTeam.slackGroupLabel || leadershipTeam.slackGroupNames[0],
+      names: leadershipTeam.slackGroupNames,
+    }] : []),
+  ].map((group) => ({ ...group, normalizedNames: new Set(group.names.map(normalize)) }));
   const matchedGroups = [];
+  const matchedLabels = new Set();
   const userIds = [];
   userGroups.forEach((group) => {
     const names = [group?.name, group?.handle].map(normalize).filter(Boolean);
-    if (!names.some((name) => requested.has(name))) return;
+    const requestedGroup = requestedGroups.find((candidate) => names.some((name) => candidate.normalizedNames.has(name)));
+    if (!requestedGroup) return;
     matchedGroups.push(clean(group?.name || group?.handle));
+    matchedLabels.add(requestedGroup.label);
     userIds.push(...(Array.isArray(group?.users) ? group.users.map(clean).filter(Boolean) : []));
   });
   return {
     userIds: [...new Set(userIds)],
     matchedGroups,
-    missingGroups: requestedNames.filter((name) => !matchedGroups.some((matched) => normalize(matched) === normalize(name))),
+    missingGroups: requestedGroups.filter((group) => !matchedLabels.has(group.label)).map((group) => group.label),
   };
 };
 
@@ -349,6 +364,7 @@ export const runSlackEventChannelSync = async ({ now = new Date(), eventId = '',
         unmatchedWorkers: workers.unmatched,
         includedSlackGroups: groupMembers.matchedGroups,
         missingSlackGroups: groupMembers.missingGroups,
+        salesManager: eventManagerName(event),
         seriesStartDate,
         seriesEndDate,
         seriesEventIds: seriesEvents.map((seriesEvent) => String(seriesEvent._id)),

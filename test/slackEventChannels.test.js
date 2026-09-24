@@ -69,12 +69,12 @@ test('Slack group membership includes Leadership Team and the sales manager team
     event: { managerId: 'Olivier Cheng' },
     userGroups: [
       { name: 'Leadership Team', users: ['U1', 'U2'] },
-      { name: 'Team OC', users: ['U2', 'U3'] },
+      { name: 'teamOC', users: ['U2', 'U3'] },
       { name: 'Team George', users: ['U4'] },
     ],
   });
   assert.deepEqual(result.userIds, ['U1', 'U2', 'U3']);
-  assert.deepEqual(result.matchedGroups, ['Leadership Team', 'Team OC']);
+  assert.deepEqual(result.matchedGroups, ['Leadership Team', 'teamOC']);
   assert.deepEqual(result.missingGroups, []);
 });
 

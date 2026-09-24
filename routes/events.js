@@ -25,7 +25,7 @@ import { createMemoryRateLimiter } from '../middleware/rateLimit.js';
 import { clearApiCacheGroups, createGroupedApiCache } from '../utils/apiCache.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import { fetchNowstaImportRows, resolveNowstaSyncRange } from '../utils/nowstaApi.js';
-import { buildOperationsPeople, matchStaffByName } from '../utils/operationsRoster.js';
+import { buildOperationsPeople, matchStaffByName, normalizePersonName } from '../utils/operationsRoster.js';
 import { runWithTransactionFallback } from '../utils/mongoTransaction.js';
 import {
   importedEventMatchesSnapshot,

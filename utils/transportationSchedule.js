@@ -10,11 +10,13 @@ export const normalizeTransportationRoutes = (routes = []) => (
   (Array.isArray(routes) ? routes : []).slice(0, 250).map((route, index) => {
     const driverName = clean(route?.driverName, 240);
     const source = clean(route?.driverSource, 40).toLowerCase();
+    const deliveryRequired = route?.deliveryRequired !== false;
     return {
       ...(route?._id ? { _id: route._id } : {}),
       eventId: clean(route?.eventId, 120),
       eventTitle: clean(route?.eventTitle, 300),
       eventNumber: clean(route?.eventNumber, 120),
+      deliveryRequired,
       driverSource: ['staff', 'operations', 'nowsta'].includes(source) ? source : '',
       driverId: clean(route?.driverId, 120),
       driverName,
@@ -27,7 +29,7 @@ export const normalizeTransportationRoutes = (routes = []) => (
       pickupTime: cleanTime(route?.pickupTime),
       address: clean(route?.address, 600),
       notes: clean(route?.notes, 2_000),
-      status: route?.status === 'complete' ? 'complete' : driverName ? 'assigned' : 'unassigned',
+      status: !deliveryRequired ? 'not_required' : route?.status === 'complete' ? 'complete' : driverName ? 'assigned' : 'unassigned',
       sortOrder: index,
     };
   })

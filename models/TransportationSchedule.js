@@ -4,6 +4,7 @@ const transportationRouteSchema = new mongoose.Schema({
   eventId: { type: String, default: '', trim: true },
   eventTitle: { type: String, default: '', trim: true },
   eventNumber: { type: String, default: '', trim: true },
+  deliveryRequired: { type: Boolean, default: true },
   driverSource: { type: String, enum: ['', 'staff', 'operations', 'nowsta'], default: '' },
   driverId: { type: String, default: '', trim: true },
   driverName: { type: String, default: '', trim: true },
@@ -16,7 +17,7 @@ const transportationRouteSchema = new mongoose.Schema({
   pickupTime: { type: String, default: '', trim: true },
   address: { type: String, default: '', trim: true },
   notes: { type: String, default: '', trim: true },
-  status: { type: String, enum: ['unassigned', 'assigned', 'complete'], default: 'unassigned' },
+  status: { type: String, enum: ['not_required', 'unassigned', 'assigned', 'complete'], default: 'unassigned' },
   sortOrder: { type: Number, default: 0, min: 0 },
 }, { _id: true });
 

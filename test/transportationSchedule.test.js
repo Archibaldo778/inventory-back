@@ -27,3 +27,12 @@ test('transportation routes may be saved before a driver is assigned', () => {
   assert.equal(route.status, 'unassigned');
   assert.equal(route.callTime, '');
 });
+
+test('transportation routes retain a no-delivery decision', () => {
+  const [route] = normalizeTransportationRoutes([{
+    eventTitle: 'No delivery event',
+    deliveryRequired: false,
+  }]);
+  assert.equal(route.deliveryRequired, false);
+  assert.equal(route.status, 'not_required');
+});

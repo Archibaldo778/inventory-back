@@ -134,6 +134,20 @@ test('Slack event workers include only operational leadership and drivers', () =
   assert.deepEqual(result.matched.map((worker) => worker.id), ['U1', 'U2', 'U3', 'U4']);
 });
 
+test('Slack event workers include leadership from every day in a series and match Zak aliases', () => {
+  const result = matchSlackEventWorkers({
+    schedules: [
+      { shifts: [{ position: "Maitre D'", workers: [{ name: 'Maitre One', status: 'confirmed' }] }] },
+      { shifts: [{ position: 'Floor Captain', workers: [{ name: 'Zak', status: 'assigned' }] }] },
+    ],
+    slackUsers: [
+      { id: 'U1', profile: { real_name: 'Maitre One' } },
+      { id: 'U2', profile: { real_name: 'Zach Smith' } },
+    ],
+  });
+  assert.deepEqual(result.matched.map((worker) => worker.id), ['U1', 'U2']);
+});
+
 test('captain direct access goes only to confirmed or assigned captains', () => {
   const result = matchSlackEventCaptains({
     schedules: [{ shifts: [

@@ -23,7 +23,7 @@ const DEFAULT_EVENT_LEADERSHIP_TEAMS = [
   { managers: ['Emma'], slackGroupNames: [], assistants: [] },
 ];
 const ALWAYS_INCLUDED_SLACK_GROUPS = [{ label: 'Leadership Team', names: ['Leadership Team', 'leadershipTeam'] }];
-const EVENT_LEADERSHIP_POSITION = /(?:captain|lead\s+chef|ma[iî]tre\s*d|driver)/i;
+const EVENT_LEADERSHIP_POSITION = /(?:captain|floor\s+lead|lead\s+chef|ma[iî]tre(?:\s*['’]?\s*d)?|driver)/i;
 export const slackEventChannelsEnabled = () => /^(?:1|true|yes|on)$/i.test(clean(process.env.SLACK_EVENT_CHANNELS_ENABLED));
 const normalize = (value) => clean(value)
   .normalize('NFKD')
@@ -32,6 +32,11 @@ const normalize = (value) => clean(value)
   .replace(/[^a-z0-9]+/g, ' ')
   .trim()
   .replace(/\s+/g, ' ');
+
+const canonicalFirstName = (value) => {
+  const name = normalize(value);
+  return ['zak', 'zach', 'zack'].includes(name) ? 'zak' : name;
+};
 
 export const slackEventSeriesTitle = (value) => clean(value)
   .replace(/^\s*(?:20\d{2}[-/.])?\d{1,2}[-/.]\d{1,2}(?:[-/.]\d{2,4})?\s*[-–—:]?\s*/i, '')
@@ -90,7 +95,7 @@ const slackUserIndexes = (users = []) => {
         const current = byName.get(name) || [];
         current.push(user);
         byName.set(name, current);
-        const firstName = name.split(' ')[0];
+        const firstName = canonicalFirstName(name.split(' ')[0]);
         const firstNameMatches = byFirstName.get(firstName) || [];
         if (!firstNameMatches.some((item) => item.id === user.id)) firstNameMatches.push(user);
         byFirstName.set(firstName, firstNameMatches);
@@ -109,7 +114,7 @@ const matchSlackPeople = ({ people = [], slackUsers = [] }) => {
     const normalizedName = normalize(name);
     const exactNameMatches = byName.get(normalizedName) || [];
     const firstNameMatches = normalizedName && !normalizedName.includes(' ')
-      ? (byFirstName.get(normalizedName) || [])
+      ? (byFirstName.get(canonicalFirstName(normalizedName)) || [])
       : [];
     const match = (email ? byEmail.get(email) : null)
       || (exactNameMatches.length === 1 ? exactNameMatches[0] : null)
@@ -188,8 +193,9 @@ export const slackEventUserGroupMembers = ({ event, userGroups = [] }) => {
   };
 };
 
-export const matchSlackEventWorkers = ({ schedule, slackUsers }) => {
-  const people = (Array.isArray(schedule?.shifts) ? schedule.shifts : []).flatMap((shift) => (
+export const matchSlackEventWorkers = ({ schedule, schedules = [], slackUsers }) => {
+  const sourceSchedules = Array.isArray(schedules) && schedules.length ? schedules : [schedule].filter(Boolean);
+  const people = sourceSchedules.flatMap((sourceSchedule) => (Array.isArray(sourceSchedule?.shifts) ? sourceSchedule.shifts : []).flatMap((shift) => (
     (Array.isArray(shift?.workers) ? shift.workers : []).flatMap((worker) => {
       const status = clean(worker?.status).toLowerCase();
       const position = clean(shift?.position);
@@ -198,7 +204,7 @@ export const matchSlackEventWorkers = ({ schedule, slackUsers }) => {
         ? []
         : [{ name: clean(worker?.name), email: clean(worker?.email).toLowerCase() }];
     })
-  ));
+  )));
   return matchSlackPeople({ people, slackUsers });
 };
 
@@ -382,7 +388,7 @@ export const runSlackEventChannelSync = async ({ now = new Date(), eventId = '',
       const workers = mergeSlackMatches(
         groupMatches,
         matchSlackPeople({ people: eventLeadershipPeople(event), slackUsers }),
-        matchSlackEventWorkers({ schedule, slackUsers })
+        matchSlackEventWorkers({ schedules: scheduleSeries, slackUsers })
       );
       const previouslyInvited = new Set(Array.isArray(stored.invitedUserIds) ? stored.invitedUserIds.map(clean) : []);
       const inviteIds = workers.matched.map((worker) => worker.id).filter((id) => !previouslyInvited.has(id));

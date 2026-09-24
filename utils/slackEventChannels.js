@@ -98,19 +98,37 @@ const findEventForSchedule = async (schedule) => Event.findOne({
 
 let activeSlackSync = null;
 
-export const runSlackEventChannelSync = async ({ now = new Date() } = {}) => {
+export const runSlackEventChannelSync = async ({ now = new Date(), eventId = '', force = false } = {}) => {
   if (activeSlackSync) return activeSlackSync;
   activeSlackSync = (async () => {
     if (!clean(process.env.SLACK_BOT_TOKEN)) return { configured: false, processed: 0, created: 0, updated: 0, skipped: 0 };
-    if (!slackEventChannelsEnabled()) return { configured: true, enabled: false, processed: 0, created: 0, updated: 0, skipped: 0 };
+    if (!slackEventChannelsEnabled() && !force) return { configured: true, enabled: false, processed: 0, created: 0, updated: 0, skipped: 0 };
     const from = new Date(now.getTime() - DAY_MS);
     const through = new Date(now.getTime() + DAY_MS);
-    const schedules = await NowstaScheduleEntry.find({
-      entryType: 'event',
-      archived: false,
-      startsAt: { $gt: from, $lte: through },
-    }).sort({ startsAt: 1 }).lean();
-    if (!schedules.length) return { configured: true, enabled: true, processed: 0, created: 0, updated: 0, skipped: 0 };
+    const targetEvent = clean(eventId) ? await Event.findById(clean(eventId)).lean() : null;
+    if (clean(eventId) && !targetEvent) throw Object.assign(new Error('Event was not found'), { statusCode: 404 });
+    const targetNowstaId = clean(targetEvent?.meta?.nowsta?.apiEventId);
+    const targetExternalId = clean(targetEvent?.externalId);
+    const targetScheduleConditions = [
+      ...(targetNowstaId ? [{ nowstaEventId: targetNowstaId }] : []),
+      ...(targetExternalId ? [{ externalId: targetExternalId }] : []),
+    ];
+    if (targetEvent && !targetScheduleConditions.length) {
+      throw Object.assign(new Error('This event is not linked to a Nowsta schedule'), { statusCode: 409 });
+    }
+    const schedules = targetEvent
+      ? await NowstaScheduleEntry.find({
+          $or: targetScheduleConditions,
+        }).sort({ startsAt: 1 }).limit(1).lean()
+      : await NowstaScheduleEntry.find({
+          entryType: 'event',
+          archived: false,
+          startsAt: { $gt: from, $lte: through },
+        }).sort({ startsAt: 1 }).lean();
+    if (!schedules.length) {
+      if (targetEvent) throw Object.assign(new Error('This event has no matching Nowsta schedule'), { statusCode: 409 });
+      return { configured: true, enabled: slackEventChannelsEnabled(), processed: 0, created: 0, updated: 0, skipped: 0 };
+    }
 
     const [auth, slackUsers, slackChannels] = await Promise.all([
       slackAuthTest(),
@@ -118,10 +136,10 @@ export const runSlackEventChannelSync = async ({ now = new Date() } = {}) => {
       listSlackChannels(),
     ]);
     const channelsByName = new Map(slackChannels.map((channel) => [clean(channel?.name), channel]));
-    const summary = { configured: true, enabled: true, team: clean(auth?.team), processed: 0, created: 0, updated: 0, skipped: 0, unmatched: 0 };
+    const summary = { configured: true, enabled: slackEventChannelsEnabled(), manual: Boolean(targetEvent), team: clean(auth?.team), processed: 0, created: 0, updated: 0, skipped: 0, unmatched: 0, events: [] };
 
     for (const schedule of schedules) {
-      const event = await findEventForSchedule(schedule);
+      const event = targetEvent || await findEventForSchedule(schedule);
       if (!event) {
         summary.skipped += 1;
         continue;
@@ -164,6 +182,14 @@ export const runSlackEventChannelSync = async ({ now = new Date() } = {}) => {
       summary.unmatched += workers.unmatched.length;
       if (created) summary.created += 1;
       else summary.updated += 1;
+      summary.events.push({
+        eventId: String(event._id),
+        channelId: clean(channel.id),
+        channelName: clean(channel.name) || channelName,
+        channelUrl: `https://slack.com/app_redirect?channel=${encodeURIComponent(clean(channel.id))}`,
+        invited: inviteIds.length,
+        unmatched: workers.unmatched,
+      });
     }
     return summary;
   })();

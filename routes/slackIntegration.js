@@ -33,4 +33,12 @@ router.post('/sync', requireAuth, requireAdmin, async (_req, res) => {
   }
 });
 
+router.post('/events/:eventId/sync', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    return res.json(await runSlackEventChannelSync({ eventId: req.params.eventId, force: true }));
+  } catch (error) {
+    return res.status(Number(error?.statusCode) || 502).json({ error: error?.message || 'Slack event channel sync failed' });
+  }
+});
+
 export default router;

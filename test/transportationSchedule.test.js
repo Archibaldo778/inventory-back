@@ -6,8 +6,12 @@ test('transportation routes retain spreadsheet planning fields and derive assign
   const [route] = normalizeTransportationRoutes([{
     eventId: 'event-1',
     eventTitle: 'Prada Day 1',
+    taskSource: 'event',
     taskType: 'pickup',
     cargoType: 'Dry goods',
+    reviewStatus: 'confirmed',
+    reviewedAt: '2026-09-20T15:00:00.000Z',
+    sourceEventEnd: '2026-09-24T21:00:00.000Z',
     driverSource: 'operations',
     driverId: 'driver-72',
     driverName: 'Oleksandr Stupak',
@@ -22,8 +26,22 @@ test('transportation routes retain spreadsheet planning fields and derive assign
   assert.equal(route.status, 'assigned');
   assert.equal(route.taskType, 'pickup');
   assert.equal(route.cargoType, 'Dry goods');
+  assert.equal(route.reviewStatus, 'confirmed');
+  assert.equal(route.sourceEventEnd, '2026-09-24T21:00:00.000Z');
   assert.equal(route.vehicle, 'Edge (N19)');
   assert.equal(route.onSiteTime, '10:00');
+});
+
+test('transportation retains standalone side tasks without an event', () => {
+  const [route] = normalizeTransportationRoutes([{
+    taskSource: 'side',
+    taskTitle: 'Pick up rental van',
+    taskType: 'pickup',
+  }]);
+  assert.equal(route.taskSource, 'side');
+  assert.equal(route.taskTitle, 'Pick up rental van');
+  assert.equal(route.eventTitle, '');
+  assert.equal(route.reviewStatus, 'pending');
 });
 
 test('legacy transportation rows become delivery tasks', () => {

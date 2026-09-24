@@ -53,8 +53,8 @@ router.put('/:date', async (req, res) => {
     const date = String(req.params.date || '').trim();
     if (!DATE_PATTERN.test(date)) return res.status(400).json({ message: 'A valid transportation date is required' });
     const routes = normalizeTransportationRoutes(req.body?.routes);
-    if (routes.some((route) => !route.eventTitle)) {
-      return res.status(400).json({ message: 'Every transportation route needs an event name' });
+    if (routes.some((route) => route.taskSource === 'side' ? !route.taskTitle : !route.eventTitle)) {
+      return res.status(400).json({ message: 'Every transportation task needs an event or side-task name' });
     }
     const schedule = await TransportationSchedule.findOneAndUpdate(
       { date },

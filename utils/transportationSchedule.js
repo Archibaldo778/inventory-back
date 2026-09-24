@@ -12,12 +12,16 @@ export const normalizeTransportationRoutes = (routes = []) => (
     const source = clean(route?.driverSource, 40).toLowerCase();
     const deliveryRequired = route?.deliveryRequired !== false;
     const taskType = clean(route?.taskType, 40).toLowerCase();
+    const taskSource = clean(route?.taskSource, 20).toLowerCase() === 'side' ? 'side' : 'event';
+    const reviewStatus = clean(route?.reviewStatus, 20).toLowerCase() === 'confirmed' ? 'confirmed' : 'pending';
     return {
       ...(route?._id ? { _id: route._id } : {}),
       eventId: clean(route?.eventId, 120),
       eventTitle: clean(route?.eventTitle, 300),
       eventNumber: clean(route?.eventNumber, 120),
       eventVenue: clean(route?.eventVenue, 300),
+      taskSource,
+      taskTitle: clean(route?.taskTitle, 300),
       deliveryRequired,
       taskType: ['delivery', 'pickup', 'return', 'other'].includes(taskType) ? taskType : 'delivery',
       cargoType: clean(route?.cargoType, 160),
@@ -33,6 +37,13 @@ export const normalizeTransportationRoutes = (routes = []) => (
       pickupTime: cleanTime(route?.pickupTime),
       address: clean(route?.address, 600),
       notes: clean(route?.notes, 2_000),
+      reviewStatus,
+      reviewedAt: reviewStatus === 'confirmed' && route?.reviewedAt ? route.reviewedAt : null,
+      reviewedWarningKey: reviewStatus === 'confirmed' ? clean(route?.reviewedWarningKey, 1_000) : '',
+      sourceEventStart: clean(route?.sourceEventStart, 120),
+      sourceEventEnd: clean(route?.sourceEventEnd, 120),
+      sourceAddress: clean(route?.sourceAddress, 600),
+      sourceStaffFingerprint: clean(route?.sourceStaffFingerprint, 8_000),
       status: !deliveryRequired ? 'not_required' : route?.status === 'complete' ? 'complete' : driverName ? 'assigned' : 'unassigned',
       sortOrder: index,
     };

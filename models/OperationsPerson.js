@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 const operationsPersonSchema = new mongoose.Schema({
   nowstaCompanyUserId: { type: String, required: true, unique: true, trim: true, index: true },
   fullName: { type: String, required: true, trim: true, index: true },
+  normalizedName: { type: String, default: '', trim: true, index: true },
   firstName: { type: String, default: '', trim: true },
   lastName: { type: String, default: '', trim: true },
   email: { type: String, default: '', trim: true, lowercase: true },

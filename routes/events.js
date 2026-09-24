@@ -767,6 +767,7 @@ export const runNowstaSync = async ({ from, to, actor } = {}) => {
               update: {
                 $set: {
                   ...syncedPerson,
+                  normalizedName: normalizePersonName(person.fullName),
                   sourceRoles: roles,
                   sourceEmail: email,
                   sourcePhone: phone,

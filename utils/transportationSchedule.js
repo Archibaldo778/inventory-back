@@ -16,6 +16,7 @@ export const normalizeTransportationRoutes = (routes = []) => (
       eventId: clean(route?.eventId, 120),
       eventTitle: clean(route?.eventTitle, 300),
       eventNumber: clean(route?.eventNumber, 120),
+      eventVenue: clean(route?.eventVenue, 300),
       deliveryRequired,
       driverSource: ['staff', 'operations', 'nowsta'].includes(source) ? source : '',
       driverId: clean(route?.driverId, 120),

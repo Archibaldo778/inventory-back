@@ -1,12 +1,15 @@
 import { Router } from 'express';
 import mongoose from 'mongoose';
+import multer from 'multer';
 import NowstaScheduleEntry from '../models/NowstaScheduleEntry.js';
 import OperationsPerson from '../models/OperationsPerson.js';
 import Staff from '../models/Staff.js';
 import { matchStaffByName, normalizePersonName, staffFullName } from '../utils/operationsRoster.js';
+import { parseOperationsDriversWorkbook } from '../utils/operationsDriverWorkbook.js';
 import { sendApiError } from '../utils/apiErrors.js';
 
 const router = Router();
+const workbookUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 const clean = (value, maxLength = 500) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, maxLength);
 const cleanList = (value, maxItems = 20) => [...new Set(
   (Array.isArray(value) ? value : []).map((item) => clean(item, 160)).filter(Boolean)
@@ -15,14 +18,70 @@ const cleanList = (value, maxItems = 20) => [...new Set(
 router.get('/people', async (req, res) => {
   try {
     const includeInactive = String(req.query?.includeInactive || '') === 'true';
+    const includeStaff = String(req.query?.includeStaff || '') === 'true';
     const [people, staff] = await Promise.all([
       OperationsPerson.find(includeInactive ? {} : { active: true }).sort({ fullName: 1 }).lean(),
       Staff.find({}).select('firstName lastName positions active photo').lean(),
     ]);
     const staffNames = new Set(staff.map((person) => normalizePersonName(staffFullName(person))).filter(Boolean));
-    return res.json(people.filter((person) => !staffNames.has(normalizePersonName(person.fullName))));
+    return res.json(includeStaff ? people : people.filter((person) => !staffNames.has(normalizePersonName(person.fullName))));
   } catch (error) {
     return sendApiError(res, error, { context: 'Operations people list failed', fallbackMessage: 'Unable to load operations people' });
+  }
+});
+
+router.post('/people', async (req, res) => {
+  try {
+    const fullName = clean(req.body?.fullName, 240);
+    if (!fullName) return res.status(400).json({ message: 'Driver name is required' });
+    const normalizedName = normalizePersonName(fullName);
+    const parts = fullName.split(/\s+/);
+    const person = await OperationsPerson.findOneAndUpdate(
+      { $or: [{ normalizedName }, { fullName }] },
+      {
+        $set: {
+          fullName,
+          normalizedName,
+          firstName: parts.shift() || '',
+          lastName: parts.join(' '),
+          email: clean(req.body?.email, 240).toLowerCase(),
+          phone: clean(req.body?.phone, 80),
+          roles: ['Driver'],
+          active: true,
+          lastSeenAt: new Date(),
+        },
+        $setOnInsert: { nowstaCompanyUserId: `manual:${normalizedName}` },
+      },
+      { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true }
+    );
+    return res.status(201).json(person);
+  } catch (error) {
+    return sendApiError(res, error, { context: 'Operations driver creation failed', fallbackMessage: 'Unable to create driver' });
+  }
+});
+
+router.post('/people/import', workbookUpload.single('file'), async (req, res) => {
+  try {
+    if (!req.file?.buffer) return res.status(400).json({ message: 'Excel file is required' });
+    const people = await parseOperationsDriversWorkbook(req.file.buffer);
+    if (!people.length) return res.status(400).json({ message: 'No drivers were found in drivers info' });
+    await OperationsPerson.bulkWrite(people.map((person) => {
+      const fullName = clean(`${person.firstName} ${person.lastName}`, 240);
+      const normalizedName = normalizePersonName(fullName);
+      return {
+        updateOne: {
+          filter: { $or: [{ normalizedName }, { fullName }] },
+          update: {
+            $set: { ...person, fullName, normalizedName, roles: ['Driver'], active: true, lastSeenAt: new Date() },
+            $setOnInsert: { nowstaCompanyUserId: `manual:${normalizedName}` },
+          },
+          upsert: true,
+        },
+      };
+    }), { ordered: false });
+    return res.json({ imported: people.length });
+  } catch (error) {
+    return sendApiError(res, error, { context: 'Operations driver import failed', fallbackMessage: 'Unable to import drivers' });
   }
 });
 

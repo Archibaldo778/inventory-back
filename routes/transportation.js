@@ -2,6 +2,7 @@ import { Router } from 'express';
 import TransportationSchedule from '../models/TransportationSchedule.js';
 import { TransportationVehicle, TransportationVenue } from '../models/TransportationResource.js';
 import { normalizeTransportationRoutes } from '../utils/transportationSchedule.js';
+import { buildDriverRoutePreview } from '../utils/googleRoutes.js';
 import { sendApiError } from '../utils/apiErrors.js';
 
 const router = Router();
@@ -34,6 +35,22 @@ router.put('/venues/address', async (req, res) => {
     return res.json(venue);
   } catch (error) {
     return sendApiError(res, error, { context: 'Transportation venue update failed', fallbackMessage: 'Unable to save service address' });
+  }
+});
+
+router.post('/route-preview', async (req, res) => {
+  try {
+    const date = String(req.body?.date || '').trim();
+    if (!DATE_PATTERN.test(date)) return res.status(400).json({ message: 'A valid transportation date is required' });
+    const driver = req.body?.driver || {};
+    const routes = normalizeTransportationRoutes(driver.routes);
+    if (!clean(driver.name, 240) || !routes.length) {
+      return res.status(400).json({ message: 'A driver with at least one transportation task is required' });
+    }
+    const preview = await buildDriverRoutePreview({ date, driver: { ...driver, routes } });
+    return res.json(preview);
+  } catch (error) {
+    return sendApiError(res, error, { context: 'Google transportation route preview failed', fallbackMessage: 'Unable to calculate this driver route' });
   }
 });
 

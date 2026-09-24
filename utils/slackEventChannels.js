@@ -122,6 +122,7 @@ const eventManagerName = (event = {}) => clean(
   || event.salesRepName
   || event.managerName
   || event?.catereaseOperations?.salesRep
+  || event?.catereaseOperations?.snapshot?.salesRep
   || event?.meta?.salesRep
   || event?.meta?.catereaseOperations?.salesRep
   || event?.meta?.catereaseSnapshot?.salesRep

@@ -70,6 +70,8 @@ test('Nowsta salesperson accepts names, nested people, and company user ids', ()
   assert.equal(nowstaEventSalesperson({ salesperson_name: 'Oliver Cheng' }, people), 'Oliver Cheng');
   assert.equal(nowstaEventSalesperson({ salesperson: { first_name: 'George', last_name: 'Smith' } }, people), 'George Smith');
   assert.equal(nowstaEventSalesperson({ salesperson_id: 15 }, people), 'Oliver Cheng');
+  assert.equal(nowstaEventSalesperson({ salesperson: 15 }, people), 'Oliver Cheng');
+  assert.equal(nowstaEventSalesperson({ details: { event_sales_contact: { company_user_id: 15 } } }, people), 'Oliver Cheng');
 });
 
 test('Nowsta rows resolve addresses from a referenced venue', () => {

@@ -150,6 +150,33 @@ const personEmail = (person) => clean(
   240
 ).toLowerCase();
 
+const salespersonValueName = (value, people = new Map()) => {
+  if (value === null || value === undefined || value === '') return '';
+  if (typeof value === 'number') return personName(people.get(String(value)));
+  if (typeof value === 'string') {
+    const byId = personName(people.get(value));
+    return byId || (/^\d+$/.test(value) ? '' : clean(value, 240));
+  }
+  if (typeof value !== 'object' || Array.isArray(value)) return '';
+  const directName = personName(value) || clean(value.full_name || value.name || value.display_name, 240);
+  if (directName) return directName;
+  return personName(people.get(String(value.company_user_id ?? value.user_id ?? value.id ?? '')));
+};
+
+const deepSalespersonValues = (source, depth = 0, seen = new Set()) => {
+  if (!source || typeof source !== 'object' || depth > 3 || seen.has(source)) return [];
+  seen.add(source);
+  const matches = [];
+  Object.entries(source).forEach(([key, value]) => {
+    const normalizedKey = key.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+    if (/(?:sales.*(?:person|rep|representative|contact)|(?:account|event).*manager)/i.test(normalizedKey)) {
+      matches.push({ key: normalizedKey, value });
+    }
+    if (value && typeof value === 'object') matches.push(...deepSalespersonValues(value, depth + 1, seen));
+  });
+  return matches;
+};
+
 export const nowstaEventSalesperson = (event = {}, people = new Map()) => {
   const direct = clean(
     event.salesperson_name
@@ -164,24 +191,37 @@ export const nowstaEventSalesperson = (event = {}, people = new Map()) => {
     || event.sales_person
     || event.sales_rep
     || event.sales_representative
-    || event.account_manager;
-  if (typeof nested === 'string') return clean(nested, 240);
-  if (nested && typeof nested === 'object') {
-    const nestedName = personName(nested) || clean(nested.full_name || nested.name || nested.display_name, 240);
-    if (nestedName) return nestedName;
-  }
+    || event.account_manager
+    || event.salesperson_company_user
+    || event.sales_person_company_user;
+  const nestedName = salespersonValueName(nested, people);
+  if (nestedName) return nestedName;
   const personId = String(
     event.salesperson_id
     ?? event.sales_person_id
     ?? event.sales_rep_id
     ?? event.salesperson_company_user_id
     ?? event.sales_person_company_user_id
+    ?? event.salesperson_user_id
+    ?? event.sales_person_user_id
     ?? event.account_manager_id
     ?? nested?.id
     ?? nested?.company_user_id
     ?? ''
   );
-  return personName(people.get(personId));
+  const personIdName = personName(people.get(personId));
+  if (personIdName) return personIdName;
+  const candidates = deepSalespersonValues(event)
+    .filter(({ key }) => !/(?:email|phone|note|status)/i.test(key))
+    .sort((left, right) => {
+      const priority = (item) => /name/.test(item.key) ? 0 : typeof item.value === 'object' ? 1 : /id/.test(item.key) ? 2 : 3;
+      return priority(left) - priority(right);
+    });
+  for (const candidate of candidates) {
+    const candidateName = salespersonValueName(candidate.value, people);
+    if (candidateName) return candidateName;
+  }
+  return '';
 };
 
 const venueMap = (venues = []) => new Map((Array.isArray(venues) ? venues : [])

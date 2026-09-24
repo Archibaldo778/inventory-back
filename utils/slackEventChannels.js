@@ -1,6 +1,7 @@
 import Event from '../models/Event.js';
 import Staff from '../models/Staff.js';
 import NowstaScheduleEntry from '../models/NowstaScheduleEntry.js';
+import EventReport from '../models/EventReport.js';
 import {
   createSlackPrivateChannel,
   inviteSlackUsers,
@@ -122,7 +123,7 @@ const matchSlackPeople = ({ people = [], slackUsers = [], linkedSlackByNowstaId 
       || (email ? byEmail.get(email) : null)
       || (exactNameMatches.length === 1 ? exactNameMatches[0] : null)
       || (firstNameMatches.length === 1 ? firstNameMatches[0] : null);
-    if (match?.id) matched.set(match.id, { id: match.id, name, email });
+    if (match?.id) matched.set(match.id, { ...person, id: match.id, name, email });
     else if (name || email) unmatched.set(`${normalizedName}:${email}`, { name, email });
   });
   return { matched: [...matched.values()], unmatched: [...unmatched.values()] };
@@ -226,6 +227,30 @@ export const matchSlackEventCaptains = ({ schedules = [], slackUsers, linkedSlac
   return matchSlackPeople({ people, slackUsers, linkedSlackByNowstaId });
 };
 
+const eligibleShiftPeople = (schedules, positionPattern) => (Array.isArray(schedules) ? schedules : []).flatMap((schedule) => (
+  (Array.isArray(schedule?.shifts) ? schedule.shifts : []).flatMap((shift) => {
+    const position = clean(shift?.position);
+    if (!positionPattern.test(position)) return [];
+    return (Array.isArray(shift?.workers) ? shift.workers : []).flatMap((worker) => {
+      const status = clean(worker?.status).toLowerCase();
+      return status && !['assigned', 'confirmed'].includes(status) ? [] : [{
+        companyUserId: clean(worker?.companyUserId), name: clean(worker?.name), email: clean(worker?.email).toLowerCase(), position,
+      }];
+    });
+  })
+));
+
+export const matchSlackBarReturnRecipients = ({ schedules = [], slackUsers, linkedSlackByNowstaId = new Map() }) => {
+  const barCaptains = eligibleShiftPeople(schedules, /\bbar\s+captain\b/i);
+  const people = barCaptains.length ? barCaptains : eligibleShiftPeople(schedules, /\bcaptain\b/i);
+  return matchSlackPeople({ people, slackUsers, linkedSlackByNowstaId });
+};
+
+export const matchSlackEventReporters = ({ schedules = [], slackUsers, linkedSlackByNowstaId = new Map() }) => {
+  const people = eligibleShiftPeople(schedules, /(?:\bcaptain\b|lead\s+chef|ma[iî]tre(?:\s*['’]?\s*d)?)/i);
+  return matchSlackPeople({ people, slackUsers, linkedSlackByNowstaId });
+};
+
 const mergeSlackMatches = (...groups) => ({
   matched: [...new Map(groups.flatMap((group) => group.matched).map((person) => [person.id, person])).values()],
   unmatched: [...new Map(groups.flatMap((group) => group.unmatched).map((person) => [`${normalize(person.name)}:${clean(person.email).toLowerCase()}`, person])).values()],
@@ -247,6 +272,14 @@ const captainBarUrl = (event, seriesEvents = [], endDate = '') => {
   const eventIds = (seriesEvents.length ? seriesEvents : [event]).map((item) => String(item?._id || '')).filter(Boolean);
   const token = issueEventGuestAccess({ eventIds, capability: 'bar:returns', expiresAt: guestExpiry(endDate || event.date) });
   return `${frontendBaseUrl()}/bar/returns?event=${encodeURIComponent(String(event._id))}&access=${encodeURIComponent(token)}`;
+};
+
+const eventReportUrl = (event, slackUserId, eventEndsAt) => {
+  const token = issueEventGuestAccess({
+    eventIds: [String(event._id)], capability: 'event:report', subjectId: slackUserId,
+    expiresAt: new Date((new Date(eventEndsAt || event.date).getTime() || Date.now()) + (120 * DAY_MS)),
+  });
+  return `${frontendBaseUrl()}/event-report/${encodeURIComponent(String(event._id))}?access=${encodeURIComponent(token)}`;
 };
 
 const formatSeriesDateRange = (startDate, endDate) => {
@@ -410,23 +443,65 @@ export const runSlackEventChannelSync = async ({ now = new Date(), eventId = '',
       } else {
         await updateSlackMessage({ channel: channel.id, timestamp: messageTs, ...currentMessage });
       }
-      const captains = matchSlackEventCaptains({ schedules: scheduleSeries, slackUsers, linkedSlackByNowstaId });
-      const captainLinksSent = new Set(Array.isArray(stored.captainLinksSentUserIds) ? stored.captainLinksSentUserIds.map(clean) : []);
-      const newCaptains = captains.matched.filter((captain) => !captainLinksSent.has(captain.id));
-      const barUrl = captainBarUrl(primaryEvent, seriesEvents, seriesEndDate);
-      for (const captain of newCaptains) {
-        try {
-          await postSlackMessage({
-            channel: captain.id,
-            text: `Captain access for ${slackEventSeriesTitle(primaryEvent.title) || primaryEvent.title}: ${barUrl}`,
-            blocks: [
-              { type: 'section', text: { type: 'mrkdwn', text: `*Captain Bar Returns*\n${slackEventSeriesTitle(primaryEvent.title) || primaryEvent.title} · ${formatSeriesDateRange(seriesStartDate, seriesEndDate)}` } },
-              { type: 'actions', elements: [{ type: 'button', text: { type: 'plain_text', text: 'Open Bar Returns' }, url: barUrl, action_id: 'open_captain_bar_returns' }] },
-            ],
-          });
-          captainLinksSent.add(captain.id);
-        } catch (error) {
-          console.warn(`Slack captain link could not be sent to ${captain.id}: ${error?.slackCode || error?.message || 'unknown error'}`);
+      const barLinksSent = new Set(Array.isArray(stored.barLinksSentKeys) ? stored.barLinksSentKeys.map(clean) : []);
+      const reportRequestKeys = new Set(Array.isArray(stored.eventReportRequestKeys) ? stored.eventReportRequestKeys.map(clean) : []);
+      for (const seriesSchedule of scheduleSeries) {
+        const seriesEvent = seriesEvents.find((candidate) => clean(candidate?.meta?.nowsta?.apiEventId) === clean(seriesSchedule?.nowstaEventId))
+          || (clean(seriesSchedule?.externalId) ? seriesEvents.find((candidate) => clean(candidate?.externalId) === clean(seriesSchedule.externalId)) : null);
+        if (!seriesEvent) continue;
+        const startsAt = new Date(seriesSchedule?.startsAt || `${seriesSchedule?.date}T12:00:00`).getTime();
+        if (!force && Number.isFinite(startsAt) && startsAt > now.getTime() + DAY_MS) continue;
+        const eventEndsAt = seriesSchedule?.endsAt || `${seriesSchedule?.date}T23:59:59-04:00`;
+        const barRecipients = matchSlackBarReturnRecipients({ schedules: [seriesSchedule], slackUsers, linkedSlackByNowstaId });
+        const barUrl = captainBarUrl(seriesEvent, [seriesEvent], seriesSchedule.date);
+        for (const captain of barRecipients.matched) {
+          const sentKey = `${seriesEvent._id}:${captain.id}`;
+          if (barLinksSent.has(sentKey)) continue;
+          try {
+            await postSlackMessage({
+              channel: captain.id,
+              text: `Bar Returns access for ${seriesEvent.title}: ${barUrl}`,
+              blocks: [
+                { type: 'section', text: { type: 'mrkdwn', text: `*Bar Returns*\n${seriesEvent.title} · ${formatSeriesDateRange(seriesSchedule.date, seriesSchedule.date)}\nPlease confirm received quantities and enter the returns after the event.` } },
+                { type: 'actions', elements: [{ type: 'button', text: { type: 'plain_text', text: 'Open Bar Returns' }, url: barUrl, action_id: 'open_captain_bar_returns' }] },
+              ],
+            });
+            barLinksSent.add(sentKey);
+          } catch (error) {
+            console.warn(`Slack bar returns link could not be sent to ${captain.id}: ${error?.slackCode || error?.message || 'unknown error'}`);
+          }
+        }
+
+        const reporters = matchSlackEventReporters({ schedules: [seriesSchedule], slackUsers, linkedSlackByNowstaId });
+        for (const reporter of reporters.matched) {
+          const requestKey = `${seriesEvent._id}:${reporter.id}`;
+          const report = await EventReport.findOneAndUpdate(
+            { eventId: seriesEvent._id, slackUserId: reporter.id },
+            { $setOnInsert: {
+              nowstaEventId: clean(seriesSchedule.nowstaEventId), eventTitle: clean(seriesEvent.title), eventDate: clean(seriesSchedule.date),
+              eventEndsAt: new Date(eventEndsAt), slackUserId: reporter.id, reporterName: reporter.name,
+              reporterEmail: reporter.email, position: clean(reporter.position), status: 'pending',
+              nextReminderAt: new Date(new Date(eventEndsAt).getTime() + DAY_MS),
+            } },
+            { upsert: true, new: true, setDefaultsOnInsert: true }
+          );
+          if (report.status === 'submitted' || report.requestSentAt || reportRequestKeys.has(requestKey)) continue;
+          const reportUrl = eventReportUrl(seriesEvent, reporter.id, eventEndsAt);
+          try {
+            await postSlackMessage({
+              channel: reporter.id,
+              text: `Event report for ${seriesEvent.title}: ${reportUrl}`,
+              blocks: [
+                { type: 'section', text: { type: 'mrkdwn', text: `*Event Report*\n${seriesEvent.title} · ${formatSeriesDateRange(seriesSchedule.date, seriesSchedule.date)}\nPlease complete your report after the event.` } },
+                { type: 'actions', elements: [{ type: 'button', text: { type: 'plain_text', text: 'Complete Event Report' }, url: reportUrl, action_id: 'open_event_report' }] },
+              ],
+            });
+            report.requestSentAt = new Date();
+            await report.save();
+            reportRequestKeys.add(requestKey);
+          } catch (error) {
+            console.warn(`Slack event report link could not be sent to ${reporter.id}: ${error?.slackCode || error?.message || 'unknown error'}`);
+          }
         }
       }
       const invitedUserIds = [...new Set([...previouslyInvited, ...workers.matched.map((worker) => worker.id)])];
@@ -436,7 +511,8 @@ export const runSlackEventChannelSync = async ({ now = new Date(), eventId = '',
         channelUrl: `https://slack.com/app_redirect?channel=${encodeURIComponent(clean(channel.id))}`,
         messageTs,
         invitedUserIds,
-        captainLinksSentUserIds: [...captainLinksSent],
+        barLinksSentKeys: [...barLinksSent],
+        eventReportRequestKeys: [...reportRequestKeys],
         unmatchedWorkers: workers.unmatched,
         includedSlackGroups: groupMembers.matchedGroups,
         missingSlackGroups: groupMembers.missingGroups,
@@ -477,4 +553,39 @@ export const runSlackEventChannelSync = async ({ now = new Date(), eventId = '',
   } finally {
     activeSlackSync = null;
   }
+};
+
+export const runSlackEventReportReminders = async ({ now = new Date() } = {}) => {
+  if (!clean(process.env.SLACK_BOT_TOKEN)) return { configured: false, sent: 0, failed: 0 };
+  const pending = await EventReport.find({
+    status: 'pending', requestSentAt: { $ne: null }, nextReminderAt: { $ne: null, $lte: now },
+  }).sort({ nextReminderAt: 1 }).limit(200);
+  const eventIds = [...new Set(pending.map((report) => String(report.eventId)))];
+  const events = await Event.find({ _id: { $in: eventIds } }).select('_id title date').lean();
+  const eventsById = new Map(events.map((event) => [String(event._id), event]));
+  const summary = { configured: true, sent: 0, failed: 0 };
+  for (const report of pending) {
+    const event = eventsById.get(String(report.eventId));
+    if (!event) continue;
+    const url = eventReportUrl(event, report.slackUserId, report.eventEndsAt || event.date);
+    try {
+      await postSlackMessage({
+        channel: report.slackUserId,
+        text: `Reminder: event report for ${report.eventTitle}: ${url}`,
+        blocks: [
+          { type: 'section', text: { type: 'mrkdwn', text: `*Event Report Reminder*\nThe report for ${report.eventTitle} is still waiting for your response.` } },
+          { type: 'actions', elements: [{ type: 'button', text: { type: 'plain_text', text: 'Complete Event Report' }, url, action_id: 'open_event_report_reminder' }] },
+        ],
+      });
+      report.lastReminderAt = now;
+      report.nextReminderAt = new Date(now.getTime() + DAY_MS);
+      report.reminderCount = Number(report.reminderCount || 0) + 1;
+      await report.save();
+      summary.sent += 1;
+    } catch (error) {
+      summary.failed += 1;
+      console.warn(`Slack event report reminder failed for ${report.slackUserId}: ${error?.slackCode || error?.message || 'unknown error'}`);
+    }
+  }
+  return summary;
 };

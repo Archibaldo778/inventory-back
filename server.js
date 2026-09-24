@@ -451,6 +451,8 @@ import toolsRoutes from './routes/tools.js';
 import barRoutes from './routes/bar.js';
 import publicBarReturnsRoutes from './routes/publicBarReturns.js';
 import publicEventWorkspaceRoutes from './routes/publicEventWorkspace.js';
+import publicEventReportsRoutes from './routes/publicEventReports.js';
+import eventReportsRoutes from './routes/eventReports.js';
 import dropboxIntegrationRoutes, { runDropboxDiscoverySync } from './routes/dropboxIntegration.js';
 import catereaseIntegrationRoutes, {
   runCatereaseFileSync,
@@ -462,7 +464,7 @@ import nowstaScheduleRoutes from './routes/nowstaSchedule.js';
 import operationsRoutes from './routes/operations.js';
 import transportationRoutes from './routes/transportation.js';
 import slackIntegrationRoutes from './routes/slackIntegration.js';
-import { runSlackEventChannelSync, slackEventChannelsEnabled } from './utils/slackEventChannels.js';
+import { runSlackEventChannelSync, runSlackEventReportReminders, slackEventChannelsEnabled } from './utils/slackEventChannels.js';
 import { getCatereaseConfig } from './utils/catereaseApi.js';
 
 app.use('/api/auth', authRoutes);
@@ -492,6 +494,8 @@ app.use('/api/proposal-templates', requireAuth, requireProposalTemplateAccess, p
 app.use('/api/tools', requireAuth, requireAdmin, toolsRoutes);
 app.use('/api/public/bar-returns', publicBarReturnsRoutes);
 app.use('/api/public/event-workspace', publicEventWorkspaceRoutes);
+app.use('/api/public/event-reports', publicEventReportsRoutes);
+app.use('/api/event-reports', requireAuth, requireAdmin, eventReportsRoutes);
 app.use('/api/bar', requireAuth, barRoutes);
 app.use('/api/integrations/dropbox', dropboxIntegrationRoutes);
 app.use('/api/integrations/caterease', catereaseIntegrationRoutes);
@@ -710,8 +714,12 @@ export const startServer = async () => {
     const intervalMinutes = Number.isFinite(configuredMinutes)
       ? Math.max(5, Math.min(60, Math.trunc(configuredMinutes)))
       : 15;
-    const syncSlack = () => runSlackEventChannelSync({ existingOnly: !slackEventChannelsEnabled() }).then((summary) => {
+    const syncSlack = () => Promise.all([
+      runSlackEventChannelSync({ existingOnly: !slackEventChannelsEnabled() }),
+      runSlackEventReportReminders(),
+    ]).then(([summary, reminders]) => {
       console.log('✅ Slack event channel sync completed', summary);
+      if (reminders.sent || reminders.failed) console.log('✅ Slack event report reminders processed', reminders);
     }).catch((error) => {
       console.error('Slack event channel sync failed:', error?.message || error);
     });

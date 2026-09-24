@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 
 import {
   eventLeadershipPeople,
+  matchSlackBarReturnRecipients,
   matchSlackEventCaptains,
+  matchSlackEventReporters,
   matchSlackEventWorkers,
   slackEventChannelName,
   slackEventSeriesKey,
@@ -163,6 +165,46 @@ test('captain direct access goes only to confirmed or assigned captains', () => 
     ],
   });
   assert.deepEqual(result.matched.map((worker) => worker.id), ['U1', 'U2']);
+});
+
+test('bar returns prefer bar captains and fall back to regular captains', () => {
+  const slackUsers = [
+    { id: 'UBAR', profile: { real_name: 'Bar Captain' } },
+    { id: 'UFLOOR', profile: { real_name: 'Floor Captain' } },
+  ];
+  const withBarCaptain = matchSlackBarReturnRecipients({
+    schedules: [{ shifts: [
+      { position: 'Bar Captain', workers: [{ name: 'Bar Captain', status: 'confirmed' }] },
+      { position: 'Floor Captain', workers: [{ name: 'Floor Captain', status: 'confirmed' }] },
+    ] }],
+    slackUsers,
+  });
+  assert.deepEqual(withBarCaptain.matched.map((worker) => worker.id), ['UBAR']);
+
+  const withoutBarCaptain = matchSlackBarReturnRecipients({
+    schedules: [{ shifts: [{ position: 'Captain - Working', workers: [{ name: 'Floor Captain', status: 'assigned' }] }] }],
+    slackUsers,
+  });
+  assert.deepEqual(withoutBarCaptain.matched.map((worker) => worker.id), ['UFLOOR']);
+});
+
+test('event reports go to captains, maitre d and lead chefs only', () => {
+  const result = matchSlackEventReporters({
+    schedules: [{ shifts: [
+      { position: 'Floor Captain', workers: [{ name: 'Captain One', status: 'confirmed' }] },
+      { position: "Maitre D'", workers: [{ name: 'Maitre One', status: 'assigned' }] },
+      { position: 'Lead Chef', workers: [{ name: 'Chef One', status: 'confirmed' }] },
+      { position: 'Driver', workers: [{ name: 'Driver One', status: 'confirmed' }] },
+    ] }],
+    slackUsers: [
+      { id: 'U1', profile: { real_name: 'Captain One' } },
+      { id: 'U2', profile: { real_name: 'Maitre One' } },
+      { id: 'U3', profile: { real_name: 'Chef One' } },
+      { id: 'U4', profile: { real_name: 'Driver One' } },
+    ],
+  });
+  assert.deepEqual(result.matched.map((worker) => worker.id), ['U1', 'U2', 'U3']);
+  assert.deepEqual(result.matched.map((worker) => worker.position), ['Floor Captain', "Maitre D'", 'Lead Chef']);
 });
 
 test('saved Nowsta to Slack link overrides different email and display name', () => {

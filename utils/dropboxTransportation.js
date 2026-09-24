@@ -98,6 +98,13 @@ const titleScore = (left, right) => {
   const aTokens = new Set(a.split(' '));
   const bTokens = new Set(b.split(' '));
   const intersection = [...aTokens].filter((token) => bTokens.has(token)).length;
+  // Caterease/Nowsta can expand a concise Transportation title with extra
+  // identifying words. For example, "Prada Donna Appts" belongs to
+  // "Prada Donna and Uomo Appts", not the neighboring "Prada Uomo Appts".
+  // Treat a complete token subset as a strong match even when the shared
+  // words are not contiguous in the longer title.
+  const smallerSize = Math.min(aTokens.size, bTokens.size);
+  if (smallerSize >= 3 && intersection === smallerSize) return 0.95;
   return intersection / Math.max(aTokens.size, bTokens.size);
 };
 

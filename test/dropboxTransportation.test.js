@@ -88,3 +88,22 @@ test('transportation matching never assigns two source groups to one event', () 
   assert.equal(result.matches.length, 1);
   assert.equal(result.unmatched.length, 1);
 });
+
+test('transportation matching distinguishes Donna and Uomo events', () => {
+  const result = matchTransportationToEvents([
+    { eventName: 'Prada Donna Appts - DAY 1', driver: 'Donna Driver' },
+    { eventName: 'Prada Uomo Appts - DAY1', driver: 'Uomo Driver' },
+  ], [
+    { _id: 'event-donna', title: 'Prada Donna and Uomo Appts - DAY 1' },
+    { _id: 'event-uomo', title: 'Prada Uomo Appts- Day 1' },
+  ]);
+
+  assert.equal(result.unmatched.length, 0);
+  assert.equal(result.matches.length, 2);
+  const donnaMatch = result.matches.find((match) => match.event._id === 'event-donna');
+  const uomoMatch = result.matches.find((match) => match.event._id === 'event-uomo');
+  assert.equal(donnaMatch?.sourceEventName, 'Prada Donna Appts - DAY 1');
+  assert.equal(donnaMatch?.drivers[0]?.name, 'Donna Driver');
+  assert.equal(uomoMatch?.sourceEventName, 'Prada Uomo Appts - DAY1');
+  assert.equal(uomoMatch?.drivers[0]?.name, 'Uomo Driver');
+});

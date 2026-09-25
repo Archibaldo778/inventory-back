@@ -7,6 +7,15 @@ const escapeHtml = (value) => clean(value).replace(/[&<>"']/g, (character) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 }[character]));
 
+const formatEventDate = (value) => {
+  const normalized = clean(value, 40);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return normalized;
+  const [year, month, day] = normalized.split('-').map(Number);
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC',
+  }).format(new Date(Date.UTC(year, month - 1, day)));
+};
+
 export const EVENT_REPORT_EMAIL_SECTIONS = [
   ['Staff', [
     ['staffEnough', 'Enough staff'], ['staffingResponsive', 'Staffing Department responsive'], ['staffingComments', 'Staffing comments'],
@@ -42,14 +51,56 @@ export const EVENT_REPORT_EMAIL_SECTIONS = [
 export const renderEventReportEmail = (report = {}) => {
   const answers = report.answers || {};
   const sections = EVENT_REPORT_EMAIL_SECTIONS.map(([title, fields]) => {
-    const rows = fields.map(([key, label]) => {
+    const rows = fields.map(([key, label], index) => {
       const raw = key === 'followUpRequired' ? (answers[key] ? 'Yes' : 'No') : answers[key];
       const value = clean(raw) || '—';
-      return `<tr><th style="padding:8px 10px;border-bottom:1px solid #e6e1d7;text-align:left;vertical-align:top;width:38%;color:#665b43">${escapeHtml(label)}</th><td style="padding:8px 10px;border-bottom:1px solid #e6e1d7;white-space:pre-wrap">${escapeHtml(value)}</td></tr>`;
+      const color = value === 'Yes' ? '#176a43' : value === 'No' ? '#a33a35' : '#20272c';
+      const background = index % 2 === 0 ? '#ffffff' : '#f7f6f2';
+      return `<tr bgcolor="${background}">
+        <td width="230" valign="top" style="width:230px;padding:10px 14px;border-bottom:1px solid #e5e2da;font-family:Arial,sans-serif;font-size:13px;line-height:18px;font-weight:bold;color:#5d574b">${escapeHtml(label)}</td>
+        <td width="350" valign="top" style="width:350px;padding:10px 14px;border-bottom:1px solid #e5e2da;font-family:Arial,sans-serif;font-size:13px;line-height:18px;color:${color};white-space:pre-wrap">${escapeHtml(value)}</td>
+      </tr>`;
     }).join('');
-    return `<h2 style="margin:26px 0 8px;color:#3f392d">${escapeHtml(title)}</h2><table style="width:100%;border-collapse:collapse">${rows}</table>`;
+    return `<tr><td height="20" style="height:20px;line-height:20px;font-size:1px">&nbsp;</td></tr>
+      <tr><td bgcolor="#263038" style="padding:10px 14px;border-left:4px solid #c8aa62;font-family:Arial,sans-serif;font-size:17px;line-height:22px;font-weight:bold;color:#ffffff">${escapeHtml(title)}</td></tr>
+      <tr><td><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse">${rows}</table></td></tr>`;
   }).join('');
-  return `<!doctype html><html><body style="margin:0;background:#f4f1ea;color:#24221e;font-family:Arial,sans-serif"><div style="max-width:760px;margin:auto;padding:28px"><div style="padding:26px;background:#fff;border:1px solid #ded8ca;border-radius:16px"><div style="color:#927d49;font-size:12px;font-weight:bold;letter-spacing:.1em;text-transform:uppercase">OCC Staffing &amp; Service</div><h1 style="margin:8px 0">Captain's Report</h1><p style="margin:0 0 4px"><strong>${escapeHtml(report.eventTitle)}</strong> · ${escapeHtml(report.eventDate)}</p><p style="margin:0">${escapeHtml(report.reporterName)} · ${escapeHtml(report.position)}</p>${sections}</div></div></body></html>`;
+  return `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"></head>
+  <body bgcolor="#edf0f2" style="margin:0;padding:0;background-color:#edf0f2;color:#20272c">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent">Captain's report for ${escapeHtml(report.eventTitle)}</div>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#edf0f2" style="width:100%;background-color:#edf0f2">
+      <tr><td align="center" style="padding:24px 10px">
+        <table role="presentation" width="640" cellpadding="0" cellspacing="0" border="0" bgcolor="#ffffff" style="width:640px;max-width:640px;border-collapse:collapse;background-color:#ffffff;border:1px solid #d9dde0">
+          <tr><td bgcolor="#172129" style="padding:24px 28px;border-top:5px solid #c8aa62;font-family:Arial,sans-serif;color:#ffffff">
+            <div style="font-size:11px;line-height:16px;font-weight:bold;letter-spacing:1.4px;color:#d8c38d">OCC STAFFING &amp; SERVICE</div>
+            <div style="padding-top:6px;font-size:28px;line-height:34px;font-weight:bold">Captain's Report</div>
+          </td></tr>
+          <tr><td style="padding:20px 28px 4px;font-family:Arial,sans-serif">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse">
+              <tr><td width="120" style="padding:5px 0;font-size:12px;font-weight:bold;color:#756b55;text-transform:uppercase">Event</td><td style="padding:5px 0;font-size:15px;font-weight:bold;color:#20272c">${escapeHtml(report.eventTitle) || '—'}</td></tr>
+              <tr><td width="120" style="padding:5px 0;font-size:12px;font-weight:bold;color:#756b55;text-transform:uppercase">Date</td><td style="padding:5px 0;font-size:14px;color:#20272c">${escapeHtml(formatEventDate(report.eventDate)) || '—'}</td></tr>
+              <tr><td width="120" style="padding:5px 0;font-size:12px;font-weight:bold;color:#756b55;text-transform:uppercase">Captain</td><td style="padding:5px 0;font-size:14px;color:#20272c">${escapeHtml(report.reporterName) || '—'}</td></tr>
+              <tr><td width="120" style="padding:5px 0;font-size:12px;font-weight:bold;color:#756b55;text-transform:uppercase">Position</td><td style="padding:5px 0;font-size:14px;color:#20272c">${escapeHtml(report.position) || '—'}</td></tr>
+            </table>
+          </td></tr>
+          <tr><td style="padding:0 28px 24px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse">${sections}</table></td></tr>
+          <tr><td bgcolor="#172129" align="center" style="padding:16px 24px;font-family:Arial,sans-serif;font-size:11px;line-height:16px;color:#cfd6da">Generated by OCC Event Operations &nbsp;&bull;&nbsp; Saved with the event</td></tr>
+        </table>
+      </td></tr>
+    </table>
+  </body></html>`;
+};
+
+export const renderEventReportText = (report = {}) => {
+  const answers = report.answers || {};
+  const sections = EVENT_REPORT_EMAIL_SECTIONS.map(([title, fields]) => {
+    const rows = fields.map(([key, label]) => {
+      const raw = key === 'followUpRequired' ? (answers[key] ? 'Yes' : 'No') : answers[key];
+      return `${label}: ${clean(raw) || '—'}`;
+    }).join('\n');
+    return `${title}\n${rows}`;
+  }).join('\n\n');
+  return `CAPTAIN'S REPORT\n${clean(report.eventTitle) || '—'} · ${formatEventDate(report.eventDate) || '—'}\n${clean(report.reporterName) || '—'} · ${clean(report.position) || '—'}\n\n${sections}`;
 };
 
 export const sendEventReportEmail = async ({ report, event, configuredRecipients = [], fetchImpl = fetch }) => {
@@ -72,6 +123,7 @@ export const sendEventReportEmail = async ({ report, event, configuredRecipients
       ...(cc.length ? { cc } : {}),
       subject: `Captain's Report · ${clean(report.eventTitle, 300)} · ${clean(report.reporterName, 200)}`,
       html: renderEventReportEmail(report),
+      text: renderEventReportText(report),
     }),
   });
   const payload = await response.json().catch(() => ({}));

@@ -60,7 +60,7 @@ router.post('/:reportId/email', async (req, res) => {
     const report = await EventReport.findById(req.params.reportId);
     if (!report) return res.status(404).json({ message: 'Event report was not found' });
     if (report.status !== 'submitted') return res.status(409).json({ message: 'The report has not been submitted yet' });
-    if (report.emailDelivery?.status === 'sent') return res.status(409).json({ message: 'This report email has already been sent' });
+    if (report.emailDelivery?.status === 'sent' && req.body?.force !== true) return res.status(409).json({ message: 'This report email has already been sent' });
     const [event, settings] = await Promise.all([
       Event.findById(report.eventId).select('meta.eventReportTest').lean(),
       EventReportSettings.findOne({ key: 'default' }).lean(),

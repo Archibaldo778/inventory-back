@@ -709,24 +709,31 @@ export const startServer = async () => {
 
   let slackSyncTimer = null;
   let slackStartupTimer = null;
+  let slackReportReminderTimer = null;
+  let slackReportReminderStartupTimer = null;
   if (String(process.env.SLACK_BOT_TOKEN || '').trim()) {
     const configuredMinutes = Number(process.env.SLACK_SYNC_INTERVAL_MINUTES);
     const intervalMinutes = Number.isFinite(configuredMinutes)
       ? Math.max(5, Math.min(60, Math.trunc(configuredMinutes)))
       : 15;
-    const syncSlack = () => Promise.all([
-      runSlackEventChannelSync({ existingOnly: !slackEventChannelsEnabled() }),
-      runSlackEventReportReminders(),
-    ]).then(([summary, reminders]) => {
+    const syncSlack = () => runSlackEventChannelSync({ existingOnly: !slackEventChannelsEnabled() }).then((summary) => {
       console.log('✅ Slack event channel sync completed', summary);
-      if (reminders.sent || reminders.failed) console.log('✅ Slack event report reminders processed', reminders);
     }).catch((error) => {
       console.error('Slack event channel sync failed:', error?.message || error);
+    });
+    const syncSlackReportReminders = () => runSlackEventReportReminders().then((reminders) => {
+      if (reminders.sent || reminders.failed) console.log('✅ Slack event report reminders processed', reminders);
+    }).catch((error) => {
+      console.error('Slack event report reminder sync failed:', error?.message || error);
     });
     slackStartupTimer = setTimeout(syncSlack, 60_000);
     slackStartupTimer.unref?.();
     slackSyncTimer = setInterval(syncSlack, intervalMinutes * 60_000);
     slackSyncTimer.unref?.();
+    slackReportReminderStartupTimer = setTimeout(syncSlackReportReminders, 60_000);
+    slackReportReminderStartupTimer.unref?.();
+    slackReportReminderTimer = setInterval(syncSlackReportReminders, 60_000);
+    slackReportReminderTimer.unref?.();
     console.log(`Slack event channel sync enabled every ${intervalMinutes} minutes (${slackEventChannelsEnabled() ? 'all due events' : 'linked test channels only'})`);
   }
 
@@ -745,6 +752,8 @@ export const startServer = async () => {
     if (catereaseOperationalSyncTimer) clearInterval(catereaseOperationalSyncTimer);
     if (slackStartupTimer) clearTimeout(slackStartupTimer);
     if (slackSyncTimer) clearInterval(slackSyncTimer);
+    if (slackReportReminderStartupTimer) clearTimeout(slackReportReminderStartupTimer);
+    if (slackReportReminderTimer) clearInterval(slackReportReminderTimer);
 
     const forceExit = setTimeout(() => {
       console.error('Forced shutdown after timeout');

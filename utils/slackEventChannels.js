@@ -19,6 +19,7 @@ import {
 import { issueEventGuestAccess } from './eventGuestAccess.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const TEST_REPORT_REMINDER_MS = 2 * 60 * 1000;
 const clean = (value) => String(value || '').trim();
 const DEFAULT_EVENT_LEADERSHIP_TEAMS = [
   { managers: ['Olivier Cheng', 'Oliver Cheng'], slackGroupLabel: 'teamOC', slackGroupNames: ['teamOC', 'Team OC'], assistants: ['Ashley', 'Sebastian', 'Heidi'] },
@@ -33,6 +34,9 @@ export const slackEventChannelsEnabled = () => /^(?:1|true|yes|on)$/i.test(clean
 export const slackEventReportsEnabled = () => /^(?:1|true|yes|on)$/i.test(clean(process.env.SLACK_EVENT_REPORTS_ENABLED));
 export const slackEventReportsEnabledForEvent = (event = {}) => (
   slackEventReportsEnabled() || event?.meta?.eventReportTest === true
+);
+export const eventReportReminderDelayMs = (event = {}) => (
+  event?.meta?.eventReportTest === true ? TEST_REPORT_REMINDER_MS : DAY_MS
 );
 const normalize = (value) => clean(value)
   .normalize('NFKD')
@@ -516,7 +520,7 @@ export const runSlackEventChannelSync = async ({ now = new Date(), eventId = '',
                 nowstaEventId: clean(seriesSchedule.nowstaEventId), eventTitle: clean(seriesEvent.title), eventDate: clean(seriesSchedule.date),
                 eventEndsAt: new Date(eventEndsAt), slackUserId: reporter.id, reporterName: reporter.name,
                 reporterEmail: reporter.email, position: clean(reporter.position), status: 'pending',
-                nextReminderAt: new Date(new Date(eventEndsAt).getTime() + DAY_MS),
+                nextReminderAt: new Date(new Date(eventEndsAt).getTime() + eventReportReminderDelayMs(seriesEvent)),
               } },
               { upsert: true, new: true, setDefaultsOnInsert: true }
             );
@@ -532,6 +536,9 @@ export const runSlackEventChannelSync = async ({ now = new Date(), eventId = '',
                 ],
               });
               report.requestSentAt = new Date();
+              if (seriesEvent?.meta?.eventReportTest === true) {
+                report.nextReminderAt = new Date(report.requestSentAt.getTime() + eventReportReminderDelayMs(seriesEvent));
+              }
               await report.save();
               reportRequestKeys.add(requestKey);
             } catch (error) {
@@ -601,10 +608,15 @@ export const runSlackEventReportReminders = async ({ now = new Date() } = {}) =>
     const testEventIds = await Event.find({ 'meta.eventReportTest': true }).distinct('_id');
     if (!testEventIds.length) return { configured: true, sent: 0, failed: 0 };
     pendingFilter.eventId = { $in: testEventIds };
+    const testReminderAt = new Date(now.getTime() + TEST_REPORT_REMINDER_MS);
+    await EventReport.updateMany({
+      eventId: { $in: testEventIds }, status: 'pending', requestSentAt: { $ne: null },
+      $or: [{ nextReminderAt: null }, { nextReminderAt: { $gt: testReminderAt } }],
+    }, { $set: { nextReminderAt: testReminderAt } });
   }
   const pending = await EventReport.find(pendingFilter).sort({ nextReminderAt: 1 }).limit(200);
   const eventIds = [...new Set(pending.map((report) => String(report.eventId)))];
-  const events = await Event.find({ _id: { $in: eventIds } }).select('_id title date').lean();
+  const events = await Event.find({ _id: { $in: eventIds } }).select('_id title date meta.eventReportTest').lean();
   const eventsById = new Map(events.map((event) => [String(event._id), event]));
   const summary = { configured: true, sent: 0, failed: 0 };
   for (const report of pending) {
@@ -621,7 +633,7 @@ export const runSlackEventReportReminders = async ({ now = new Date() } = {}) =>
         ],
       });
       report.lastReminderAt = now;
-      report.nextReminderAt = new Date(now.getTime() + DAY_MS);
+      report.nextReminderAt = new Date(now.getTime() + eventReportReminderDelayMs(event));
       report.reminderCount = Number(report.reminderCount || 0) + 1;
       await report.save();
       summary.sent += 1;

@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   eventChannelAdminPeople,
   eventLeadershipPeople,
+  eventReportReminderDelayMs,
   matchSlackBarReturnRecipients,
   matchSlackEventCaptains,
   matchSlackEventReporters,
@@ -34,6 +35,11 @@ test('event report DMs can be enabled only for an explicitly marked test event',
     if (previous === undefined) delete process.env.SLACK_EVENT_REPORTS_ENABLED;
     else process.env.SLACK_EVENT_REPORTS_ENABLED = previous;
   }
+});
+
+test('test event report reminders repeat every two minutes while normal reports stay daily', () => {
+  assert.equal(eventReportReminderDelayMs({ meta: { eventReportTest: true } }), 2 * 60 * 1000);
+  assert.equal(eventReportReminderDelayMs({}), 24 * 60 * 60 * 1000);
 });
 
 test('Slack event channel names are stable, valid, and short', () => {

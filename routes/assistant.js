@@ -204,6 +204,23 @@ router.post('/messages', messageRateLimit, async (req, res) => {
         })),
       },
     });
+    const addRequested = /(?:\badd\b|\bplace\b|добав|постав|закин)/i.test(message);
+    const requestedQuantityText = message.replace(/\bOCC\s*0*\d+\b/gi, '');
+    const requestedQuantityMatch = requestedQuantityText.match(/(?:\bqty\s*|\bquantity\s*|\bпо\s+)?(\d{1,3})\s*(?:pcs?|pieces?|шт(?:ук[аи]?)?)?\b/i);
+    const requestedQuantity = Math.max(1, Math.min(999, Math.trunc(Number(requestedQuantityMatch?.[1]) || 1)));
+    const requestedProduct = exactInventory[0] || inventoryCandidates[0] || null;
+    let uiAction = answer.uiAction;
+    if (addRequested && requestedProduct && Number(requestedProduct.quantity) > 0) {
+      uiAction = {
+        kind: 'preview_add_decor', query: '', colors: [],
+        productCode: clean(requestedProduct.inventoryCode, 80).toUpperCase(),
+        productName: clean(requestedProduct.name, 200),
+        quantity: Math.min(requestedQuantity, Math.max(1, Math.trunc(Number(requestedProduct.quantity) || 1))),
+        available: Math.max(0, Math.trunc(Number(requestedProduct.quantity) || 0)),
+      };
+    } else if (uiAction?.kind === 'filter_decor' && exactInventory[0]?.inventoryCode) {
+      uiAction = { ...uiAction, query: clean(exactInventory[0].inventoryCode, 80).toUpperCase() };
+    }
     const issueDetected = answer.siteIssue.detected || likelySiteIssue(message);
     let issue = null;
     if (issueDetected) {
@@ -232,7 +249,7 @@ router.post('/messages', messageRateLimit, async (req, res) => {
     );
     return res.json({
       message: serializeMessage(saved.messages[saved.messages.length - 1]),
-      uiAction: answer.uiAction,
+      uiAction,
       issueRecorded: Boolean(issue),
     });
   } catch (error) {

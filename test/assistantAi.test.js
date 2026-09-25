@@ -19,7 +19,7 @@ test('assistant response normalizes the structured OpenAI result', async () => {
         output_text: JSON.stringify({
           reply: 'I found matching decor.',
           siteIssue: { detected: false, severity: 'low', summary: '' },
-          uiAction: { kind: 'filter_decor', query: 'centerpiece', colors: ['Gold'] },
+          uiAction: { kind: 'filter_decor', query: 'centerpiece', colors: ['Gold'], productCode: '', productName: '', quantity: 1, available: 0 },
         }),
       }),
     };
@@ -35,7 +35,10 @@ test('assistant response normalizes the structured OpenAI result', async () => {
       fetchImpl,
     });
     assert.equal(result.reply, 'I found matching decor.');
-    assert.deepEqual(result.uiAction, { kind: 'filter_decor', query: 'centerpiece', colors: ['Gold'] });
+    assert.deepEqual(result.uiAction, {
+      kind: 'filter_decor', query: 'centerpiece', colors: ['Gold'],
+      productCode: '', productName: '', quantity: 1, available: 0,
+    });
   } finally {
     if (previousModel === undefined) delete process.env.OPENAI_ASSISTANT_MODEL;
     else process.env.OPENAI_ASSISTANT_MODEL = previousModel;

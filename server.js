@@ -460,6 +460,7 @@ import catereaseIntegrationRoutes, {
 } from './routes/catereaseIntegration.js';
 import brotherLabelRoutes from './routes/brotherLabels.js';
 import notificationRoutes from './routes/notifications.js';
+import assistantRoutes from './routes/assistant.js';
 import nowstaScheduleRoutes from './routes/nowstaSchedule.js';
 import operationsRoutes from './routes/operations.js';
 import transportationRoutes from './routes/transportation.js';
@@ -475,6 +476,7 @@ app.use('/api/users', requireAuth, requireUsersAccess, userRoutes);
 app.use('/users', requireAuth, requireUsersAccess, userRoutes);
 app.use('/api/events', requireAuth, requireWorkspaceAccess, requireWorkspaceEditorForMutations, eventRoutes);
 app.use('/api/notifications', requireAuth, notificationRoutes);
+app.use('/api/assistant', requireAuth, requireWorkspaceAccess, assistantRoutes);
 app.use('/api/nowsta-schedule', requireAuth, requireWorkspaceAccess, nowstaScheduleRoutes);
 app.use('/api/operations', requireAuth, requireWorkspaceAccess, requireAdminForMutations, operationsRoutes);
 app.use('/api/transportation', requireAuth, requireWorkspaceAccess, requireAdminForMutations, transportationRoutes);

@@ -136,6 +136,25 @@ test('Slack event workers include only operational leadership and drivers', () =
   assert.deepEqual(result.matched.map((worker) => worker.id), ['U1', 'U2', 'U3', 'U4']);
 });
 
+test('test event channels can include every assigned worker without leadership groups', () => {
+  const result = matchSlackEventWorkers({
+    includeAllPositions: true,
+    schedule: {
+      shifts: [
+        { position: 'Captain', workers: [{ name: 'Captain One', status: 'confirmed' }] },
+        { position: 'Bartender', workers: [{ name: 'Bartender One', status: 'assigned' }] },
+        { position: 'Server', workers: [{ name: 'Declined Server', status: 'declined' }] },
+      ],
+    },
+    slackUsers: [
+      { id: 'U1', profile: { real_name: 'Captain One' } },
+      { id: 'U2', profile: { real_name: 'Bartender One' } },
+      { id: 'U3', profile: { real_name: 'Declined Server' } },
+    ],
+  });
+  assert.deepEqual(result.matched.map((worker) => worker.id), ['U1', 'U2']);
+});
+
 test('Slack event workers include leadership from every day in a series and match Zak aliases', () => {
   const result = matchSlackEventWorkers({
     schedules: [

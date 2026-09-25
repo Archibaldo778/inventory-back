@@ -10,6 +10,7 @@ import {
   listSlackUsers,
   pinSlackMessage,
   postSlackMessage,
+  removeSlackUserFromChannel,
   renameSlackChannel,
   slackAuthTest,
   updateSlackMessage,
@@ -198,13 +199,13 @@ export const slackEventUserGroupMembers = ({ event, userGroups = [] }) => {
   };
 };
 
-export const matchSlackEventWorkers = ({ schedule, schedules = [], slackUsers, linkedSlackByNowstaId = new Map() }) => {
+export const matchSlackEventWorkers = ({ schedule, schedules = [], slackUsers, linkedSlackByNowstaId = new Map(), includeAllPositions = false }) => {
   const sourceSchedules = Array.isArray(schedules) && schedules.length ? schedules : [schedule].filter(Boolean);
   const people = sourceSchedules.flatMap((sourceSchedule) => (Array.isArray(sourceSchedule?.shifts) ? sourceSchedule.shifts : []).flatMap((shift) => (
     (Array.isArray(shift?.workers) ? shift.workers : []).flatMap((worker) => {
       const status = clean(worker?.status).toLowerCase();
       const position = clean(shift?.position);
-      const relevantPosition = !position || EVENT_LEADERSHIP_POSITION.test(position);
+      const relevantPosition = includeAllPositions || !position || EVENT_LEADERSHIP_POSITION.test(position);
       return !relevantPosition || (status && !['assigned', 'confirmed'].includes(status))
         ? []
         : [{ companyUserId: clean(worker?.companyUserId), name: clean(worker?.name), email: clean(worker?.email).toLowerCase() }];
@@ -415,7 +416,10 @@ export const runSlackEventChannelSync = async ({ now = new Date(), eventId = '',
         channelsByName.set(channelName, channel);
       }
 
-      const groupMembers = slackEventUserGroupMembers({ event, userGroups: slackUserGroups });
+      const assignedWorkersOnly = event?.meta?.eventReportTest === true;
+      const groupMembers = assignedWorkersOnly
+        ? { userIds: [], matchedGroups: [], missingGroups: [] }
+        : slackEventUserGroupMembers({ event, userGroups: slackUserGroups });
       const slackUsersById = new Map(slackUsers.map((user) => [clean(user?.id), user]));
       const groupMatches = {
         matched: groupMembers.userIds.map((id) => ({
@@ -427,10 +431,22 @@ export const runSlackEventChannelSync = async ({ now = new Date(), eventId = '',
       };
       const workers = mergeSlackMatches(
         groupMatches,
-        matchSlackPeople({ people: eventLeadershipPeople(event), slackUsers }),
-        matchSlackEventWorkers({ schedules: scheduleSeries, slackUsers, linkedSlackByNowstaId })
+        ...(assignedWorkersOnly ? [] : [matchSlackPeople({ people: eventLeadershipPeople(event), slackUsers })]),
+        matchSlackEventWorkers({ schedules: scheduleSeries, slackUsers, linkedSlackByNowstaId, includeAllPositions: assignedWorkersOnly })
       );
       const previouslyInvited = new Set(Array.isArray(stored.invitedUserIds) ? stored.invitedUserIds.map(clean) : []);
+      if (assignedWorkersOnly) {
+        const assignedIds = new Set(workers.matched.map((worker) => worker.id));
+        for (const userId of previouslyInvited) {
+          if (assignedIds.has(userId)) continue;
+          try {
+            await removeSlackUserFromChannel(channel.id, userId);
+            previouslyInvited.delete(userId);
+          } catch (error) {
+            console.warn(`Slack test-event member could not be removed from ${channel.id}: ${error?.slackCode || error?.message || 'unknown error'}`);
+          }
+        }
+      }
       const inviteIds = workers.matched.map((worker) => worker.id).filter((id) => !previouslyInvited.has(id));
       if (inviteIds.length) await inviteSlackUsers(channel.id, inviteIds);
 

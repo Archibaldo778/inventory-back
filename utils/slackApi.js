@@ -87,6 +87,11 @@ export const inviteSlackUsers = async (channel, userIds = []) => {
   return slackRequest('conversations.invite', { channel, users: unique.join(','), force: true });
 };
 
+export const removeSlackUserFromChannel = (channel, userId) => slackRequest('conversations.kick', {
+  channel,
+  user: clean(userId),
+});
+
 export const postSlackMessage = async ({ channel, text, blocks = [] }) => slackRequest('chat.postMessage', {
   channel,
   text,

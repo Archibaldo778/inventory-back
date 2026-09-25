@@ -47,9 +47,9 @@ const isExplicitlyArchivedDropboxPath = (document) => {
 };
 
 const run = async () => {
-  const mongoUri = String(productionTarget ? process.env.MONGO_URI_PROD : process.env.MONGO_URI || '').trim();
+  const mongoUri = String((productionTarget ? process.env.MONGO_URI_PROD : process.env.MONGO_URI) || '').trim();
   const mongoDbName = String(
-    productionTarget ? (process.env.MONGO_DB_NAME_PROD || 'test') : (process.env.MONGO_DB_NAME || '')
+    (productionTarget ? process.env.MONGO_DB_NAME_PROD : process.env.MONGO_DB_NAME) || ''
   ).trim();
   if (!mongoUri) throw new Error(productionTarget ? 'MONGO_URI_PROD is required' : 'MONGO_URI is required');
   if (apply && confirmation !== 'RESTORE_DROPBOX_DOCUMENTS') {

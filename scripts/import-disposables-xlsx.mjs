@@ -10,9 +10,15 @@ import { allocateDecorInventoryCodes } from '../utils/decorInventoryCodes.js';
 
 const APPLY = process.argv.includes('--apply');
 const sourcePath = process.argv.find((argument) => /\.xlsx$/i.test(argument));
+const databaseName = String(
+  (process.argv.find((argument) => argument.startsWith('--database=')) || '').split('=').slice(1).join('=')
+).trim();
 
 if (!sourcePath || !fs.existsSync(sourcePath)) {
   throw new Error('Pass the source .xlsx path. Add --apply to perform the import.');
+}
+if (!databaseName) {
+  throw new Error('Pass the target database explicitly with --database=<name>.');
 }
 
 dotenv.config({ path: path.resolve('.env.development'), override: true });
@@ -137,7 +143,7 @@ if (malformed.length) throw new Error(`Workbook contains ${malformed.length} unu
 
 const mongoUri = String(process.env.MONGO_URI_PROD || '').trim();
 if (!mongoUri) throw new Error('MONGO_URI_PROD is not configured.');
-await mongoose.connect(mongoUri, process.env.MONGO_DB_NAME ? { dbName: process.env.MONGO_DB_NAME } : {});
+await mongoose.connect(mongoUri, { dbName: databaseName });
 
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,

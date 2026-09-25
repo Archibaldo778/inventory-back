@@ -139,7 +139,13 @@ export const convertLeadershipFileToPdf = async ({
 export const mergeLeadershipPrintPdfs = async ({ documents, convert = convertLeadershipFileToPdf }) => {
   const printable = Array.isArray(documents) ? documents : [];
   if (!printable.length) throw httpError(400, 'Select at least one printable file');
-  const totalCopies = printable.reduce((sum, document) => sum + Math.max(1, Number(document?.copies) || 1), 0);
+  const totalCopies = printable.reduce((sum, document) => {
+    const pageCopies = Array.isArray(document?.pageCopies)
+      ? document.pageCopies.map((value) => Math.max(0, Math.min(99, Math.trunc(Number(value) || 0))))
+      : [];
+    const customCopies = pageCopies.reduce((pageSum, value) => pageSum + value, 0);
+    return sum + (customCopies || Math.max(1, Number(document?.copies) || 1));
+  }, 0);
   if (totalCopies > 100) throw httpError(400, 'The print job is limited to 100 document copies');
 
   const output = await PDFDocument.create();
@@ -150,31 +156,48 @@ export const mergeLeadershipPrintPdfs = async ({ documents, convert = convertLea
     const pdfBuffer = await convert({ fileName: document.fileName, buffer: document.buffer });
     const source = await PDFDocument.load(pdfBuffer);
     const copies = Math.max(1, Math.min(99, Math.trunc(Number(document.copies) || 1)));
+    const pageCopies = Array.isArray(document?.pageCopies)
+      ? document.pageCopies.map((value) => {
+          const parsed = Math.trunc(Number(value));
+          return Number.isFinite(parsed) && parsed >= 1 ? Math.min(99, parsed) : null;
+        })
+      : [];
+    const hasPageOverrides = pageCopies.some((value) => value !== null);
+    const appendPage = async (pageIndex, sourcePage) => {
+      const sourceSize = sourcePage.getSize();
+      const targetSize = sourceSize.width > sourceSize.height ? letterLandscape : letterPortrait;
+      const alreadyLetter = Math.abs(sourceSize.width - targetSize.width) < 1
+        && Math.abs(sourceSize.height - targetSize.height) < 1;
+      if (alreadyLetter) {
+        const [page] = await output.copyPages(source, [pageIndex]);
+        output.addPage(page);
+        return;
+      }
+      const embedded = await output.embedPage(sourcePage);
+      const scale = Math.min(
+        (targetSize.width - (pageMargin * 2)) / sourceSize.width,
+        (targetSize.height - (pageMargin * 2)) / sourceSize.height,
+      );
+      const width = sourceSize.width * scale;
+      const height = sourceSize.height * scale;
+      const page = output.addPage([targetSize.width, targetSize.height]);
+      page.drawPage(embedded, {
+        x: (targetSize.width - width) / 2,
+        y: (targetSize.height - height) / 2,
+        width,
+        height,
+      });
+    };
+    if (hasPageOverrides) {
+      for (const [pageIndex, sourcePage] of source.getPages().entries()) {
+        const copiesForPage = pageCopies[pageIndex] || copies;
+        for (let copy = 0; copy < copiesForPage; copy += 1) await appendPage(pageIndex, sourcePage);
+      }
+      continue;
+    }
     for (let copy = 0; copy < copies; copy += 1) {
       for (const [pageIndex, sourcePage] of source.getPages().entries()) {
-        const sourceSize = sourcePage.getSize();
-        const targetSize = sourceSize.width > sourceSize.height ? letterLandscape : letterPortrait;
-        const alreadyLetter = Math.abs(sourceSize.width - targetSize.width) < 1
-          && Math.abs(sourceSize.height - targetSize.height) < 1;
-        if (alreadyLetter) {
-          const [page] = await output.copyPages(source, [pageIndex]);
-          output.addPage(page);
-          continue;
-        }
-        const embedded = await output.embedPage(sourcePage);
-        const scale = Math.min(
-          (targetSize.width - (pageMargin * 2)) / sourceSize.width,
-          (targetSize.height - (pageMargin * 2)) / sourceSize.height,
-        );
-        const width = sourceSize.width * scale;
-        const height = sourceSize.height * scale;
-        const page = output.addPage([targetSize.width, targetSize.height]);
-        page.drawPage(embedded, {
-          x: (targetSize.width - width) / 2,
-          y: (targetSize.height - height) / 2,
-          width,
-          height,
-        });
+        await appendPage(pageIndex, sourcePage);
       }
     }
   }

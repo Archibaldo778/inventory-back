@@ -1841,6 +1841,12 @@ router.post('/operations/events/:id/leadership-print.pdf', requireAuth, leadersh
       : null;
     for (const requestedFile of requested) {
       const copies = Math.max(1, Math.min(99, Math.trunc(Number(requestedFile?.copies) || 1)));
+      const pageCopies = Array.isArray(requestedFile?.pageCopies)
+        ? requestedFile.pageCopies.slice(0, 200).map((value) => {
+            const parsed = Math.trunc(Number(value));
+            return Number.isFinite(parsed) && parsed >= 1 ? Math.min(99, parsed) : null;
+          })
+        : [];
       if (String(requestedFile?.source || '').trim() === 'kitchen_board') {
         const kitchenDecks = await Deck.find({ eventId: event._id, type: 'kitchen' })
           .select('_id')
@@ -1857,7 +1863,7 @@ router.post('/operations/events/:id/leadership-print.pdf', requireAuth, leadersh
         if (totalBytes > 80 * 1024 * 1024) {
           return res.status(413).json({ error: 'The selected files are too large for one print job' });
         }
-        documents.push({ fileName: 'Kitchen Board Photos.pdf', buffer, copies });
+        documents.push({ fileName: 'Kitchen Board Photos.pdf', buffer, copies, pageCopies });
         continue;
       }
 
@@ -1885,6 +1891,7 @@ router.post('/operations/events/:id/leadership-print.pdf', requireAuth, leadersh
         fileName,
         buffer,
         copies,
+        pageCopies,
       });
     }
 

@@ -87,6 +87,32 @@ test('leadership PDFs preserve file order and requested copy counts', async () =
   ]);
 });
 
+test('leadership PDFs allow a different copy count for every page', async () => {
+  const source = await PDFDocument.create();
+  source.addPage([612, 792]);
+  source.addPage([612, 792]);
+  source.addPage([792, 612]);
+  const input = Buffer.from(await source.save());
+  const output = await mergeLeadershipPrintPdfs({
+    documents: [{
+      fileName: 'Large Floor Plan.pdf',
+      buffer: input,
+      copies: 1,
+      pageCopies: [2, 1, 3],
+    }],
+  });
+  const merged = await PDFDocument.load(output);
+  assert.equal(merged.getPageCount(), 6);
+  assert.deepEqual(merged.getPages().map((page) => page.getSize()), [
+    { width: 612, height: 792 },
+    { width: 612, height: 792 },
+    { width: 612, height: 792 },
+    { width: 792, height: 612 },
+    { width: 792, height: 612 },
+    { width: 792, height: 612 },
+  ]);
+});
+
 test('Kitchen Board previews become landscape Leadership File pages', async () => {
   // Use a tiny valid PNG fixture for the saved board preview.
   const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';

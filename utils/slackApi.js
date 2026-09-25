@@ -81,6 +81,8 @@ export const renameSlackChannel = async (channel, name) => {
   return result.channel;
 };
 
+export const unarchiveSlackChannel = (channel) => slackRequest('conversations.unarchive', { channel });
+
 export const inviteSlackUsers = async (channel, userIds = []) => {
   const unique = [...new Set(userIds.map(clean).filter(Boolean))];
   if (!unique.length) return null;

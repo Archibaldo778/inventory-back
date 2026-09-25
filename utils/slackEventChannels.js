@@ -13,6 +13,7 @@ import {
   removeSlackUserFromChannel,
   renameSlackChannel,
   slackAuthTest,
+  unarchiveSlackChannel,
   updateSlackMessage,
 } from './slackApi.js';
 import { issueEventGuestAccess } from './eventGuestAccess.js';
@@ -380,6 +381,7 @@ export const runSlackEventChannelSync = async ({ now = new Date(), eventId = '',
         summary.skipped += 1;
         continue;
       }
+      const assignedWorkersOnly = event?.meta?.eventReportTest === true;
       const scheduleSeries = slackScheduleSeries(schedule, seriesSchedules);
       const seriesEvents = (await Promise.all(scheduleSeries.map((seriesSchedule) => (
         clean(seriesSchedule.nowstaEventId) === clean(schedule.nowstaEventId)
@@ -405,6 +407,13 @@ export const runSlackEventChannelSync = async ({ now = new Date(), eventId = '',
         ? { id: clean(stored.channelId), name: clean(stored.channelName) || channelName }
         : channelsByName.get(channelName);
       let created = false;
+      if (channel?.id && assignedWorkersOnly && clean(stored.channelId)) {
+        try {
+          await unarchiveSlackChannel(channel.id);
+        } catch (error) {
+          if (error?.slackCode !== 'not_archived') throw error;
+        }
+      }
       if (!channel?.id) {
         channel = await createSlackPrivateChannel(channelName);
         channelsByName.set(channelName, channel);
@@ -416,7 +425,6 @@ export const runSlackEventChannelSync = async ({ now = new Date(), eventId = '',
         channelsByName.set(channelName, channel);
       }
 
-      const assignedWorkersOnly = event?.meta?.eventReportTest === true;
       const groupMembers = assignedWorkersOnly
         ? { userIds: [], matchedGroups: [], missingGroups: [] }
         : slackEventUserGroupMembers({ event, userGroups: slackUserGroups });

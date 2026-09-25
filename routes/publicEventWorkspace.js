@@ -16,6 +16,12 @@ const router = Router();
 const limiter = createMemoryRateLimiter({ windowMs: 60 * 1000, max: 120, message: 'Too many event file requests' });
 const clean = (value, max = 1000) => String(value ?? '').trim().slice(0, max);
 const tokenFrom = (req) => clean(req.query?.token || req.get('X-Event-Access'), 4096);
+const PREVIEW_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const PREVIEW_CACHE_MAX_BYTES = 96 * 1024 * 1024;
+const PREVIEW_CACHE_MAX_ENTRY_BYTES = 16 * 1024 * 1024;
+const previewCache = new Map();
+const previewJobs = new Map();
+let previewCacheBytes = 0;
 
 const requireViewAccess = (req, res, next) => {
   if (!mongoose.Types.ObjectId.isValid(String(req.params.eventId || ''))) return res.status(400).json({ message: 'Invalid event' });
@@ -35,11 +41,44 @@ const fileType = (name) => ({
   png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp',
 })[clean(name).toLowerCase().match(/\.([a-z0-9]+)$/)?.[1]] || 'application/octet-stream';
 
-const loadDropbox = async () => {
+const loadDropboxIntegration = async () => {
   const integration = await DropboxIntegration.findOne({ provider: 'dropbox', enabled: true })
     .select('+refreshToken.ciphertext +refreshToken.iv +refreshToken.tag').lean();
   if (!integration?.refreshToken?.ciphertext) throw Object.assign(new Error('Dropbox is not connected'), { statusCode: 409 });
+  return integration;
+};
+
+const loadDropbox = async () => {
+  const integration = await loadDropboxIntegration();
   return { integration, accessToken: await refreshDropboxAccessToken(decryptDropboxSecret(integration.refreshToken)) };
+};
+
+const cachedPreview = (key) => {
+  const entry = previewCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.createdAt > PREVIEW_CACHE_TTL_MS) {
+    previewCache.delete(key);
+    previewCacheBytes -= entry.buffer.length;
+    return null;
+  }
+  previewCache.delete(key);
+  previewCache.set(key, entry);
+  return entry;
+};
+
+const storePreview = (key, entry) => {
+  if (!entry?.buffer?.length || entry.buffer.length > PREVIEW_CACHE_MAX_ENTRY_BYTES) return;
+  const previous = previewCache.get(key);
+  if (previous) previewCacheBytes -= previous.buffer.length;
+  previewCache.delete(key);
+  previewCache.set(key, { ...entry, createdAt: Date.now() });
+  previewCacheBytes += entry.buffer.length;
+  while (previewCacheBytes > PREVIEW_CACHE_MAX_BYTES && previewCache.size > 1) {
+    const oldestKey = previewCache.keys().next().value;
+    const oldest = previewCache.get(oldestKey);
+    previewCache.delete(oldestKey);
+    previewCacheBytes -= oldest?.buffer?.length || 0;
+  }
 };
 
 const resolveFolder = async (event, integration) => {
@@ -85,7 +124,7 @@ const operationalFiles = async (event, token) => {
         id: clean(entry.id || entry.path_lower || path), name: clean(entry.name || 'Event file'), relativePath,
         size: Number(entry.size || 0), modifiedAt: entry.server_modified || entry.client_modified || null,
         downloadUrl: `/api/public/event-workspace/${event._id}/file?path=${encodeURIComponent(path)}&token=${encodeURIComponent(token)}`,
-        previewUrl: `/api/public/event-workspace/${event._id}/preview?path=${encodeURIComponent(path)}&token=${encodeURIComponent(token)}`,
+        previewUrl: `/api/public/event-workspace/${event._id}/preview?path=${encodeURIComponent(path)}&revision=${encodeURIComponent(clean(entry.rev, 160))}&token=${encodeURIComponent(token)}`,
       });
     }
     page = page.has_more ? await listDropboxFolder(accessToken, { cursor: page.cursor, namespaceId: integration.namespaceId || '' }) : null;
@@ -134,27 +173,41 @@ router.get('/:eventId/preview', limiter, requireViewAccess, async (req, res) => 
   try {
     const event = await Event.findById(req.params.eventId).select('externalId title date').lean();
     if (!event) return res.status(404).json({ message: 'Event not found' });
-    const { integration, accessToken } = await loadDropbox();
+    const integration = await loadDropboxIntegration();
     const folder = await resolveFolder(event, integration);
     const path = clean(req.query?.path);
     const relativePath = path.slice(folder.length).replace(/^\/+/, '');
     if (!inside(path, folder) || isRestrictedEventDocument(relativePath)) return res.status(404).json({ message: 'File not available' });
     const name = path.split('/').filter(Boolean).at(-1) || 'event-file';
     const mime = fileType(name);
-    const source = await downloadDropboxFile(accessToken, path, { namespaceId: integration.namespaceId || '' });
-    if (source.length > 25 * 1024 * 1024) return res.status(413).json({ message: 'This file is too large to preview' });
-    res.setHeader('Cache-Control', 'private, no-store');
-    if (mime.startsWith('image/')) {
-      res.setHeader('Content-Type', mime);
-      res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(name)}`);
-      return res.send(source);
+    if (!mime.startsWith('image/') && !isLeadershipPrintFileSupported(name)) return res.status(415).json({ message: 'Preview is not available for this file type' });
+    const revision = clean(req.query?.revision, 160);
+    const cacheKey = `${path.toLowerCase()}:${revision || 'current'}`;
+    let preview = cachedPreview(cacheKey);
+    if (!preview) {
+      let job = previewJobs.get(cacheKey);
+      if (!job) {
+        job = (async () => {
+          const accessToken = await refreshDropboxAccessToken(decryptDropboxSecret(integration.refreshToken));
+          const source = await downloadDropboxFile(accessToken, path, { namespaceId: integration.namespaceId || '' });
+          if (source.length > 25 * 1024 * 1024) throw Object.assign(new Error('This file is too large to preview'), { statusCode: 413 });
+          if (mime.startsWith('image/')) return { buffer: source, contentType: mime, name };
+          const buffer = await convertLeadershipFileToPdf({ fileName: name, buffer: source });
+          return { buffer, contentType: 'application/pdf', name: `${name.replace(/\.[^.]+$/, '')}.pdf` };
+        })();
+        previewJobs.set(cacheKey, job);
+      }
+      try {
+        preview = await job;
+        storePreview(cacheKey, preview);
+      } finally {
+        if (previewJobs.get(cacheKey) === job) previewJobs.delete(cacheKey);
+      }
     }
-    if (!isLeadershipPrintFileSupported(name)) return res.status(415).json({ message: 'Preview is not available for this file type' });
-    const pdf = await convertLeadershipFileToPdf({ fileName: name, buffer: source });
-    const previewName = `${name.replace(/\.[^.]+$/, '')}.pdf`;
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(previewName)}`);
-    return res.send(pdf);
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.setHeader('Content-Type', preview.contentType);
+    res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(preview.name)}`);
+    return res.send(preview.buffer);
   } catch (error) {
     return sendApiError(res, error, { context: 'Public event preview failed', defaultStatus: 502, fallbackMessage: 'Could not prepare this preview' });
   }

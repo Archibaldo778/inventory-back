@@ -6,6 +6,7 @@ import EventReportSettings from '../models/EventReportSettings.js';
 import { listSlackUsers } from '../utils/slackApi.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import { sendEventReportEmail } from '../utils/eventReportEmail.js';
+import { analyzeEventReports } from '../utils/eventReportAi.js';
 
 const router = Router();
 const clean = (value, max = 500) => String(value ?? '').trim().slice(0, max);
@@ -13,12 +14,53 @@ const clean = (value, max = 500) => String(value ?? '').trim().slice(0, max);
 router.get('/', async (req, res) => {
   try {
     const filter = {};
-    if (req.query?.eventId) filter.eventId = clean(req.query.eventId, 80);
+    const eventId = clean(req.query?.eventId, 80);
+    if (eventId && !mongoose.Types.ObjectId.isValid(eventId)) return res.status(400).json({ message: 'Invalid event' });
+    if (eventId) filter.eventId = eventId;
     if (req.query?.status) filter.status = clean(req.query.status, 40);
-    const reports = await EventReport.find(filter).sort({ eventDate: -1, reporterName: 1 }).limit(1000).lean();
-    return res.json({ items: reports });
+    const [reports, event] = await Promise.all([
+      EventReport.find(filter).sort({ eventDate: -1, reporterName: 1 }).limit(1000).lean(),
+      eventId ? Event.findById(eventId).select('meta.eventReportTest meta.eventReportAnalysis').lean() : null,
+    ]);
+    const analysis = event?.meta?.eventReportAnalysis || null;
+    const newestSubmission = reports.reduce((latest, report) => Math.max(latest, new Date(report.submittedAt || 0).getTime() || 0), 0);
+    const analysisTime = new Date(analysis?.generatedAt || 0).getTime() || 0;
+    return res.json({
+      items: reports,
+      ai: eventId ? {
+        enabledForEvent: event?.meta?.eventReportTest === true,
+        configured: Boolean(clean(process.env.OPENAI_API_KEY, 2000)),
+        analysis,
+        stale: Boolean(analysis && newestSubmission > analysisTime),
+      } : undefined,
+    });
   } catch (error) {
     return sendApiError(res, error, { context: 'Event reports list failed', fallbackMessage: 'Could not load event reports' });
+  }
+});
+
+router.post('/:eventId/analysis', async (req, res) => {
+  try {
+    const eventId = clean(req.params.eventId, 80);
+    if (!mongoose.Types.ObjectId.isValid(eventId)) return res.status(400).json({ message: 'Invalid event' });
+    const event = await Event.findById(eventId).select('title date client meta.eventReportTest').lean();
+    if (!event) return res.status(404).json({ message: 'Event was not found' });
+    if (event?.meta?.eventReportTest !== true) return res.status(403).json({ message: 'AI analysis is currently limited to test events' });
+    const reports = await EventReport.find({ eventId, status: 'submitted' }).sort({ submittedAt: 1 }).limit(50).lean();
+    if (!reports.length) return res.status(409).json({ message: 'Submit at least one report before generating an AI analysis' });
+    const result = await analyzeEventReports({ event, reports });
+    const saved = {
+      ...result.analysis,
+      model: result.model,
+      generatedAt: new Date(),
+      generatedBy: clean(req.auth?.email || req.auth?.username || req.auth?.userId, 200),
+      reportCount: reports.length,
+      reportIds: reports.map((report) => String(report._id)),
+    };
+    await Event.updateOne({ _id: eventId }, { $set: { 'meta.eventReportAnalysis': saved } });
+    return res.json({ analysis: saved, stale: false });
+  } catch (error) {
+    return sendApiError(res, error, { context: 'Event report AI analysis failed', fallbackMessage: 'Could not generate the AI analysis' });
   }
 });
 

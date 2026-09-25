@@ -9,6 +9,7 @@ import {
   matchSlackEventReporters,
   matchSlackEventWorkers,
   slackEventChannelName,
+  slackEventReportsEnabledForEvent,
   slackEventSeriesKey,
   slackScheduleSeries,
   slackEventUserGroupMembers,
@@ -21,6 +22,18 @@ test('every event channel includes the permanent channel administrators', () => 
     'Chris Olson',
   ]);
   assert.deepEqual(eventChannelAdminPeople({ meta: { eventReportTest: true } }), []);
+});
+
+test('event report DMs can be enabled only for an explicitly marked test event', () => {
+  const previous = process.env.SLACK_EVENT_REPORTS_ENABLED;
+  delete process.env.SLACK_EVENT_REPORTS_ENABLED;
+  try {
+    assert.equal(slackEventReportsEnabledForEvent({}), false);
+    assert.equal(slackEventReportsEnabledForEvent({ meta: { eventReportTest: true } }), true);
+  } finally {
+    if (previous === undefined) delete process.env.SLACK_EVENT_REPORTS_ENABLED;
+    else process.env.SLACK_EVENT_REPORTS_ENABLED = previous;
+  }
 });
 
 test('Slack event channel names are stable, valid, and short', () => {

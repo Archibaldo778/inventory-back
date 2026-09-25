@@ -31,6 +31,9 @@ const ALWAYS_EVENT_CHANNEL_ADMINS = ['Ivan Vyskrebentsev', 'Iurie Scurtul', 'Chr
 const EVENT_LEADERSHIP_POSITION = /(?:captain|floor\s+lead|lead\s+chef|ma[iî]tre(?:\s*['’]?\s*d)?|driver)/i;
 export const slackEventChannelsEnabled = () => /^(?:1|true|yes|on)$/i.test(clean(process.env.SLACK_EVENT_CHANNELS_ENABLED));
 export const slackEventReportsEnabled = () => /^(?:1|true|yes|on)$/i.test(clean(process.env.SLACK_EVENT_REPORTS_ENABLED));
+export const slackEventReportsEnabledForEvent = (event = {}) => (
+  slackEventReportsEnabled() || event?.meta?.eventReportTest === true
+);
 const normalize = (value) => clean(value)
   .normalize('NFKD')
   .replace(/[\u0300-\u036f]/g, '')
@@ -503,7 +506,7 @@ export const runSlackEventChannelSync = async ({ now = new Date(), eventId = '',
           }
         }
 
-        if (slackEventReportsEnabled()) {
+        if (slackEventReportsEnabledForEvent(seriesEvent)) {
           const reporters = matchSlackEventReporters({ schedules: [seriesSchedule], slackUsers, linkedSlackByNowstaId });
           for (const reporter of reporters.matched) {
             const requestKey = `${seriesEvent._id}:${reporter.id}`;
@@ -589,10 +592,17 @@ export const runSlackEventChannelSync = async ({ now = new Date(), eventId = '',
 };
 
 export const runSlackEventReportReminders = async ({ now = new Date() } = {}) => {
-  if (!slackEventReportsEnabled() || !clean(process.env.SLACK_BOT_TOKEN)) return { configured: false, sent: 0, failed: 0 };
-  const pending = await EventReport.find({
+  if (!clean(process.env.SLACK_BOT_TOKEN)) return { configured: false, sent: 0, failed: 0 };
+  const globalReportsEnabled = slackEventReportsEnabled();
+  const pendingFilter = {
     status: 'pending', requestSentAt: { $ne: null }, nextReminderAt: { $ne: null, $lte: now },
-  }).sort({ nextReminderAt: 1 }).limit(200);
+  };
+  if (!globalReportsEnabled) {
+    const testEventIds = await Event.find({ 'meta.eventReportTest': true }).distinct('_id');
+    if (!testEventIds.length) return { configured: true, sent: 0, failed: 0 };
+    pendingFilter.eventId = { $in: testEventIds };
+  }
+  const pending = await EventReport.find(pendingFilter).sort({ nextReminderAt: 1 }).limit(200);
   const eventIds = [...new Set(pending.map((report) => String(report.eventId)))];
   const events = await Event.find({ _id: { $in: eventIds } }).select('_id title date').lean();
   const eventsById = new Map(events.map((event) => [String(event._id), event]));

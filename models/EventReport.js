@@ -10,20 +10,14 @@ const eventReportSchema = new mongoose.Schema({
   reporterName: { type: String, default: '', trim: true },
   reporterEmail: { type: String, default: '', trim: true, lowercase: true },
   position: { type: String, default: '', trim: true },
+  salesRep: { type: String, default: '', trim: true },
   status: { type: String, enum: ['pending', 'submitted'], default: 'pending', index: true },
   requestSentAt: { type: Date, default: null },
   lastReminderAt: { type: Date, default: null },
   nextReminderAt: { type: Date, default: null, index: true },
   reminderCount: { type: Number, default: 0, min: 0 },
   submittedAt: { type: Date, default: null },
-  answers: {
-    overallSummary: { type: String, default: '', trim: true },
-    issues: { type: String, default: '', trim: true },
-    staffingNotes: { type: String, default: '', trim: true },
-    kitchenNotes: { type: String, default: '', trim: true },
-    clientFeedback: { type: String, default: '', trim: true },
-    followUpRequired: { type: Boolean, default: false },
-  },
+  answers: { type: mongoose.Schema.Types.Mixed, default: {} },
 }, { timestamps: true });
 
 eventReportSchema.index({ eventId: 1, slackUserId: 1 }, { unique: true });

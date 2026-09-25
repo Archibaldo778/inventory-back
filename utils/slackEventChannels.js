@@ -516,10 +516,12 @@ export const runSlackEventChannelSync = async ({ now = new Date(), eventId = '',
             const requestKey = `${seriesEvent._id}:${reporter.id}`;
             const report = await EventReport.findOneAndUpdate(
               { eventId: seriesEvent._id, slackUserId: reporter.id },
-              { $setOnInsert: {
-                nowstaEventId: clean(seriesSchedule.nowstaEventId), eventTitle: clean(seriesEvent.title), eventDate: clean(seriesSchedule.date),
-                eventEndsAt: new Date(eventEndsAt), slackUserId: reporter.id, reporterName: reporter.name,
-                reporterEmail: reporter.email, position: clean(reporter.position), status: 'pending',
+              { $set: {
+                eventTitle: clean(seriesEvent.title), eventDate: clean(seriesSchedule.date), reporterName: reporter.name,
+                reporterEmail: reporter.email, position: clean(reporter.position), salesRep: eventManagerName(seriesEvent),
+              }, $setOnInsert: {
+                nowstaEventId: clean(seriesSchedule.nowstaEventId), eventEndsAt: new Date(eventEndsAt),
+                slackUserId: reporter.id, status: 'pending',
                 nextReminderAt: new Date(new Date(eventEndsAt).getTime() + eventReportReminderDelayMs(seriesEvent)),
               } },
               { upsert: true, new: true, setDefaultsOnInsert: true }

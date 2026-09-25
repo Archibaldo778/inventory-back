@@ -717,6 +717,7 @@ const markExcludedNowstaEvents = async (excludedEvents = []) => {
               },
             ],
             status: { $not: /^deleted$/i },
+            'meta.eventReportTest': { $ne: true },
           },
           update: {
             $set: {
@@ -1384,7 +1385,15 @@ router.get('/', cacheWithGroup('5 minutes', CACHE_GROUP, {
   try {
     const q = {
       status: { $not: /^deleted$/i },
-      'meta.nowsta.excluded': { $ne: true },
+      $and: [
+        { $or: [
+          { 'meta.nowsta.excluded': { $ne: true } },
+          // Test report events are intentionally created from Nowsta-only rows.
+          // Keep their full event workspace visible even when the source row has
+          // no Caterease/external ID and is classified as a schedule-only event.
+          { 'meta.eventReportTest': true },
+        ] },
+      ],
     };
     if (req.query.managerId) q.managerId = req.query.managerId;
     if (String(req.query.calendar || '') === '1') {

@@ -1,9 +1,12 @@
 import { Router } from 'express';
 import Event from '../models/Event.js';
 import NowstaScheduleEntry from '../models/NowstaScheduleEntry.js';
+import Staff from '../models/Staff.js';
 import { requireAdmin, requireAuth } from '../middleware/auth.js';
 import { runSlackEventChannelSync, slackEventChannelsEnabled } from '../utils/slackEventChannels.js';
 import { listSlackUsers, slackAuthTest } from '../utils/slackApi.js';
+import { createNowstaClient } from '../utils/nowstaApi.js';
+import { buildSlackPeopleAudit } from '../utils/slackPeopleAudit.js';
 
 const router = Router();
 
@@ -39,6 +42,21 @@ router.post('/events/:eventId/sync', requireAuth, requireAdmin, async (req, res)
     return res.json(await runSlackEventChannelSync({ eventId: req.params.eventId, force: true }));
   } catch (error) {
     return res.status(Number(error?.statusCode) || 502).json({ error: error?.message || 'Slack event channel sync failed' });
+  }
+});
+
+router.get('/people/audit', requireAuth, requireAdmin, async (_req, res) => {
+  try {
+    const nowstaClient = createNowstaClient();
+    const [slackUsers, nowstaUsers, linkedStaff] = await Promise.all([
+      listSlackUsers(),
+      nowstaClient.listAll('/v2/company_users', { include_archived: false }),
+      Staff.find({ nowstaCompanyUserId: { $ne: '' }, slackUserId: { $ne: '' } })
+        .select('nowstaCompanyUserId slackUserId').lean(),
+    ]);
+    return res.json(buildSlackPeopleAudit({ nowstaUsers, slackUsers, linkedStaff }));
+  } catch (error) {
+    return res.status(Number(error?.statusCode) || 502).json({ error: error?.message || 'Could not audit Slack and Nowsta people' });
   }
 });
 

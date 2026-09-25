@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import mongoose from 'mongoose';
 import multer from 'multer';
+import Event from '../models/Event.js';
 import NowstaScheduleEntry from '../models/NowstaScheduleEntry.js';
 import OperationsPerson from '../models/OperationsPerson.js';
 import Staff from '../models/Staff.js';
@@ -110,11 +111,19 @@ router.get('/events/:nowstaEventId', async (req, res) => {
     if (!entry) return res.status(404).json({ message: 'Operations event not found' });
     const workers = (entry.shifts || []).flatMap((shift) => (shift.workers || []).map((worker) => ({ worker, shift })));
     const workerIds = workers.map(({ worker }) => clean(worker.companyUserId, 120)).filter(Boolean);
-    const [staff, operationsPeople] = await Promise.all([
+    const [staff, operationsPeople, linkedEvent] = await Promise.all([
       Staff.find({}).select('firstName lastName positions active photo').lean(),
       OperationsPerson.find({ nowstaCompanyUserId: { $in: workerIds } })
         .select('nowstaCompanyUserId fullName firstName lastName email phone roles active')
         .lean(),
+      Event.findOne({
+        'meta.nowsta.apiEventId': nowstaEventId,
+        status: { $not: /^deleted$/i },
+        $or: [
+          { 'meta.nowsta.excluded': { $ne: true } },
+          { 'meta.eventReportTest': true },
+        ],
+      }).select('_id title').lean(),
     ]);
     const operationsByNowstaId = new Map(operationsPeople.map((person) => [person.nowstaCompanyUserId, person]));
     const shifts = (entry.shifts || []).map((shift) => ({
@@ -129,7 +138,11 @@ router.get('/events/:nowstaEventId', async (req, res) => {
         };
       }),
     }));
-    return res.json({ ...entry, shifts });
+    return res.json({
+      ...entry,
+      shifts,
+      linkedEvent: linkedEvent ? { id: String(linkedEvent._id), title: linkedEvent.title } : null,
+    });
   } catch (error) {
     return sendApiError(res, error, { context: 'Operations event lookup failed', fallbackMessage: 'Unable to load operations event' });
   }

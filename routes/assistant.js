@@ -208,11 +208,22 @@ router.post('/messages', messageRateLimit, async (req, res) => {
     const requestedQuantityText = message.replace(/\bOCC\s*0*\d+\b/gi, '');
     const requestedQuantityMatch = requestedQuantityText.match(/(?:\bqty\s*|\bquantity\s*|\bпо\s+)?(\d{1,3})\s*(?:pcs?|pieces?|шт(?:ук[аи]?)?)?\b/i);
     const requestedQuantity = Math.max(1, Math.min(999, Math.trunc(Number(requestedQuantityMatch?.[1]) || 1)));
-    const requestedProduct = exactInventory[0] || inventoryCandidates[0] || null;
+    const modelProductCode = clean(answer?.uiAction?.productCode, 80).toLowerCase();
+    const modelProductName = clean(answer?.uiAction?.productName, 200).toLowerCase();
+    const modelSelectedProduct = inventoryCandidates.find((item) => (
+      modelProductCode
+      && clean(item.inventoryCode, 80).toLowerCase() === modelProductCode
+    )) || inventoryCandidates.find((item) => (
+      modelProductName
+      && clean(item.name, 200).toLowerCase() === modelProductName
+    ));
+    const requestedProduct = exactInventory[0]
+      || modelSelectedProduct
+      || (inventoryCandidates.length === 1 ? inventoryCandidates[0] : null);
     let uiAction = answer.uiAction;
     if (addRequested && requestedProduct && Number(requestedProduct.quantity) > 0) {
       uiAction = {
-        kind: 'preview_add_decor', query: '', colors: [],
+        kind: 'add_decor', query: '', colors: [],
         productCode: clean(requestedProduct.inventoryCode, 80).toUpperCase(),
         productName: clean(requestedProduct.name, 200),
         quantity: Math.min(requestedQuantity, Math.max(1, Math.trunc(Number(requestedProduct.quantity) || 1))),

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  eventChannelAdminPeople,
   eventLeadershipPeople,
   matchSlackBarReturnRecipients,
   matchSlackEventCaptains,
@@ -12,6 +13,15 @@ import {
   slackScheduleSeries,
   slackEventUserGroupMembers,
 } from '../utils/slackEventChannels.js';
+
+test('every event channel includes the permanent channel administrators', () => {
+  assert.deepEqual(eventChannelAdminPeople().map((person) => person.name), [
+    'Ivan Vyskrebentsev',
+    'Iurie Scurtul',
+    'Chris Olson',
+  ]);
+  assert.deepEqual(eventChannelAdminPeople({ meta: { eventReportTest: true } }), []);
+});
 
 test('Slack event channel names are stable, valid, and short', () => {
   const name = slackEventChannelName({

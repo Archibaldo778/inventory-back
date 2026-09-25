@@ -27,6 +27,7 @@ const DEFAULT_EVENT_LEADERSHIP_TEAMS = [
   { managers: ['Emma'], slackGroupNames: [], assistants: [] },
 ];
 const ALWAYS_INCLUDED_SLACK_GROUPS = [{ label: 'Leadership Team', names: ['Leadership Team', 'leadershipTeam'] }];
+const ALWAYS_EVENT_CHANNEL_ADMINS = ['Ivan Vyskrebentsev', 'Iurie Scurtul', 'Chris Olson'];
 const EVENT_LEADERSHIP_POSITION = /(?:captain|floor\s+lead|lead\s+chef|ma[iî]tre(?:\s*['’]?\s*d)?|driver)/i;
 export const slackEventChannelsEnabled = () => /^(?:1|true|yes|on)$/i.test(clean(process.env.SLACK_EVENT_CHANNELS_ENABLED));
 export const slackEventReportsEnabled = () => /^(?:1|true|yes|on)$/i.test(clean(process.env.SLACK_EVENT_REPORTS_ENABLED));
@@ -162,6 +163,10 @@ export const eventLeadershipPeople = (event = {}) => {
   }));
   return [managerName, ...(team?.assistants || [])].map((name) => ({ name }));
 };
+
+export const eventChannelAdminPeople = (event = {}) => (
+  event?.meta?.eventReportTest === true ? [] : ALWAYS_EVENT_CHANNEL_ADMINS.map((name) => ({ name }))
+);
 
 const eventLeadershipTeam = (event = {}) => {
   const normalizedManager = normalize(eventManagerName(event));
@@ -438,6 +443,7 @@ export const runSlackEventChannelSync = async ({ now = new Date(), eventId = '',
         unmatched: [],
       };
       const workers = mergeSlackMatches(
+        matchSlackPeople({ people: eventChannelAdminPeople(event), slackUsers }),
         groupMatches,
         ...(assignedWorkersOnly ? [] : [matchSlackPeople({ people: eventLeadershipPeople(event), slackUsers })]),
         matchSlackEventWorkers({ schedules: scheduleSeries, slackUsers, linkedSlackByNowstaId, includeAllPositions: assignedWorkersOnly })

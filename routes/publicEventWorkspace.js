@@ -6,7 +6,7 @@ import DropboxIntegration from '../models/DropboxIntegration.js';
 import { createMemoryRateLimiter } from '../middleware/rateLimit.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import { verifyEventGuestAccess } from '../utils/eventGuestAccess.js';
-import { isRestrictedEventDocument } from '../utils/eventFileVisibility.js';
+import { isLeadershipEventDocument, isRestrictedEventDocument } from '../utils/eventFileVisibility.js';
 import { buildDropboxPathDateRangePattern, findDropboxFolderEventMatch, inferDropboxEventFolderPath, inferDropboxPathDate, selectLatestDropboxFileRevisions } from '../utils/dropboxDocuments.js';
 import { decryptDropboxSecret, downloadDropboxFile, listDropboxFolder, refreshDropboxAccessToken } from '../utils/dropboxApi.js';
 import { resolveOperationalDropboxFolder } from '../utils/operationalDropbox.js';
@@ -136,7 +136,7 @@ const operationalFiles = async (event, token) => {
       if (entry?.['.tag'] !== 'file') continue;
       const path = clean(entry.path_display || entry.path_lower);
       const relativePath = path.slice(folderPath.length).replace(/^\/+/, '');
-      if (!inside(path, folderPath) || /^~\$/i.test(clean(entry.name)) || isRestrictedEventDocument(relativePath)) continue;
+      if (!inside(path, folderPath) || !isLeadershipEventDocument(relativePath) || /^~\$/i.test(clean(entry.name)) || isRestrictedEventDocument(relativePath)) continue;
       files.push({
         id: clean(entry.id || entry.path_lower || path), name: clean(entry.name || 'Event file'), relativePath,
         size: Number(entry.size || 0), modifiedAt: entry.server_modified || entry.client_modified || null,
@@ -179,7 +179,7 @@ router.get('/:eventId/file', limiter, requireViewAccess, async (req, res) => {
     const folder = await resolveFolder(event, integration);
     const path = clean(req.query?.path);
     const relativePath = path.slice(folder.length).replace(/^\/+/, '');
-    if (!inside(path, folder) || isRestrictedEventDocument(relativePath)) return res.status(404).json({ message: 'File not available' });
+    if (!inside(path, folder) || !isLeadershipEventDocument(relativePath) || isRestrictedEventDocument(relativePath)) return res.status(404).json({ message: 'File not available' });
     const buffer = await downloadDropboxFile(accessToken, path, { namespaceId: integration.namespaceId || '' });
     const name = path.split('/').filter(Boolean).at(-1) || 'event-file';
     res.type(fileType(name)); res.attachment(name); return res.send(buffer);
@@ -196,7 +196,7 @@ router.get('/:eventId/preview', limiter, requireViewAccess, async (req, res) => 
     const folder = await resolveFolder(event, integration);
     const path = clean(req.query?.path);
     const relativePath = path.slice(folder.length).replace(/^\/+/, '');
-    if (!inside(path, folder) || isRestrictedEventDocument(relativePath)) return res.status(404).json({ message: 'File not available' });
+    if (!inside(path, folder) || !isLeadershipEventDocument(relativePath) || isRestrictedEventDocument(relativePath)) return res.status(404).json({ message: 'File not available' });
     const name = path.split('/').filter(Boolean).at(-1) || 'event-file';
     const mime = fileType(name);
     if (!mime.startsWith('image/') && !isLeadershipPrintFileSupported(name)) return res.status(415).json({ message: 'Preview is not available for this file type' });

@@ -52,6 +52,11 @@ export const isVideoEventDocument = (value) => {
   return words.includes('video') || words.includes('videos');
 };
 
+export const isLeadershipEventDocument = (value) => {
+  const firstFolder = String(value || '').replace(/\\/g, '/').split('/').map((part) => part.trim()).filter(Boolean)[0] || '';
+  return /^leadership files?$/i.test(firstFolder);
+};
+
 export const isRestrictedEventDocument = (value) => (
   isFinancialEventDocument(value)
   || isInsuranceEventDocument(value)

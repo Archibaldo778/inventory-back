@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   isFinancialEventDocument,
+  isLeadershipEventDocument,
   isRestrictedEventDocument,
 } from '../utils/eventFileVisibility.js';
 
@@ -38,4 +39,12 @@ test('restricted file rules keep operational leadership files available', () => 
   assert.equal(isRestrictedEventDocument('Pack Out/Beverage PO.docx'), false);
   assert.equal(isRestrictedEventDocument('Rental Order.xlsx'), false);
   assert.equal(isRestrictedEventDocument('Tape Key.pdf'), false);
+});
+
+test('public event workspace exposes only the Leadership File folder', () => {
+  assert.equal(isLeadershipEventDocument('Leadership File/Event KM.docx'), true);
+  assert.equal(isLeadershipEventDocument('Leadership Files/Kitchen/Event KPO.docx'), true);
+  assert.equal(isLeadershipEventDocument('Kitchen/Event KM.docx'), false);
+  assert.equal(isLeadershipEventDocument('box_sample1.png'), false);
+  assert.equal(isLeadershipEventDocument('Proposals/Event Proposal.pdf'), false);
 });

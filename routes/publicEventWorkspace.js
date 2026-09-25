@@ -19,8 +19,10 @@ const tokenFrom = (req) => clean(req.query?.token || req.get('X-Event-Access'), 
 const PREVIEW_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const PREVIEW_CACHE_MAX_BYTES = 96 * 1024 * 1024;
 const PREVIEW_CACHE_MAX_ENTRY_BYTES = 16 * 1024 * 1024;
+const WORKSPACE_CACHE_TTL_MS = 2 * 60 * 1000;
 const previewCache = new Map();
 const previewJobs = new Map();
+const workspaceCache = new Map();
 let previewCacheBytes = 0;
 
 const requireViewAccess = (req, res, next) => {
@@ -104,7 +106,22 @@ const inside = (path, folder) => {
   return Boolean(normalizedPath && normalizedFolder && normalizedPath.startsWith(`${normalizedFolder}/`));
 };
 
+const publicOperationalFile = (event, token, file) => {
+  const { path, revision, ...visible } = file;
+  return {
+    ...visible,
+    downloadUrl: `/api/public/event-workspace/${event._id}/file?path=${encodeURIComponent(path)}&token=${encodeURIComponent(token)}`,
+    previewUrl: `/api/public/event-workspace/${event._id}/preview?path=${encodeURIComponent(path)}&revision=${encodeURIComponent(revision)}&token=${encodeURIComponent(token)}`,
+  };
+};
+
 const operationalFiles = async (event, token) => {
+  const cacheKey = String(event._id);
+  const cached = workspaceCache.get(cacheKey);
+  if (cached && Date.now() - cached.createdAt < WORKSPACE_CACHE_TTL_MS) {
+    return { folderPath: cached.folderPath, files: cached.files.map((file) => publicOperationalFile(event, token, file)) };
+  }
+  if (cached) workspaceCache.delete(cacheKey);
   const { integration, accessToken } = await loadDropbox();
   const folderPath = await resolveFolder(event, integration);
   let page;
@@ -123,13 +140,15 @@ const operationalFiles = async (event, token) => {
       files.push({
         id: clean(entry.id || entry.path_lower || path), name: clean(entry.name || 'Event file'), relativePath,
         size: Number(entry.size || 0), modifiedAt: entry.server_modified || entry.client_modified || null,
-        downloadUrl: `/api/public/event-workspace/${event._id}/file?path=${encodeURIComponent(path)}&token=${encodeURIComponent(token)}`,
-        previewUrl: `/api/public/event-workspace/${event._id}/preview?path=${encodeURIComponent(path)}&revision=${encodeURIComponent(clean(entry.rev, 160))}&token=${encodeURIComponent(token)}`,
+        path, revision: clean(entry.rev, 160),
       });
     }
     page = page.has_more ? await listDropboxFolder(accessToken, { cursor: page.cursor, namespaceId: integration.namespaceId || '' }) : null;
   }
-  return { folderPath, files: selectLatestDropboxFileRevisions(files).sort((a, b) => a.relativePath.localeCompare(b.relativePath, undefined, { numeric: true })) };
+  const latestFiles = selectLatestDropboxFileRevisions(files).sort((a, b) => a.relativePath.localeCompare(b.relativePath, undefined, { numeric: true }));
+  workspaceCache.set(cacheKey, { folderPath, files: latestFiles, createdAt: Date.now() });
+  while (workspaceCache.size > 100) workspaceCache.delete(workspaceCache.keys().next().value);
+  return { folderPath, files: latestFiles.map((file) => publicOperationalFile(event, token, file)) };
 };
 
 router.get('/:eventId', limiter, requireViewAccess, async (req, res) => {

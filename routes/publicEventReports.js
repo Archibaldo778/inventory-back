@@ -30,6 +30,24 @@ const REPORT_REQUIRED_FIELDS = [
   'finalWalkthrough', 'actualGuestCount', 'rerunsOrPurchases', 'paperworkAccurate', 'partyExtended',
   'staffStayedLate', 'prepWorkTimeAdded', 'healthSafetyIssues', 'overallFeedback',
 ];
+const KITCHEN_REPORT_STRING_FIELDS = [
+  'staffLate', 'staffLateWho', 'staffProperlyDressed', 'staffDressIssues', 'staffFollowedDirection',
+  'staffDirectionIssues', 'staffSizeAppropriate', 'staffSizeComments', 'staffBroughtTools',
+  'staffToolsMissing', 'staffComments', 'rentalsReceived', 'rentalsWorking', 'kitchenEquipmentReceived',
+  'choiceEntreeService', 'choiceEntreeDetails', 'foodEnough', 'foodQuality', 'foodOnTime',
+  'fohKitchenCommunication', 'otherIssues', 'paperworkLeadTime', 'paperworkAccurate',
+  'healthSafetyIssues', 'healthSafetyFeedback', 'concernsImprovements', 'rerunsOrPurchases',
+  'rerunsDetails', 'overtime', 'overtimeDetails', 'prepWorkTimeAdded', 'prepWorkTimeDetails',
+  'photoLinks', 'overallEvaluation',
+];
+const KITCHEN_REPORT_REQUIRED_FIELDS = [
+  'staffLate', 'staffProperlyDressed', 'staffFollowedDirection', 'staffSizeAppropriate',
+  'staffBroughtTools', 'staffComments', 'rentalsReceived', 'rentalsWorking', 'kitchenEquipmentReceived',
+  'choiceEntreeService', 'foodEnough', 'foodQuality', 'foodOnTime', 'fohKitchenCommunication',
+  'otherIssues', 'paperworkLeadTime', 'paperworkAccurate', 'healthSafetyIssues',
+  'healthSafetyFeedback', 'concernsImprovements', 'rerunsOrPurchases', 'overtime',
+  'prepWorkTimeAdded', 'overallEvaluation',
+];
 const loadAccess = (req, res) => {
   if (!mongoose.Types.ObjectId.isValid(String(req.params.eventId || ''))) {
     res.status(400).json({ message: 'Invalid event' });
@@ -46,7 +64,7 @@ const loadAccess = (req, res) => {
 const publicReport = (report) => ({
   id: String(report._id), eventId: String(report.eventId), eventTitle: report.eventTitle,
   eventDate: report.eventDate, reporterName: report.reporterName, reporterEmail: report.reporterEmail,
-  position: report.position, salesRep: report.salesRep,
+  position: report.position, salesRep: report.salesRep, reportType: report.reportType || 'captain',
   status: report.status, submittedAt: report.submittedAt, answers: report.answers || {}, emailDelivery: report.emailDelivery,
 });
 
@@ -69,9 +87,12 @@ router.post('/:eventId', limiter, async (req, res) => {
     const report = await EventReport.findOne({ eventId: req.params.eventId, slackUserId: clean(access.subjectId, 100) });
     if (!report) return res.status(404).json({ message: 'Event report was not found' });
     if (report.status === 'submitted') return res.status(409).json({ message: 'This report has already been submitted' });
-    const answers = Object.fromEntries(REPORT_STRING_FIELDS.map((key) => [key, clean(req.body?.answers?.[key])]));
-    answers.followUpRequired = req.body?.answers?.followUpRequired === true;
-    const missingRequired = REPORT_REQUIRED_FIELDS.filter((key) => !answers[key]);
+    const kitchenReport = report.reportType === 'kitchen';
+    const stringFields = kitchenReport ? KITCHEN_REPORT_STRING_FIELDS : REPORT_STRING_FIELDS;
+    const requiredFields = kitchenReport ? KITCHEN_REPORT_REQUIRED_FIELDS : REPORT_REQUIRED_FIELDS;
+    const answers = Object.fromEntries(stringFields.map((key) => [key, clean(req.body?.answers?.[key])]));
+    if (!kitchenReport) answers.followUpRequired = req.body?.answers?.followUpRequired === true;
+    const missingRequired = requiredFields.filter((key) => !answers[key]);
     if (missingRequired.length) return res.status(400).json({ message: `Complete all required questions (${missingRequired.length} remaining)` });
     report.answers = answers;
     report.status = 'submitted';

@@ -48,9 +48,40 @@ export const EVENT_REPORT_EMAIL_SECTIONS = [
   ]],
 ];
 
+export const KITCHEN_REPORT_EMAIL_SECTIONS = [
+  ['Staff', [
+    ['staffLate', 'Staff late'], ['staffLateWho', 'Who was late'], ['staffProperlyDressed', 'Staff properly dressed'],
+    ['staffDressIssues', 'Dress issues'], ['staffFollowedDirection', 'Followed direction / communicated'],
+    ['staffDirectionIssues', 'Direction or communication issues'], ['staffSizeAppropriate', 'Staff size appropriate'],
+    ['staffSizeComments', 'Staff size comments'], ['staffBroughtTools', 'Staff brought knives / tools'],
+    ['staffToolsMissing', 'Missing tools'], ['staffComments', 'Staff comments'],
+  ]],
+  ['Equipment', [
+    ['rentalsReceived', 'All required rentals received'], ['rentalsWorking', 'Rentals working properly'],
+    ['kitchenEquipmentReceived', 'All kitchen equipment / tools received'],
+  ]],
+  ['Service / Kitchen', [
+    ['choiceEntreeService', 'Choice of entree service'], ['choiceEntreeDetails', 'Entree counts'],
+    ['foodEnough', 'Enough food'], ['foodQuality', 'Food quality'], ['foodOnTime', 'Food served on time'],
+    ['fohKitchenCommunication', 'FOH / kitchen communication'], ['otherIssues', 'Other issues'],
+    ['paperworkLeadTime', 'Paperwork lead time'], ['paperworkAccurate', 'Paperwork reflected event needs'],
+    ['healthSafetyIssues', 'Health & Safety issues'], ['healthSafetyFeedback', 'Health & Safety feedback'],
+    ['concernsImprovements', 'Concerns / Improvements'],
+  ]],
+  ['Final Evaluation', [
+    ['rerunsOrPurchases', 'Re-runs or purchases'], ['rerunsDetails', 'Re-run details'],
+    ['overtime', 'Overtime'], ['overtimeDetails', 'Overtime details'], ['prepWorkTimeAdded', 'Prep-work time added'],
+    ['prepWorkTimeDetails', 'Added time details'], ['photoLinks', 'Event photo links'],
+    ['overallEvaluation', 'Overall event evaluation'],
+  ]],
+];
+
+const emailSections = (report) => report?.reportType === 'kitchen' ? KITCHEN_REPORT_EMAIL_SECTIONS : EVENT_REPORT_EMAIL_SECTIONS;
+const emailReportTitle = (report) => report?.reportType === 'kitchen' ? 'Kitchen Report' : "Captain's Report";
+
 export const renderEventReportEmail = (report = {}) => {
   const answers = report.answers || {};
-  const sections = EVENT_REPORT_EMAIL_SECTIONS.map(([title, fields]) => {
+  const sections = emailSections(report).map(([title, fields]) => {
     const rows = fields.map(([key, label], index) => {
       const raw = key === 'followUpRequired' ? (answers[key] ? 'Yes' : 'No') : answers[key];
       const value = clean(raw) || '—';
@@ -67,19 +98,19 @@ export const renderEventReportEmail = (report = {}) => {
   }).join('');
   return `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"></head>
   <body bgcolor="#edf0f2" style="margin:0;padding:0;background-color:#edf0f2;color:#20272c">
-    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent">Captain's report for ${escapeHtml(report.eventTitle)}</div>
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent">${escapeHtml(emailReportTitle(report))} for ${escapeHtml(report.eventTitle)}</div>
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#edf0f2" style="width:100%;background-color:#edf0f2">
       <tr><td align="center" style="padding:24px 10px">
         <table role="presentation" width="640" cellpadding="0" cellspacing="0" border="0" bgcolor="#ffffff" style="width:640px;max-width:640px;border-collapse:collapse;background-color:#ffffff;border:1px solid #d9dde0">
           <tr><td bgcolor="#172129" style="padding:24px 28px;border-top:5px solid #c8aa62;font-family:Arial,sans-serif;color:#ffffff">
             <div style="font-size:11px;line-height:16px;font-weight:bold;letter-spacing:1.4px;color:#d8c38d">OCC STAFFING &amp; SERVICE</div>
-            <div style="padding-top:6px;font-size:28px;line-height:34px;font-weight:bold">Captain's Report</div>
+            <div style="padding-top:6px;font-size:28px;line-height:34px;font-weight:bold">${escapeHtml(emailReportTitle(report))}</div>
           </td></tr>
           <tr><td style="padding:20px 28px 4px;font-family:Arial,sans-serif">
             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse">
               <tr><td width="120" style="padding:5px 0;font-size:12px;font-weight:bold;color:#756b55;text-transform:uppercase">Event</td><td style="padding:5px 0;font-size:15px;font-weight:bold;color:#20272c">${escapeHtml(report.eventTitle) || '—'}</td></tr>
               <tr><td width="120" style="padding:5px 0;font-size:12px;font-weight:bold;color:#756b55;text-transform:uppercase">Date</td><td style="padding:5px 0;font-size:14px;color:#20272c">${escapeHtml(formatEventDate(report.eventDate)) || '—'}</td></tr>
-              <tr><td width="120" style="padding:5px 0;font-size:12px;font-weight:bold;color:#756b55;text-transform:uppercase">Captain</td><td style="padding:5px 0;font-size:14px;color:#20272c">${escapeHtml(report.reporterName) || '—'}</td></tr>
+              <tr><td width="120" style="padding:5px 0;font-size:12px;font-weight:bold;color:#756b55;text-transform:uppercase">${report?.reportType === 'kitchen' ? 'Lead Chef' : 'Captain'}</td><td style="padding:5px 0;font-size:14px;color:#20272c">${escapeHtml(report.reporterName) || '—'}</td></tr>
               <tr><td width="120" style="padding:5px 0;font-size:12px;font-weight:bold;color:#756b55;text-transform:uppercase">Position</td><td style="padding:5px 0;font-size:14px;color:#20272c">${escapeHtml(report.position) || '—'}</td></tr>
             </table>
           </td></tr>
@@ -93,14 +124,14 @@ export const renderEventReportEmail = (report = {}) => {
 
 export const renderEventReportText = (report = {}) => {
   const answers = report.answers || {};
-  const sections = EVENT_REPORT_EMAIL_SECTIONS.map(([title, fields]) => {
+  const sections = emailSections(report).map(([title, fields]) => {
     const rows = fields.map(([key, label]) => {
       const raw = key === 'followUpRequired' ? (answers[key] ? 'Yes' : 'No') : answers[key];
       return `${label}: ${clean(raw) || '—'}`;
     }).join('\n');
     return `${title}\n${rows}`;
   }).join('\n\n');
-  return `CAPTAIN'S REPORT\n${clean(report.eventTitle) || '—'} · ${formatEventDate(report.eventDate) || '—'}\n${clean(report.reporterName) || '—'} · ${clean(report.position) || '—'}\n\n${sections}`;
+  return `${emailReportTitle(report).toUpperCase()}\n${clean(report.eventTitle) || '—'} · ${formatEventDate(report.eventDate) || '—'}\n${clean(report.reporterName) || '—'} · ${clean(report.position) || '—'}\n\n${sections}`;
 };
 
 export const sendEventReportEmail = async ({ report, event, configuredRecipients = [], fetchImpl = fetch }) => {
@@ -121,7 +152,7 @@ export const sendEventReportEmail = async ({ report, event, configuredRecipients
       from: clean(process.env.EVENT_REPORT_FROM, 320) || 'OCC Staffing & Service <reports@reports.occdecks.com>',
       to,
       ...(cc.length ? { cc } : {}),
-      subject: `Captain's Report · ${clean(report.eventTitle, 300)} · ${clean(report.reporterName, 200)}`,
+      subject: `${emailReportTitle(report)} · ${clean(report.eventTitle, 300)} · ${clean(report.reporterName, 200)}`,
       html: renderEventReportEmail(report),
       text: renderEventReportText(report),
     }),

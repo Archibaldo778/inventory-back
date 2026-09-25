@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { EVENT_REPORT_EMAIL_SECTIONS, renderEventReportEmail, renderEventReportText, sendEventReportEmail } from '../utils/eventReportEmail.js';
+import { EVENT_REPORT_EMAIL_SECTIONS, KITCHEN_REPORT_EMAIL_SECTIONS, renderEventReportEmail, renderEventReportText, sendEventReportEmail } from '../utils/eventReportEmail.js';
 
 test('captain report email renders every report section and escapes answers', () => {
   const html = renderEventReportEmail({ eventTitle: '<Test>', reporterName: 'Ivan', answers: { overallFeedback: '<script>alert(1)</script>' } });
@@ -11,6 +11,15 @@ test('captain report email renders every report section and escapes answers', ()
   assert.match(html, /width="640"/);
   assert.match(html, /role="presentation"/);
   assert.match(renderEventReportText({ eventTitle: 'Test', answers: { overallFeedback: 'All good' } }), /Overall feedback: All good/);
+});
+
+test('kitchen report email uses the kitchen template', () => {
+  const html = renderEventReportEmail({ reportType: 'kitchen', eventTitle: 'Kitchen Test', reporterName: 'Chef', answers: { overallEvaluation: 'Successful service' } });
+  assert.equal(KITCHEN_REPORT_EMAIL_SECTIONS.length, 4);
+  assert.match(html, /Kitchen Report/);
+  assert.match(html, /Service \/ Kitchen/);
+  assert.match(html, /Successful service/);
+  assert.doesNotMatch(html, /Sanitation \/ Rentals/);
 });
 
 test('test report email uses fixed OCC recipients and copies the Slack email', async () => {

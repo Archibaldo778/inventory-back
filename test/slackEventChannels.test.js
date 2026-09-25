@@ -6,9 +6,11 @@ import {
   eventLeadershipPeople,
   eventReportReminderDelayMs,
   matchSlackBarReturnRecipients,
+  matchSlackCaptainReporters,
   matchSlackEventCaptains,
   matchSlackEventReporters,
   matchSlackEventWorkers,
+  matchSlackKitchenReporters,
   slackEventChannelName,
   slackEventReportsEnabledForEvent,
   slackEventSeriesKey,
@@ -253,6 +255,21 @@ test('event reports go to captains, maitre d and lead chefs only', () => {
   });
   assert.deepEqual(result.matched.map((worker) => worker.id), ['U1', 'U2', 'U3']);
   assert.deepEqual(result.matched.map((worker) => worker.position), ['Floor Captain', "Maitre D'", 'Lead Chef']);
+});
+
+test('captain and kitchen reports are assigned to separate roles', () => {
+  const options = {
+    schedules: [{ shifts: [
+      { position: 'Floor Captain', workers: [{ name: 'Captain One', status: 'confirmed' }] },
+      { position: 'Lead Chef', workers: [{ name: 'Chef One', status: 'confirmed' }] },
+    ] }],
+    slackUsers: [
+      { id: 'U1', profile: { real_name: 'Captain One' } },
+      { id: 'U2', profile: { real_name: 'Chef One' } },
+    ],
+  };
+  assert.deepEqual(matchSlackCaptainReporters(options).matched.map((worker) => worker.id), ['U1']);
+  assert.deepEqual(matchSlackKitchenReporters(options).matched.map((worker) => worker.id), ['U2']);
 });
 
 test('saved Nowsta to Slack link overrides different email and display name', () => {

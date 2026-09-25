@@ -1,8 +1,11 @@
 import { Router } from 'express';
+import mongoose from 'mongoose';
+import Event from '../models/Event.js';
 import EventReport from '../models/EventReport.js';
 import EventReportSettings from '../models/EventReportSettings.js';
 import { listSlackUsers } from '../utils/slackApi.js';
 import { sendApiError } from '../utils/apiErrors.js';
+import { sendEventReportEmail } from '../utils/eventReportEmail.js';
 
 const router = Router();
 const clean = (value, max = 500) => String(value ?? '').trim().slice(0, max);
@@ -48,6 +51,30 @@ router.put('/settings', async (req, res) => {
     return res.json({ settings });
   } catch (error) {
     return sendApiError(res, error, { context: 'Event report settings save failed', fallbackMessage: 'Could not save report settings' });
+  }
+});
+
+router.post('/:reportId/email', async (req, res) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(String(req.params.reportId || ''))) return res.status(400).json({ message: 'Invalid report' });
+    const report = await EventReport.findById(req.params.reportId);
+    if (!report) return res.status(404).json({ message: 'Event report was not found' });
+    if (report.status !== 'submitted') return res.status(409).json({ message: 'The report has not been submitted yet' });
+    if (report.emailDelivery?.status === 'sent') return res.status(409).json({ message: 'This report email has already been sent' });
+    const [event, settings] = await Promise.all([
+      Event.findById(report.eventId).select('meta.eventReportTest').lean(),
+      EventReportSettings.findOne({ key: 'default' }).lean(),
+    ]);
+    const configuredRecipients = settings?.emailEnabled === true
+      ? (settings.recipients || []).map((recipient) => recipient.email)
+      : [];
+    report.emailDelivery = { status: 'pending', recipients: [], cc: [], error: '' };
+    await report.save();
+    report.emailDelivery = await sendEventReportEmail({ report: report.toObject(), event, configuredRecipients });
+    await report.save();
+    return res.json({ ok: report.emailDelivery.status === 'sent', report });
+  } catch (error) {
+    return sendApiError(res, error, { context: 'Event report email retry failed', fallbackMessage: 'Could not send the event report email' });
   }
 });
 

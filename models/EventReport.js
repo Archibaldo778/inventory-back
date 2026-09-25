@@ -18,6 +18,14 @@ const eventReportSchema = new mongoose.Schema({
   reminderCount: { type: Number, default: 0, min: 0 },
   submittedAt: { type: Date, default: null },
   answers: { type: mongoose.Schema.Types.Mixed, default: {} },
+  emailDelivery: {
+    status: { type: String, enum: ['not_sent', 'pending', 'sent', 'failed'], default: 'not_sent' },
+    providerId: { type: String, default: '', trim: true },
+    sentAt: { type: Date, default: null },
+    recipients: { type: [String], default: [] },
+    cc: { type: [String], default: [] },
+    error: { type: String, default: '', trim: true },
+  },
 }, { timestamps: true });
 
 eventReportSchema.index({ eventId: 1, slackUserId: 1 }, { unique: true });

@@ -1,9 +1,12 @@
 import { Router } from 'express';
 import mongoose from 'mongoose';
+import Event from '../models/Event.js';
 import EventReport from '../models/EventReport.js';
+import EventReportSettings from '../models/EventReportSettings.js';
 import { createMemoryRateLimiter } from '../middleware/rateLimit.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import { verifyEventGuestAccess } from '../utils/eventGuestAccess.js';
+import { sendEventReportEmail } from '../utils/eventReportEmail.js';
 
 const router = Router();
 const limiter = createMemoryRateLimiter({ windowMs: 10 * 60 * 1000, max: 60, message: 'Too many event report requests' });
@@ -44,7 +47,7 @@ const publicReport = (report) => ({
   id: String(report._id), eventId: String(report.eventId), eventTitle: report.eventTitle,
   eventDate: report.eventDate, reporterName: report.reporterName, reporterEmail: report.reporterEmail,
   position: report.position, salesRep: report.salesRep,
-  status: report.status, submittedAt: report.submittedAt, answers: report.answers || {},
+  status: report.status, submittedAt: report.submittedAt, answers: report.answers || {}, emailDelivery: report.emailDelivery,
 });
 
 router.get('/:eventId', limiter, async (req, res) => {
@@ -74,6 +77,20 @@ router.post('/:eventId', limiter, async (req, res) => {
     report.status = 'submitted';
     report.submittedAt = new Date();
     report.nextReminderAt = null;
+    report.emailDelivery = { status: 'pending', recipients: [], cc: [], error: '' };
+    await report.save();
+    const [event, settings] = await Promise.all([
+      Event.findById(report.eventId).select('meta.eventReportTest').lean(),
+      EventReportSettings.findOne({ key: 'default' }).lean(),
+    ]);
+    const configuredRecipients = settings?.emailEnabled === true
+      ? (settings.recipients || []).map((recipient) => recipient.email)
+      : [];
+    try {
+      report.emailDelivery = await sendEventReportEmail({ report: report.toObject(), event, configuredRecipients });
+    } catch (emailError) {
+      report.emailDelivery = { status: 'failed', recipients: configuredRecipients, cc: [], error: clean(emailError?.message || 'Email delivery failed', 1000) };
+    }
     await report.save();
     return res.json({ ok: true, report: publicReport(report) });
   } catch (error) {

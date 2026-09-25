@@ -37,8 +37,8 @@ test('event report DMs can be enabled only for an explicitly marked test event',
   }
 });
 
-test('test event report reminders repeat every two minutes while normal reports stay daily', () => {
-  assert.equal(eventReportReminderDelayMs({ meta: { eventReportTest: true } }), 2 * 60 * 1000);
+test('event report reminders repeat daily for test and normal reports', () => {
+  assert.equal(eventReportReminderDelayMs({ meta: { eventReportTest: true } }), 24 * 60 * 60 * 1000);
   assert.equal(eventReportReminderDelayMs({}), 24 * 60 * 60 * 1000);
 });
 

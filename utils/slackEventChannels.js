@@ -19,7 +19,6 @@ import {
 import { issueEventGuestAccess } from './eventGuestAccess.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const TEST_REPORT_REMINDER_MS = 2 * 60 * 1000;
 const clean = (value) => String(value || '').trim();
 const DEFAULT_EVENT_LEADERSHIP_TEAMS = [
   { managers: ['Olivier Cheng', 'Oliver Cheng'], slackGroupLabel: 'teamOC', slackGroupNames: ['teamOC', 'Team OC'], assistants: ['Ashley', 'Sebastian', 'Heidi'] },
@@ -35,9 +34,7 @@ export const slackEventReportsEnabled = () => /^(?:1|true|yes|on)$/i.test(clean(
 export const slackEventReportsEnabledForEvent = (event = {}) => (
   slackEventReportsEnabled() || event?.meta?.eventReportTest === true
 );
-export const eventReportReminderDelayMs = (event = {}) => (
-  event?.meta?.eventReportTest === true ? TEST_REPORT_REMINDER_MS : DAY_MS
-);
+export const eventReportReminderDelayMs = () => DAY_MS;
 const normalize = (value) => clean(value)
   .normalize('NFKD')
   .replace(/[\u0300-\u036f]/g, '')
@@ -610,7 +607,7 @@ export const runSlackEventReportReminders = async ({ now = new Date() } = {}) =>
     const testEventIds = await Event.find({ 'meta.eventReportTest': true }).distinct('_id');
     if (!testEventIds.length) return { configured: true, sent: 0, failed: 0 };
     pendingFilter.eventId = { $in: testEventIds };
-    const testReminderAt = new Date(now.getTime() + TEST_REPORT_REMINDER_MS);
+    const testReminderAt = new Date(now.getTime() + DAY_MS);
     await EventReport.updateMany({
       eventId: { $in: testEventIds }, status: 'pending', requestSentAt: { $ne: null },
       $or: [{ nextReminderAt: null }, { nextReminderAt: { $gt: testReminderAt } }],

@@ -18,6 +18,17 @@ const messageRateLimit = createMemoryRateLimiter({
 });
 const clean = (value, max = 4000) => String(value ?? '').trim().slice(0, max);
 const regexEscape = (value) => String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const INVENTORY_STOP_WORDS = new Set([
+  'this', 'that', 'with', 'have', 'from', 'your', 'event', 'please', 'look', 'check',
+  'этот', 'этого', 'ивент', 'сейчас', 'посмотри', 'проверь', 'добавь', 'нужно', 'который',
+]);
+const decorInventoryScope = {
+  $or: [
+    { inventoryType: 'decor' },
+    { inventoryType: { $exists: false } },
+    { inventoryType: '' },
+  ],
+};
 
 const isOwner = (auth) => {
   const configured = String(process.env.OCC_ASSISTANT_OWNER_EMAILS || 'ivan@ocnyc.com,itsupport@ocnyc.com')
@@ -146,16 +157,35 @@ router.post('/messages', messageRateLimit, async (req, res) => {
       ? await EventReport.find({ eventId: activeEvent._id, status: 'submitted' })
         .select('reportType reporterName position answers submittedAt').sort({ submittedAt: -1 }).limit(12).lean()
       : [];
-    const searchTerms = [...new Set(message.toLowerCase().match(/[a-zа-яё0-9-]{3,}/gi) || [])].slice(0, 8);
+    const recentUserContext = (thread?.messages || []).slice(-12)
+      .filter((entry) => entry?.role === 'user')
+      .map((entry) => clean(entry?.content, 1000))
+      .join(' ');
+    const inventorySearchText = `${recentUserContext} ${message}`.slice(-8000);
+    const inventoryCodes = [...new Set((inventorySearchText.match(/\bOCC\s*0*\d+\b/gi) || [])
+      .map((value) => value.replace(/\s+/g, '').toUpperCase()))];
+    const searchTerms = [...new Set(inventorySearchText.toLowerCase().match(/[a-zа-яё0-9-]{4,}/gi) || [])]
+      .filter((term) => !INVENTORY_STOP_WORDS.has(term) && !/^occ\d+$/i.test(term))
+      .slice(-12);
     const translatedColors = [
       [/золот/i, 'gold'], [/черн/i, 'black'], [/бел/i, 'white'], [/серебр/i, 'silver'],
       [/красн/i, 'red'], [/син/i, 'blue'], [/зелен/i, 'green'], [/розов/i, 'pink'],
-    ].filter(([pattern]) => pattern.test(message)).map(([, color]) => color);
+    ].filter(([pattern]) => pattern.test(inventorySearchText)).map(([, color]) => color);
     const inventoryNeedle = [...new Set([...searchTerms, ...translatedColors])].map(regexEscape).filter(Boolean);
-    const inventoryCandidates = inventoryNeedle.length ? await Product.find({
-      inventoryType: 'decor',
-      $or: ['name', 'description', 'category', 'material', 'color'].map((field) => ({ [field]: { $regex: inventoryNeedle.join('|'), $options: 'i' } })),
-    }).select('name inventoryCode quantity category material color description').limit(30).lean() : [];
+    const productFields = 'name inventoryCode quantity category material color description';
+    const [exactInventory, fuzzyInventory] = await Promise.all([
+      inventoryCodes.length ? Product.find({
+        $and: [decorInventoryScope, { inventoryCode: { $in: inventoryCodes } }],
+      }).select(productFields).limit(12).lean() : [],
+      inventoryNeedle.length ? Product.find({
+        $and: [decorInventoryScope, {
+          $or: ['name', 'inventoryCode', 'description', 'category', 'material', 'color']
+            .map((field) => ({ [field]: { $regex: inventoryNeedle.join('|'), $options: 'i' } })),
+        }],
+      }).select(productFields).limit(40).lean() : [],
+    ]);
+    const inventoryCandidates = [...new Map([...exactInventory, ...fuzzyInventory]
+      .map((item) => [String(item._id), item])).values()].slice(0, 30);
     const answer = await askOccAssistant({
       user: req.auth,
       message,

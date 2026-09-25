@@ -10,6 +10,7 @@ const eventReportSettingsSchema = new mongoose.Schema({
   key: { type: String, default: 'default', unique: true },
   recipients: { type: [recipientSchema], default: [] },
   emailEnabled: { type: Boolean, default: false },
+  historicalArchive: { type: mongoose.Schema.Types.Mixed, default: {} },
   updatedBy: { type: String, default: '', trim: true },
 }, { timestamps: true });
 

@@ -3,7 +3,11 @@ import assert from 'node:assert/strict';
 import mongoose from 'mongoose';
 
 import DecorPackout from '../models/DecorPackout.js';
-import { buildDecorPackoutCanvas, removeGeneratedDecorPackoutDuplicates } from '../utils/decorPackoutBoard.js';
+import {
+  buildDecorPackoutCanvas,
+  preserveUnplacedDecorPackoutItems,
+  removeGeneratedDecorPackoutDuplicates,
+} from '../utils/decorPackoutBoard.js';
 
 const objectId = () => new mongoose.Types.ObjectId();
 
@@ -134,7 +138,7 @@ test('Canvas import removes only a generated duplicate when the dragged product 
   assert.deepEqual(result.map((item) => item.id), [original.id, unrelated.id]);
 });
 
-test('Canvas import removes a legacy linked duplicate even when its id is not generated', () => {
+test('Canvas import never removes user-placed copies even when one is linked to the packout', () => {
   const packoutId = objectId();
   const productId = objectId();
   const original = { id: 'canvas-product', productId: String(productId), name: 'Stage vase' };
@@ -147,5 +151,14 @@ test('Canvas import removes a legacy linked duplicate even when its id is not ge
   };
   const result = removeGeneratedDecorPackoutDuplicates([legacyDuplicate, original], packoutId);
 
-  assert.deepEqual(result.map((item) => item.id), [original.id]);
+  assert.deepEqual(result.map((item) => item.id), [legacyDuplicate.id, original.id]);
+  assert.deepEqual(removeGeneratedDecorPackoutDuplicates(result, packoutId), result);
+});
+
+test('Canvas reconciliation preserves unplaced scans and removes only a missing placed item', () => {
+  const unplaced = { _id: 'unplaced', name: 'New scan', boardItemId: '' };
+  const removedFromCanvas = { _id: 'placed', name: 'Removed vase', boardItemId: 'canvas-vase' };
+  const result = preserveUnplacedDecorPackoutItems([unplaced, removedFromCanvas], [], new Set());
+
+  assert.deepEqual(result, [unplaced]);
 });

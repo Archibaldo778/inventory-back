@@ -27,32 +27,39 @@ export const removeGeneratedDecorPackoutDuplicates = (imagesValue, packoutValue)
   const packoutId = idOf(packoutValue);
   if (!packoutId) return images;
   const generatedPrefix = `packout-${packoutId}-`;
-  const preferredByKey = new Map();
-  const rank = (item) => {
-    if (text(item?.decorPackoutId) !== packoutId) return 0;
-    return text(item?.id).startsWith(generatedPrefix) ? 2 : 1;
-  };
+  const manualProductKeys = new Set();
+  const manualPackoutItemIds = new Set();
   images.forEach((item) => {
-    const key = canvasProductKey(item);
-    if (!key) return;
-    const preferred = preferredByKey.get(key);
-    if (!preferred || rank(item) < rank(preferred)) preferredByKey.set(key, item);
-  });
-  const retainedItemIds = new Set();
-  const retainedLinkedKeys = new Set();
-  return images.filter((item) => {
-    const linked = text(item?.decorPackoutId) === packoutId;
-    const generated = text(item?.id).startsWith(generatedPrefix);
-    if (!linked && !generated) return true;
+    if (text(item?.id).startsWith(generatedPrefix)) return;
     const key = canvasProductKey(item);
     const itemId = text(item?.decorPackoutItemId);
-    if (itemId && retainedItemIds.has(itemId)) return false;
-    if (key && preferredByKey.get(key) !== item) return false;
-    if (key && retainedLinkedKeys.has(key)) return false;
-    if (itemId) retainedItemIds.add(itemId);
-    if (key) retainedLinkedKeys.add(key);
+    if (key) manualProductKeys.add(key);
+    if (itemId) manualPackoutItemIds.add(itemId);
+  });
+  const retainedGeneratedItemIds = new Set();
+  return images.filter((item) => {
+    const generated = text(item?.id).startsWith(generatedPrefix);
+    if (!generated) return true;
+    const key = canvasProductKey(item);
+    const itemId = text(item?.decorPackoutItemId);
+    if ((key && manualProductKeys.has(key)) || (itemId && manualPackoutItemIds.has(itemId))) return false;
+    if (itemId && retainedGeneratedItemIds.has(itemId)) return false;
+    if (itemId) retainedGeneratedItemIds.add(itemId);
     return true;
   });
+};
+
+export const preserveUnplacedDecorPackoutItems = (previousItemsValue, reconciledItemsValue, matchedItemIdsValue) => {
+  const previousItems = Array.isArray(previousItemsValue) ? previousItemsValue : [];
+  const reconciledItems = Array.isArray(reconciledItemsValue) ? reconciledItemsValue : [];
+  const matchedItemIds = matchedItemIdsValue instanceof Set ? matchedItemIdsValue : new Set(matchedItemIdsValue || []);
+  const result = [...reconciledItems];
+  previousItems.forEach((item) => {
+    const itemId = idOf(item);
+    if ((itemId && matchedItemIds.has(itemId)) || text(item?.boardItemId)) return;
+    result.push(item);
+  });
+  return result;
 };
 
 export const buildDecorPackoutCanvas = (canvasValue, packoutValue) => {

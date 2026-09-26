@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  dropboxFileBelongsToEvent,
+  isUnsafeOperationalDropboxFolder,
   resolveOperationalDropboxFolder,
 } from '../utils/operationalDropbox.js';
 
@@ -71,18 +71,30 @@ test('documents from unrelated event folders never collapse to a shared month fo
   });
 });
 
-test('event file access rejects a file belonging to another event', () => {
-  const event = {
-    _id: 'giulia', externalId: 'E22943 - S62982', title: 'Giulia Beverage Only', date: '2026-09-26',
-  };
-  assert.equal(dropboxFileBelongsToEvent({
-    event,
-    filePath: '/Proposals/2026/September/09-01-2026 Bensadoun/Leadership File/PO/09-01-26 Bensadoun PO.docx',
-    fileName: '09-01-26 Bensadoun PO.docx',
-  }), false);
-  assert.equal(dropboxFileBelongsToEvent({
-    event,
-    filePath: '/Proposals/2026/September/09-26-2026 Giulia Beverage Only/Leadership File/PO/09-26-26 Giulia PO.docx',
-    fileName: '09-26-26 Giulia PO.docx',
-  }), true);
+test('resolved event folders remain valid when names and dates do not mirror the event', () => {
+  const cases = [
+    '/Proposals/2026/September/09-01-2026 Bensadoun/Leadership File/PO/Event PO.docx',
+    '/Proposals/2026/September/BMR/Leadership File/PO/Event PO.docx',
+    '/Proposals/2026/September/Undated Client/Leadership File/PO/Event PO.docx',
+    '/Proposals/2026/September/Kim/Leadership File/PO/Event PO.docx',
+  ];
+  cases.forEach((sourcePath) => {
+    const result = resolveOperationalDropboxFolder({
+      event: {
+        date: '2026-09-26', title: 'Bar Mitzvah Reception',
+        documents: [{ sourceProvider: 'dropbox', sourcePath }],
+      },
+    });
+    assert.equal(result.existing, true);
+    assert.equal(result.folderPath, sourcePath.split('/Leadership File/')[0]);
+  });
+});
+
+test('Dropbox root, year, and month folders are rejected as unsafe event folders', () => {
+  const integration = { resolvedRootPath: '/Proposals' };
+  assert.equal(isUnsafeOperationalDropboxFolder('/Proposals', integration), true);
+  assert.equal(isUnsafeOperationalDropboxFolder('/Proposals/2026', integration), true);
+  assert.equal(isUnsafeOperationalDropboxFolder('/Proposals/2026/September', integration), true);
+  assert.equal(isUnsafeOperationalDropboxFolder('/Proposals/2026/09', integration), true);
+  assert.equal(isUnsafeOperationalDropboxFolder('/Proposals/2026/September/Kim', integration), false);
 });

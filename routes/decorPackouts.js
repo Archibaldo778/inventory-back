@@ -8,7 +8,11 @@ import Product from '../models/Product.js';
 import { clearApiCacheGroups } from '../utils/apiCache.js';
 import { parseDecorInventoryCode } from '../utils/decorInventoryCodes.js';
 import { sendApiError } from '../utils/apiErrors.js';
-import { buildDecorPackoutCanvas, removeGeneratedDecorPackoutDuplicates } from '../utils/decorPackoutBoard.js';
+import {
+  buildDecorPackoutCanvas,
+  preserveUnplacedDecorPackoutItems,
+  removeGeneratedDecorPackoutDuplicates,
+} from '../utils/decorPackoutBoard.js';
 import { requireAuth } from '../middleware/auth.js';
 import { renderCatereaseOperationalDocx } from '../utils/catereaseOperations.js';
 import { loadBrandLogoSvg, loadCloudinaryWordImages } from '../utils/operationalDocumentAssets.js';
@@ -258,6 +262,7 @@ const mergePackoutItemsFromEventBoards = async (packout) => {
   });
 
   const reconciledItems = [];
+  const matchedItemIds = new Set();
   grouped.forEach((value) => {
     const existing = (packout.items || []).find((item) => {
       const itemDeckId = String(item.deckId || packout.deckId || '');
@@ -267,6 +272,7 @@ const mergePackoutItemsFromEventBoards = async (packout) => {
       return !value.productId && !value.inventoryCode && String(item.name || '').trim().toLowerCase() === value.name.toLowerCase();
     });
     if (existing) {
+      matchedItemIds.add(String(existing._id || existing.id || ''));
       existing.productId = isObjectId(value.productId) ? value.productId : null;
       existing.inventoryCode = parseDecorInventoryCode(value.inventoryCode) ? value.inventoryCode : '';
       existing.source = value.product ? 'inventory' : existing.source;
@@ -305,15 +311,12 @@ const mergePackoutItemsFromEventBoards = async (packout) => {
       boardItemId: value.boardItemId,
     });
   });
-  packout.items = reconciledItems;
-  if (!packout.items.length) {
-    await DecorPackout.deleteOne({ _id: packout._id });
+  packout.items = preserveUnplacedDecorPackoutItems(packout.items, reconciledItems, matchedItemIds);
+  if (packoutItemsSignature(packout.items) !== previousItemsSignature) {
+    await packout.save();
     clearCaches();
-    return null;
   }
-  if (packoutItemsSignature(packout.items) === previousItemsSignature) return packout;
-  await packout.save();
-  clearCaches();
+  await syncPackoutToBoardSafely(packout);
   return packout;
 };
 
@@ -388,7 +391,7 @@ router.post('/:id/sync-board', async (req, res) => {
     if (!packout) return res.status(404).json({ error: 'Packout not found' });
     if (packout.status !== 'draft') return res.status(409).json({ error: 'Reopen this packout before syncing the Decor Board' });
     const synced = await mergePackoutItemsFromEventBoards(packout);
-    return res.json(synced || { deleted: true, id: String(packout._id), items: [] });
+    return res.json(synced);
   } catch (error) {
     return sendApiError(res, error, {
       context: 'Decor Board packout sync failed',

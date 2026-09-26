@@ -1,8 +1,6 @@
 import path from 'node:path';
 import {
-  findDropboxFolderEventMatch,
   inferDropboxEventFolderPath,
-  inferDropboxPathDate,
 } from './dropboxDocuments.js';
 
 const clean = (value) => String(value || '').trim();
@@ -16,18 +14,20 @@ export const joinOperationalDropboxPath = (...parts) => `/${parts
   .filter(Boolean)
   .join('/')}`;
 
-export const dropboxFileBelongsToEvent = ({ filePath, fileName, event }) => {
-  const match = findDropboxFolderEventMatch({
-    path: filePath,
-    name: fileName,
-    inferredDate: inferDropboxPathDate(filePath),
-  }, [{
-    _id: event?._id || 'event',
-    externalId: event?.externalId,
-    title: event?.title,
-    date: String(event?.date || '').slice(0, 10),
-  }]);
-  return match.status === 'matched';
+const MONTH_FOLDER_NAMES = new Set([
+  'january', 'february', 'march', 'april', 'may', 'june',
+  'july', 'august', 'september', 'october', 'november', 'december',
+]);
+
+export const isUnsafeOperationalDropboxFolder = (folderPath, integration = {}) => {
+  const normalized = clean(folderPath).replace(/\/+$/g, '');
+  if (!normalized || normalized === '/') return true;
+  const configuredRoot = clean(integration.resolvedRootPath || integration.rootPath || '/Proposals').replace(/\/+$/g, '');
+  if (configuredRoot && normalized.toLowerCase() === configuredRoot.toLowerCase()) return true;
+  const basename = path.posix.basename(normalized).toLowerCase();
+  return /^20\d{2}$/.test(basename)
+    || /^(?:0?[1-9]|1[0-2])$/.test(basename)
+    || MONTH_FOLDER_NAMES.has(basename);
 };
 
 export const resolveOperationalDropboxFolder = ({ event = {}, integration = {} } = {}) => {

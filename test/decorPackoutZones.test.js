@@ -12,11 +12,13 @@ test('decor packout items retain their deck zone and target page', () => {
   assert.match(modelSource, /pageId: \{ type: mongoose\.Schema\.Types\.ObjectId, ref: 'Page'/);
 });
 
-test('board sync treats the saved Canvas as authoritative and removes an empty packout', () => {
+test('board sync keeps an empty draft and re-materializes unplaced items', () => {
   assert.match(routeSource, /router\.post\('\/:id\/sync-board'/);
   assert.match(routeSource, /grouped\.forEach\(\(value\) =>/);
-  assert.match(routeSource, /packout\.items = reconciledItems/);
-  assert.match(routeSource, /DecorPackout\.deleteOne\(\{ _id: packout\._id \}\)/);
+  assert.match(routeSource, /packout\.items = preserveUnplacedDecorPackoutItems/);
+  const mergeBody = routeSource.match(/const mergePackoutItemsFromEventBoards[\s\S]+?return packout;\n};/)?.[0] || '';
+  assert.doesNotMatch(mergeBody, /DecorPackout\.deleteOne/);
+  assert.match(mergeBody, /await syncPackoutToBoardSafely\(packout\)/);
 });
 
 test('Word export groups decor rows by zone before product category', () => {
@@ -29,8 +31,9 @@ test('Canvas products are linked to the shared packout instead of duplicated', (
   assert.match(boardSource, /decorPackoutItemId: itemId/);
 });
 
-test('Canvas import never writes the imported packout back over its source board', () => {
+test('Canvas import reconciles first and then restores only unplaced packout items', () => {
   const mergeBody = routeSource.match(/const mergePackoutItemsFromEventBoards[\s\S]+?return packout;\n};/)?.[0] || '';
   assert.match(mergeBody, /removeGeneratedDecorPackoutDuplicates/);
-  assert.doesNotMatch(mergeBody, /syncPackoutToBoardSafely\(packout\)/);
+  assert.match(mergeBody, /preserveUnplacedDecorPackoutItems/);
+  assert.match(mergeBody, /syncPackoutToBoardSafely\(packout\)/);
 });

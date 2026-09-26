@@ -114,11 +114,14 @@ export const processAutomationAlerts = async ({
   fetchImpl = fetch,
   force = false,
   ruleIds = [],
+  ruleModel = AutomationAlertRule,
+  deliveryModel = AutomationAlertDelivery,
+  ensureDefaultRule = ensureDefaultAutomationRule,
 }) => {
-  await ensureDefaultAutomationRule();
+  await ensureDefaultRule();
   const ruleQuery = { enabled: true, source: 'caterease_packout' };
   if (Array.isArray(ruleIds) && ruleIds.length) ruleQuery._id = { $in: ruleIds };
-  const rules = await AutomationAlertRule.find(ruleQuery).lean();
+  const rules = await ruleModel.find(ruleQuery).lean();
   const results = [];
   for (const rule of rules) {
     const matches = findAutomationMatches(snapshot, rule.matchTerms);
@@ -131,7 +134,8 @@ export const processAutomationAlerts = async ({
       results.push({ ruleId: rule._id, status: 'baseline', matches: matches.length });
       continue;
     }
-    const existing = await AutomationAlertDelivery.findOne({ ruleId: rule._id, eventId: event._id, signature }).lean();
+    const deliveryKey = { ruleId: rule._id, eventId: event._id, signature };
+    const existing = await deliveryModel.findOne(deliveryKey).lean();
     const unchangedSnapshot = String(previousChecksum) === String(snapshot?.checksum || '');
     const pendingIsFresh = existing?.status === 'pending'
       && Date.now() - new Date(existing.lastAttemptAt || existing.updatedAt || 0).getTime() < 10 * 60 * 1000;
@@ -150,11 +154,40 @@ export const processAutomationAlerts = async ({
       results.push({ ruleId: rule._id, status: 'baseline', matches: matches.length });
       continue;
     }
-    const delivery = await AutomationAlertDelivery.findOneAndUpdate(
-      { ruleId: rule._id, eventId: event._id, signature },
-      { $set: { status: 'pending', recipients: rule.recipients, matchedItems: matches, error: '', lastAttemptAt: new Date() }, $inc: { attempts: 1 } },
-      { upsert: true, new: true, setDefaultsOnInsert: true },
+    const lastAttemptAt = new Date();
+    const staleBefore = new Date(lastAttemptAt.getTime() - 10 * 60 * 1000);
+    const pendingFields = {
+      status: 'pending', recipients: rule.recipients, matchedItems: matches, error: '', lastAttemptAt,
+    };
+    let delivery = await deliveryModel.findOneAndUpdate(
+      {
+        ...deliveryKey,
+        $or: [
+          { status: 'failed' },
+          { status: 'pending', lastAttemptAt: { $lt: staleBefore } },
+        ],
+      },
+      { $set: pendingFields, $inc: { attempts: 1 } },
+      { new: true },
     );
+    if (!delivery) {
+      try {
+        delivery = await deliveryModel.create({
+          ...deliveryKey,
+          ...pendingFields,
+          attempts: 1,
+        });
+      } catch (error) {
+        if (Number(error?.code) !== 11000) throw error;
+        const occupied = await deliveryModel.findOne(deliveryKey).lean();
+        results.push({
+          ruleId: rule._id,
+          status: occupied?.status === 'sent' ? 'already_sent' : 'pending',
+          matches: matches.length,
+        });
+        continue;
+      }
+    }
     const sent = await sendAutomationAlertEmail({ event, rule, matches, fetchImpl });
     delivery.status = sent.status;
     delivery.providerId = sent.providerId || '';

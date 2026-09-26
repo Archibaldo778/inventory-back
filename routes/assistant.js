@@ -9,6 +9,11 @@ import { isAdminAuth } from '../middleware/auth.js';
 import { createMemoryRateLimiter } from '../middleware/rateLimit.js';
 import { askOccAssistant, likelySiteIssue } from '../utils/assistantAi.js';
 import { sendApiError } from '../utils/apiErrors.js';
+import {
+  assistantDecorActionKind,
+  currentMessageInventoryCodes,
+  selectAssistantDecorProduct,
+} from '../utils/assistantDecorActions.js';
 
 const router = Router();
 const messageRateLimit = createMemoryRateLimiter({
@@ -162,8 +167,7 @@ router.post('/messages', messageRateLimit, async (req, res) => {
       .map((entry) => clean(entry?.content, 1000))
       .join(' ');
     const inventorySearchText = `${recentUserContext} ${message}`.slice(-8000);
-    const inventoryCodes = [...new Set((inventorySearchText.match(/\bOCC\s*0*\d+\b/gi) || [])
-      .map((value) => value.replace(/\s+/g, '').toUpperCase()))];
+    const inventoryCodes = currentMessageInventoryCodes(message);
     const searchTerms = [...new Set(inventorySearchText.toLowerCase().match(/[a-zа-яё0-9-]{4,}/gi) || [])]
       .filter((term) => !INVENTORY_STOP_WORDS.has(term) && !/^occ\d+$/i.test(term))
       .slice(-12);
@@ -217,18 +221,20 @@ router.post('/messages', messageRateLimit, async (req, res) => {
       modelProductName
       && clean(item.name, 200).toLowerCase() === modelProductName
     ));
-    const requestedProduct = exactInventory[0]
-      || modelSelectedProduct
-      || (inventoryCandidates.length === 1 ? inventoryCandidates[0] : null);
+    const { product: requestedProduct, exactCurrentCode } = selectAssistantDecorProduct({
+      message, exactInventory, inventoryCandidates, modelSelectedProduct,
+    });
     let uiAction = answer.uiAction;
     if (addRequested && requestedProduct && Number(requestedProduct.quantity) > 0) {
       uiAction = {
-        kind: 'add_decor', query: '', colors: [],
+        kind: assistantDecorActionKind(exactCurrentCode), query: '', colors: [],
         productCode: clean(requestedProduct.inventoryCode, 80).toUpperCase(),
         productName: clean(requestedProduct.name, 200),
         quantity: Math.min(requestedQuantity, Math.max(1, Math.trunc(Number(requestedProduct.quantity) || 1))),
         available: Math.max(0, Math.trunc(Number(requestedProduct.quantity) || 0)),
       };
+    } else if (uiAction?.kind === 'add_decor') {
+      uiAction = { ...uiAction, kind: 'preview_add_decor' };
     } else if (uiAction?.kind === 'filter_decor' && exactInventory[0]?.inventoryCode) {
       uiAction = { ...uiAction, query: clean(exactInventory[0].inventoryCode, 80).toUpperCase() };
     }

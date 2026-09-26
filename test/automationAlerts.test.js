@@ -4,6 +4,7 @@ import {
   LEGACY_PO_SCANNER_RECIPIENTS,
   LEGACY_PO_SCANNER_TERMS,
   findAutomationMatches,
+  processAutomationAlerts,
   sendAutomationAlertEmail,
 } from '../utils/automationAlerts.js';
 
@@ -54,5 +55,75 @@ test('automation email sends only configured event and Pack Out details', async 
     else process.env.PACKOUT_ALERT_FROM = previousAlertFrom;
     if (previousReportFrom === undefined) delete process.env.EVENT_REPORT_FROM;
     else process.env.EVENT_REPORT_FROM = previousReportFrom;
+  }
+});
+
+test('parallel forced alert processing atomically claims one delivery', async () => {
+  const previousKey = process.env.RESEND_API_KEY;
+  process.env.RESEND_API_KEY = 'test-key';
+  const rule = {
+    _id: 'rule-1', name: 'Operations equipment', department: 'Operations',
+    subjectPrefix: 'ACTION REQUIRED', recipients: ['ops@ocnyc.com'], matchTerms: ['Heat Lamp'],
+  };
+  const ruleModel = { find: () => ({ lean: async () => [rule] }) };
+  let storedDelivery = null;
+  const asStoredData = (value) => ({
+    ruleId: value.ruleId,
+    eventId: value.eventId,
+    signature: value.signature,
+    status: value.status,
+    recipients: value.recipients,
+    matchedItems: value.matchedItems,
+    error: value.error,
+    lastAttemptAt: value.lastAttemptAt,
+    attempts: value.attempts,
+    providerId: value.providerId,
+    sentAt: value.sentAt,
+  });
+  const deliveryModel = {
+    findOne: () => ({ lean: async () => (storedDelivery ? asStoredData(storedDelivery) : null) }),
+    findOneAndUpdate: async () => null,
+    create: async (data) => {
+      await Promise.resolve();
+      if (storedDelivery) {
+        const duplicate = new Error('duplicate delivery');
+        duplicate.code = 11000;
+        throw duplicate;
+      }
+      storedDelivery = {
+        ...data,
+        async save() {
+          storedDelivery = this;
+          return this;
+        },
+      };
+      return storedDelivery;
+    },
+  };
+  let fetchCount = 0;
+  try {
+    const input = {
+      event: { _id: 'event-1', title: 'Test Event', date: '2026-09-26' },
+      snapshot: { checksum: 'new', packOut: [{ itemName: 'Heat Lamp', quantity: 2 }] },
+      previousSnapshot: null,
+      previousChecksum: 'old',
+      force: true,
+      ruleModel,
+      deliveryModel,
+      ensureDefaultRule: async () => {},
+      fetchImpl: async () => {
+        fetchCount += 1;
+        return { ok: true, json: async () => ({ id: `email-${fetchCount}` }) };
+      },
+    };
+    const outcomes = await Promise.all([
+      processAutomationAlerts(input),
+      processAutomationAlerts(input),
+    ]);
+    assert.equal(fetchCount, 1);
+    assert.deepEqual(outcomes.flat().map(({ status }) => status).sort(), ['pending', 'sent']);
+  } finally {
+    if (previousKey === undefined) delete process.env.RESEND_API_KEY;
+    else process.env.RESEND_API_KEY = previousKey;
   }
 });

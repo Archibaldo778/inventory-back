@@ -105,7 +105,7 @@ import {
   uploadDropboxFile,
 } from '../utils/dropboxApi.js';
 import {
-  dropboxFileBelongsToEvent,
+  isUnsafeOperationalDropboxFolder,
   joinOperationalDropboxPath,
   resolveOperationalDropboxFolder,
 } from '../utils/operationalDropbox.js';
@@ -1746,6 +1746,9 @@ router.get('/operations/events/:id/dropbox-files', requireAuth, dropboxFileRateL
     if (!event) return undefined;
     const { integration, accessToken } = await loadOperationalDropboxAccess();
     const { folderPath } = await resolveOperationalDropboxFolderForEvent({ event, integration });
+    if (isUnsafeOperationalDropboxFolder(folderPath, integration)) {
+      return res.json({ folderPath, files: [] });
+    }
     let page;
     try {
       page = await listDropboxFolder(accessToken, {
@@ -1764,11 +1767,7 @@ router.get('/operations/events/:id/dropbox-files', requireAuth, dropboxFileRateL
       (Array.isArray(page.entries) ? page.entries : []).forEach((entry) => {
         if (String(entry?.['.tag'] || '') !== 'file') return;
         const filePath = String(entry.path_display || entry.path_lower || '');
-        if (
-          !dropboxPathInsideFolder(filePath, folderPath)
-          || /^~\$/i.test(String(entry.name || ''))
-          || !dropboxFileBelongsToEvent({ filePath, fileName: entry.name, event })
-        ) return;
+        if (!dropboxPathInsideFolder(filePath, folderPath) || /^~\$/i.test(String(entry.name || ''))) return;
         const relativePath = filePath.slice(String(folderPath).length).replace(/^\/+/, '');
         if (isRestrictedEventDocument(relativePath)) return;
         files.push({
@@ -1807,12 +1806,12 @@ router.get('/operations/events/:id/dropbox-file', requireAuth, dropboxFileRateLi
     if (!event) return undefined;
     const { integration, accessToken } = await loadOperationalDropboxAccess();
     const { folderPath } = await resolveOperationalDropboxFolderForEvent({ event, integration });
+    if (isUnsafeOperationalDropboxFolder(folderPath, integration)) {
+      return res.status(400).json({ error: 'The event Dropbox folder could not be resolved safely' });
+    }
     const filePath = String(req.query?.path || '').trim();
     const fileName = filePath.replace(/\\/g, '/').split('/').filter(Boolean).at(-1) || 'event-file';
-    if (
-      !dropboxPathInsideFolder(filePath, folderPath)
-      || !dropboxFileBelongsToEvent({ filePath, fileName, event })
-    ) {
+    if (!dropboxPathInsideFolder(filePath, folderPath)) {
       return res.status(400).json({ error: 'The requested file is outside this event folder' });
     }
     const relativePath = filePath.slice(String(folderPath).length).replace(/^\/+/, '');
@@ -1854,6 +1853,9 @@ router.post('/operations/events/:id/leadership-print.pdf', requireAuth, leadersh
     const dropboxFolder = dropboxAccess
       ? await resolveOperationalDropboxFolderForEvent({ event, integration: dropboxAccess.integration })
       : null;
+    if (dropboxFolder && isUnsafeOperationalDropboxFolder(dropboxFolder.folderPath, dropboxAccess.integration)) {
+      return res.status(400).json({ error: 'The event Dropbox folder could not be resolved safely' });
+    }
     for (const requestedFile of requested) {
       const copies = Math.max(1, Math.min(99, Math.trunc(Number(requestedFile?.copies) || 1)));
       const pageCopies = Array.isArray(requestedFile?.pageCopies)
@@ -1885,10 +1887,7 @@ router.post('/operations/events/:id/leadership-print.pdf', requireAuth, leadersh
       const filePath = String(requestedFile?.path || '').trim();
       const folderPath = dropboxFolder?.folderPath || '';
       const fileName = filePath.split('/').filter(Boolean).pop() || 'event-file';
-      if (
-        !dropboxPathInsideFolder(filePath, folderPath)
-        || !dropboxFileBelongsToEvent({ filePath, fileName, event })
-      ) {
+      if (!dropboxPathInsideFolder(filePath, folderPath)) {
         return res.status(400).json({ error: 'A requested file is outside this event folder' });
       }
       const relativePath = filePath.slice(String(folderPath).length).replace(/^\/+/, '');

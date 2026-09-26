@@ -62,6 +62,8 @@ export const findAutomationMatches = (snapshot, matchTerms = []) => {
 
 export const automationAlertSignature = ({ event, rule, matches }) => crypto.createHash('sha256').update(JSON.stringify({
   eventId: clean(event?._id || event?.externalId, 100),
+  eventTitle: normalize(event?.title),
+  eventDate: normalize(event?.date),
   ruleId: clean(rule?._id, 100),
   items: matches.map((item) => ({
     name: normalize(item.itemName), quantity: item.quantity, unit: normalize(item.unit), zone: normalize(item.zone),
@@ -136,6 +138,9 @@ export const processAutomationAlerts = async ({
     }
     const deliveryKey = { ruleId: rule._id, eventId: event._id, signature };
     const existing = await deliveryModel.findOne(deliveryKey).lean();
+    const priorSentDelivery = !existing
+      ? await deliveryModel.findOne({ ruleId: rule._id, eventId: event._id, status: 'sent' }).lean()
+      : null;
     const unchangedSnapshot = String(previousChecksum) === String(snapshot?.checksum || '');
     const pendingIsFresh = existing?.status === 'pending'
       && Date.now() - new Date(existing.lastAttemptAt || existing.updatedAt || 0).getTime() < 10 * 60 * 1000;
@@ -143,14 +148,14 @@ export const processAutomationAlerts = async ({
       results.push({ ruleId: rule._id, status: existing.status === 'sent' ? 'already_sent' : 'pending', matches: matches.length });
       continue;
     }
-    if (!force && unchangedSnapshot && existing?.status !== 'failed' && existing?.status !== 'pending') {
+    if (!force && unchangedSnapshot && !priorSentDelivery && existing?.status !== 'failed' && existing?.status !== 'pending') {
       results.push({ ruleId: rule._id, status: 'unchanged', matches: matches.length });
       continue;
     }
     const previousMatches = findAutomationMatches(previousSnapshot, rule.matchTerms);
     const matchesWereAlreadyPresent = previousMatches.length
       && automationAlertSignature({ event, rule, matches: previousMatches }) === signature;
-    if (!force && !existing && matchesWereAlreadyPresent) {
+    if (!force && !existing && !priorSentDelivery && matchesWereAlreadyPresent) {
       results.push({ ruleId: rule._id, status: 'baseline', matches: matches.length });
       continue;
     }

@@ -127,3 +127,80 @@ test('parallel forced alert processing atomically claims one delivery', async ()
     else process.env.RESEND_API_KEY = previousKey;
   }
 });
+
+test('renaming or rescheduling an event sends one updated alert and then stays idempotent', async () => {
+  const previousKey = process.env.RESEND_API_KEY;
+  process.env.RESEND_API_KEY = 'test-key';
+  const rule = {
+    _id: 'rule-1', name: 'Operations equipment', department: 'Operations',
+    subjectPrefix: 'ACTION REQUIRED', recipients: ['ops@ocnyc.com'], matchTerms: ['Heat Lamp'],
+  };
+  const ruleModel = { find: () => ({ lean: async () => [rule] }) };
+  const deliveries = [];
+  const matchesQuery = (delivery, query) => Object.entries(query).every(([key, value]) => (
+    String(delivery?.[key] || '') === String(value || '')
+  ));
+  const deliveryModel = {
+    findOne: (query) => ({
+      lean: async () => deliveries.find((delivery) => matchesQuery(delivery, query)) || null,
+    }),
+    findOneAndUpdate: async () => null,
+    create: async (data) => {
+      if (deliveries.some((delivery) => (
+        String(delivery.ruleId) === String(data.ruleId)
+        && String(delivery.eventId) === String(data.eventId)
+        && delivery.signature === data.signature
+      ))) {
+        const duplicate = new Error('duplicate delivery');
+        duplicate.code = 11000;
+        throw duplicate;
+      }
+      const delivery = {
+        ...data,
+        async save() { return this; },
+      };
+      deliveries.push(delivery);
+      return delivery;
+    },
+  };
+  let fetchCount = 0;
+  const fetchImpl = async () => {
+    fetchCount += 1;
+    return { ok: true, json: async () => ({ id: `email-${fetchCount}` }) };
+  };
+  const snapshot = { checksum: 'same-items', packOut: [{ itemName: 'Heat Lamp', quantity: 2 }] };
+  const baseInput = {
+    snapshot,
+    previousSnapshot: snapshot,
+    previousChecksum: snapshot.checksum,
+    ruleModel,
+    deliveryModel,
+    ensureDefaultRule: async () => {},
+    fetchImpl,
+  };
+
+  try {
+    const first = await processAutomationAlerts({
+      ...baseInput,
+      event: { _id: 'event-1', title: 'Original Event', date: '2026-09-26' },
+      force: true,
+    });
+    const updated = await processAutomationAlerts({
+      ...baseInput,
+      event: { _id: 'event-1', title: 'Renamed Event', date: '2026-09-27' },
+    });
+    const repeated = await processAutomationAlerts({
+      ...baseInput,
+      event: { _id: 'event-1', title: 'Renamed Event', date: '2026-09-27' },
+    });
+
+    assert.equal(first[0].status, 'sent');
+    assert.equal(updated[0].status, 'sent');
+    assert.equal(repeated[0].status, 'already_sent');
+    assert.equal(fetchCount, 2);
+    assert.equal(deliveries.length, 2);
+  } finally {
+    if (previousKey === undefined) delete process.env.RESEND_API_KEY;
+    else process.env.RESEND_API_KEY = previousKey;
+  }
+});

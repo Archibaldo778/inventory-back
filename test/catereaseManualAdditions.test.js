@@ -94,6 +94,46 @@ test('operational primary mode sends the refreshed snapshot to Bar Operations', 
   assert.equal(syncedSnapshot, snapshot);
 });
 
+test('a partial Caterease response preserves the last complete snapshot and skips downstream writes', async () => {
+  const previousSnapshot = {
+    checksum: 'complete-snapshot',
+    packOut: [{ itemName: 'Heat Lamp', quantity: 2 }],
+    kitchenPackOut: [{ itemName: 'Sheet Pan', quantity: 4 }],
+    kitchenMenu: [],
+    staffRequest: [],
+  };
+  const partialSnapshot = {
+    checksum: 'partial-snapshot',
+    packOut: [],
+    kitchenPackOut: [{ itemName: 'Sheet Pan', quantity: 4 }],
+    kitchenMenu: [],
+    staffRequest: [],
+    sourceErrors: [{ source: 'foodserv', status: 503, message: 'Caterease unavailable' }],
+  };
+  const calls = { saved: 0, alerts: 0, bar: 0 };
+  const event = {
+    externalId: 'E22856',
+    date: '2026-09-14',
+    title: 'Chanel YPO Cocktail',
+    catereaseOperations: previousSnapshot,
+    markModified() { throw new Error('partial snapshot must not mark the event modified'); },
+    async save() { calls.saved += 1; },
+  };
+
+  await assert.rejects(
+    syncOperationalEvent(event, {
+      fetchSnapshot: async () => partialSnapshot,
+      processAlerts: async () => { calls.alerts += 1; return []; },
+      syncBarItems: async () => { calls.bar += 1; return { synced: true, items: 0 }; },
+      primaryFiles: true,
+    }),
+    (error) => error?.code === 'CATEREASE_PARTIAL_OPERATIONAL_SNAPSHOT' && error?.statusCode === 502,
+  );
+
+  assert.equal(event.catereaseOperations, previousSnapshot);
+  assert.deepEqual(calls, { saved: 0, alerts: 0, bar: 0 });
+});
+
 test('editing and deleting a manual addition targets only the matching subdocument id', () => {
   const event = new Event({
     title: 'Manual additions',

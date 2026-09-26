@@ -144,6 +144,13 @@ let operationalSyncProgress = null;
 let printTemplatePromise = null;
 let printTemplateCache = { locationId: '', expiresAt: 0, rows: null };
 const dedupeViewSync = createCatereaseViewSyncDeduper();
+const CATEREASE_OPERATIONAL_CORE_SOURCES = new Set(['foodserv', 'eventrequireditem', 'shift', 'subevent']);
+
+export const failedCatereaseOperationalCoreSources = (snapshot) => (
+  [...new Set((Array.isArray(snapshot?.sourceErrors) ? snapshot.sourceErrors : [])
+    .map((entry) => String(entry?.source || '').trim().toLowerCase())
+    .filter((source) => CATEREASE_OPERATIONAL_CORE_SOURCES.has(source)))]
+);
 
 const listAllCatereaseCalendarEvents = async (from, to) => {
   const rows = [];
@@ -514,8 +521,7 @@ export const fetchCatereaseOperationalSnapshot = async (eventId, eventDate = '',
     subEventPromise,
     eventPrintTemplatePromise,
   ]);
-  const coreSources = new Set(['foodserv', 'eventrequireditem', 'shift', 'subevent']);
-  if (sourceErrors.filter((entry) => coreSources.has(entry.source)).length === coreSources.size) {
+  if (sourceErrors.filter((entry) => CATEREASE_OPERATIONAL_CORE_SOURCES.has(entry.source)).length === CATEREASE_OPERATIONAL_CORE_SOURCES.size) {
     const error = new Error(`Caterease returned no operational sources: ${sourceErrors.map((entry) => entry.message).join('; ')}`);
     error.statusCode = sourceErrors.find((entry) => entry.status)?.status || 502;
     throw error;
@@ -545,6 +551,13 @@ export const syncOperationalEvent = async (event, {
   const eventId = normalizeCatereaseEventId(event?.externalId);
   if (!eventId) return { status: 'skipped', reason: 'missing_event_id' };
   const snapshot = await fetchSnapshot(eventId, String(event?.date || ''), String(event?.title || ''));
+  const failedCoreSources = failedCatereaseOperationalCoreSources(snapshot);
+  if (failedCoreSources.length) {
+    const error = new Error(`Caterease operational sync is incomplete; preserving the last complete snapshot (${failedCoreSources.join(', ')})`);
+    error.statusCode = 502;
+    error.code = 'CATEREASE_PARTIAL_OPERATIONAL_SNAPSHOT';
+    throw error;
+  }
   const previousSnapshot = event?.catereaseOperations || null;
   const previousChecksum = String(event?.catereaseOperations?.checksum || '');
   event.catereaseOperations = snapshot;

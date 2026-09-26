@@ -24,6 +24,14 @@ export const LEGACY_PO_SCANNER_RECIPIENTS = [
   'ivan@ocnyc.com', 'iurie@ocnyc.com', 'vladimir@ocnyc.com', 'opsinventory@ocnyc.com',
 ];
 
+const termMatchesProduct = (termKey, productKey) => {
+  if (!termKey || !productKey || !productKey.includes(termKey)) return false;
+  // The migrated Flow searched for the generic word "Steamer", which also
+  // caught the coffee-service Milk Steamer. That item is not an Operations alert.
+  if (termKey === 'steamer' && /\bmilk steamer\b/.test(productKey)) return false;
+  return true;
+};
+
 export const ensureDefaultAutomationRule = () => AutomationAlertRule.findOneAndUpdate(
   { seededKey: 'legacy-po-scanner' },
   { $setOnInsert: {
@@ -40,7 +48,7 @@ export const findAutomationMatches = (snapshot, matchTerms = []) => {
   const rows = Array.isArray(snapshot?.packOut) ? snapshot.packOut : [];
   return rows.flatMap((row) => {
     const searchable = normalize([row?.itemName, row?.name, row?.description, row?.notes].filter(Boolean).join(' '));
-    const matchedTerms = terms.filter(({ key }) => searchable.includes(key)).map(({ label }) => label);
+    const matchedTerms = terms.filter(({ key }) => termMatchesProduct(key, searchable)).map(({ label }) => label);
     if (!matchedTerms.length) return [];
     return [{
       itemName: clean(row?.itemName || row?.name || matchedTerms[0], 300),
@@ -66,6 +74,15 @@ const itemLine = (item) => [
   item.zone,
 ].filter(Boolean).join(' · ');
 
+const operationsSender = () => {
+  const configured = clean(process.env.PACKOUT_ALERT_FROM, 320);
+  const configuredAddress = clean(configured.match(/<([^<>]+)>/)?.[1] || configured, 320);
+  const address = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(configuredAddress)
+    ? configuredAddress
+    : 'reports@reports.occdecks.com';
+  return `OCC Operations <${address}>`;
+};
+
 export const sendAutomationAlertEmail = async ({ event, rule, matches, fetchImpl = fetch }) => {
   const apiKey = clean(process.env.RESEND_API_KEY, 1000);
   if (!apiKey) return { status: 'failed', error: 'RESEND_API_KEY is not configured' };
@@ -77,7 +94,7 @@ export const sendAutomationAlertEmail = async ({ event, rule, matches, fetchImpl
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      from: clean(process.env.PACKOUT_ALERT_FROM, 320) || clean(process.env.EVENT_REPORT_FROM, 320) || 'OCC Operations <reports@reports.occdecks.com>',
+      from: operationsSender(),
       to: recipients,
       subject: `${clean(rule?.subjectPrefix, 160) || 'ACTION REQUIRED'} · ${eventTitle}${eventDate ? ` · ${eventDate}` : ''}`,
       html: `<div style="font-family:Arial,sans-serif;color:#222"><h2 style="margin:0 0 8px">${escapeHtml(rule?.name || 'Automated alert')}</h2><p style="margin:0 0 16px"><strong>${escapeHtml(eventTitle)}</strong>${eventDate ? ` · ${escapeHtml(eventDate)}` : ''}</p><p>The following Pack Out items matched the ${escapeHtml(rule?.department || 'department')} rule:</p><ul>${lines.map((line) => `<li>${escapeHtml(line)}</li>`).join('')}</ul></div>`,

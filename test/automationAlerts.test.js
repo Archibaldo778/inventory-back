@@ -18,6 +18,7 @@ test('automation alert matches Pack Out products without unrelated partial match
   const matches = findAutomationMatches({ packOut: [
     { itemName: 'White Setup Gloves - Large', quantity: 4, zoneName: 'Loading' },
     { itemName: 'Commercial Steamer', quantity: 1, zoneName: 'Kitchen' },
+    { itemName: 'Milk Steamer', quantity: 1, zoneName: 'Coffee Equipment' },
     { itemName: 'White dinner plates', quantity: 50 },
   ] }, LEGACY_PO_SCANNER_TERMS);
   assert.deepEqual(matches.map(({ itemName }) => itemName), ['White Setup Gloves - Large', 'Commercial Steamer']);
@@ -25,7 +26,11 @@ test('automation alert matches Pack Out products without unrelated partial match
 
 test('automation email sends only configured event and Pack Out details', async () => {
   const previousKey = process.env.RESEND_API_KEY;
+  const previousAlertFrom = process.env.PACKOUT_ALERT_FROM;
+  const previousReportFrom = process.env.EVENT_REPORT_FROM;
   process.env.RESEND_API_KEY = 'test-key';
+  process.env.PACKOUT_ALERT_FROM = 'OCC Staffing & Service <reports@reports.occdecks.com>';
+  process.env.EVENT_REPORT_FROM = 'OCC Staffing & Service <reports@reports.occdecks.com>';
   let request;
   try {
     const result = await sendAutomationAlertEmail({
@@ -38,11 +43,16 @@ test('automation email sends only configured event and Pack Out details', async 
       },
     });
     assert.equal(result.status, 'sent');
+    assert.equal(request.body.from, 'OCC Operations <reports@reports.occdecks.com>');
     assert.deepEqual(request.body.to, ['chef@ocnyc.com']);
     assert.match(request.body.subject, /Prada Dinner/);
     assert.match(request.body.text, /Heat Lamp · Qty 2 ea · Kitchen/);
   } finally {
     if (previousKey === undefined) delete process.env.RESEND_API_KEY;
     else process.env.RESEND_API_KEY = previousKey;
+    if (previousAlertFrom === undefined) delete process.env.PACKOUT_ALERT_FROM;
+    else process.env.PACKOUT_ALERT_FROM = previousAlertFrom;
+    if (previousReportFrom === undefined) delete process.env.EVENT_REPORT_FROM;
+    else process.env.EVENT_REPORT_FROM = previousReportFrom;
   }
 });

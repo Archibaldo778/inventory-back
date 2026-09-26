@@ -10,6 +10,7 @@ import { parseDecorInventoryCode } from '../utils/decorInventoryCodes.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import {
   buildDecorPackoutCanvas,
+  decorPackoutNeedsBoardSync,
   preserveUnplacedDecorPackoutItems,
   removeGeneratedDecorPackoutDuplicates,
 } from '../utils/decorPackoutBoard.js';
@@ -191,6 +192,7 @@ const mergePackoutItemsFromEventBoards = async (packout) => {
     ? await Page.find({ deckId: { $in: deckIds }, deletedAt: null }).sort({ deckId: 1, index: 1, createdAt: 1 }).lean()
     : [];
   const candidates = [];
+  const canvasPackoutItemIds = new Set();
   const duplicateCleanupTasks = [];
   pages.forEach((page) => {
     const deck = decks.find((entry) => String(entry._id) === String(page.deckId));
@@ -211,6 +213,10 @@ const mergePackoutItemsFromEventBoards = async (packout) => {
       }));
     }
     images.forEach((item) => {
+      if (
+        String(item?.decorPackoutId || '') === String(packout._id)
+        && String(item?.decorPackoutItemId || '').trim()
+      ) canvasPackoutItemIds.add(String(item.decorPackoutItemId).trim());
       if (isCanvasPackoutItem(item, packout._id)) candidates.push({ item, deck, page, zone });
     });
   });
@@ -316,7 +322,9 @@ const mergePackoutItemsFromEventBoards = async (packout) => {
     await packout.save();
     clearCaches();
   }
-  await syncPackoutToBoardSafely(packout);
+  if (decorPackoutNeedsBoardSync(packout.items, canvasPackoutItemIds)) {
+    await syncPackoutToBoardSafely(packout);
+  }
   return packout;
 };
 

@@ -5,6 +5,7 @@ import mongoose from 'mongoose';
 import DecorPackout from '../models/DecorPackout.js';
 import {
   buildDecorPackoutCanvas,
+  decorPackoutNeedsBoardSync,
   preserveUnplacedDecorPackoutItems,
   removeGeneratedDecorPackoutDuplicates,
 } from '../utils/decorPackoutBoard.js';
@@ -86,7 +87,7 @@ test('decor packout items are materialized on the linked Decor Board page', () =
   assert.equal(result.canvas.images[0].src, '/uploads/holder.png');
 });
 
-test('decor board sync updates quantities, removes deleted rows and supports products without photos', () => {
+test('decor board sync preserves user quantities, removes deleted rows and supports products without photos', () => {
   const packoutId = objectId();
   const retainedItemId = objectId();
   const removedItemId = objectId();
@@ -105,7 +106,7 @@ test('decor board sync updates quantities, removes deleted rows and supports pro
 
   assert.equal(result.canvas.images.length, 3);
   assert.equal(result.canvas.images[0].id, 'manual');
-  assert.equal(result.canvas.images[1].quantity, 6);
+  assert.equal(result.canvas.images[1].quantity, 1);
   assert.equal(result.canvas.images[1].src, '/old.png');
   assert.match(result.canvas.images[2].src, /^data:image\/svg\+xml/);
 });
@@ -117,7 +118,7 @@ test('decor board sync adopts an existing Canvas product instead of adding a dup
     { id: 'canvas-product-1', productId: String(objectId()), name: 'Stage vase', quantity: 4, x: 320, y: 180 },
   ] }, {
     _id: packoutId,
-    items: [{ _id: itemId, boardItemId: 'canvas-product-1', name: 'Stage vase', quantity: 4 }],
+    items: [{ _id: itemId, boardItemId: 'canvas-product-1', name: 'Stage vase', quantity: 9 }],
   });
 
   assert.equal(result.canvas.images.length, 1);
@@ -125,6 +126,46 @@ test('decor board sync adopts an existing Canvas product instead of adding a dup
   assert.equal(result.canvas.images[0].x, 320);
   assert.equal(result.canvas.images[0].decorPackoutId, String(packoutId));
   assert.equal(result.canvas.images[0].decorPackoutItemId, String(itemId));
+  assert.equal(result.canvas.images[0].quantity, 4);
+});
+
+test('five merge and build cycles keep two user copies stable on one or two pages', () => {
+  const runCycles = (initialPages) => {
+    const packoutId = 'packout-stable';
+    const itemId = 'item-stable';
+    const productId = String(objectId());
+    let pages = initialPages.map((images) => ({ images: images.map((image) => ({ ...image, productId })) }));
+    const changes = [];
+    let quantity = 0;
+    for (let cycle = 0; cycle < 5; cycle += 1) {
+      quantity = pages.flatMap((page) => page.images)
+        .filter((image) => image.productId === productId)
+        .reduce((sum, image) => sum + Number(image.quantity || 1), 0);
+      const packout = {
+        _id: packoutId,
+        items: [{ _id: itemId, productId, boardItemId: 'a', name: 'Stage vase', quantity }],
+      };
+      let cycleChanged = false;
+      pages = pages.map((page, pageIndex) => {
+        const result = buildDecorPackoutCanvas(page, {
+          ...packout,
+          items: pageIndex === 0 ? packout.items : [],
+        });
+        cycleChanged ||= result.changed;
+        return result.canvas;
+      });
+      changes.push(cycleChanged);
+    }
+    return { changes, pages, quantity };
+  };
+
+  const onePage = runCycles([[{ id: 'a', quantity: 1 }, { id: 'b', quantity: 1 }]]);
+  const twoPages = runCycles([[{ id: 'a', quantity: 1 }], [{ id: 'b', quantity: 1 }]]);
+  [onePage, twoPages].forEach((result) => {
+    assert.equal(result.quantity, 2);
+    assert.deepEqual(result.changes, [true, false, false, false, false]);
+    assert.deepEqual(result.pages.flatMap((page) => page.images).map((image) => image.quantity), [1, 1]);
+  });
 });
 
 test('Canvas import removes only a generated duplicate when the dragged product already exists', () => {
@@ -161,4 +202,7 @@ test('Canvas reconciliation preserves unplaced scans and removes only a missing 
   const result = preserveUnplacedDecorPackoutItems([unplaced, removedFromCanvas], [], new Set());
 
   assert.deepEqual(result, [unplaced]);
+  assert.equal(decorPackoutNeedsBoardSync(result), true);
+  assert.equal(decorPackoutNeedsBoardSync([{ ...unplaced, boardItemId: 'canvas-new-scan' }]), false);
+  assert.equal(decorPackoutNeedsBoardSync(result, new Set(['unplaced'])), false);
 });

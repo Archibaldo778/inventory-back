@@ -12,6 +12,7 @@ import { sendApiError } from '../utils/apiErrors.js';
 import {
   assistantDecorActionKind,
   currentMessageInventoryCodes,
+  isExplicitDecorAddCommand,
   selectAssistantDecorProduct,
 } from '../utils/assistantDecorActions.js';
 
@@ -208,7 +209,7 @@ router.post('/messages', messageRateLimit, async (req, res) => {
         })),
       },
     });
-    const addRequested = /(?:\badd\b|\bplace\b|добав|постав|закин)/i.test(message);
+    const addRequested = isExplicitDecorAddCommand(message);
     const requestedQuantityText = message.replace(/\bOCC\s*0*\d+\b/gi, '');
     const requestedQuantityMatch = requestedQuantityText.match(/(?:\bqty\s*|\bquantity\s*|\bпо\s+)?(\d{1,3})\s*(?:pcs?|pieces?|шт(?:ук[аи]?)?)?\b/i);
     const requestedQuantity = Math.max(1, Math.min(999, Math.trunc(Number(requestedQuantityMatch?.[1]) || 1)));

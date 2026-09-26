@@ -18,7 +18,7 @@ test('board sync keeps an empty draft and re-materializes unplaced items', () =>
   assert.match(routeSource, /packout\.items = preserveUnplacedDecorPackoutItems/);
   const mergeBody = routeSource.match(/const mergePackoutItemsFromEventBoards[\s\S]+?return packout;\n};/)?.[0] || '';
   assert.doesNotMatch(mergeBody, /DecorPackout\.deleteOne/);
-  assert.match(mergeBody, /await syncPackoutToBoardSafely\(packout\)/);
+  assert.match(mergeBody, /decorPackoutNeedsBoardSync\(packout\.items, canvasPackoutItemIds\)/);
 });
 
 test('Word export groups decor rows by zone before product category', () => {
@@ -35,5 +35,5 @@ test('Canvas import reconciles first and then restores only unplaced packout ite
   const mergeBody = routeSource.match(/const mergePackoutItemsFromEventBoards[\s\S]+?return packout;\n};/)?.[0] || '';
   assert.match(mergeBody, /removeGeneratedDecorPackoutDuplicates/);
   assert.match(mergeBody, /preserveUnplacedDecorPackoutItems/);
-  assert.match(mergeBody, /syncPackoutToBoardSafely\(packout\)/);
+  assert.match(mergeBody, /if \(decorPackoutNeedsBoardSync/);
 });

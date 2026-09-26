@@ -62,6 +62,15 @@ export const preserveUnplacedDecorPackoutItems = (previousItemsValue, reconciled
   return result;
 };
 
+export const decorPackoutNeedsBoardSync = (itemsValue, canvasItemIdsValue = new Set()) => {
+  const items = Array.isArray(itemsValue) ? itemsValue : [];
+  const canvasItemIds = canvasItemIdsValue instanceof Set ? canvasItemIdsValue : new Set(canvasItemIdsValue || []);
+  return items.some((item) => {
+    const itemId = idOf(item);
+    return !text(item?.boardItemId) && (!itemId || !canvasItemIds.has(itemId));
+  });
+};
+
 export const buildDecorPackoutCanvas = (canvasValue, packoutValue) => {
   const canvas = canvasValue && typeof canvasValue === 'object' ? canvasValue : {};
   const packoutId = idOf(packoutValue);
@@ -74,6 +83,7 @@ export const buildDecorPackoutCanvas = (canvasValue, packoutValue) => {
     .filter(([boardItemId, itemId]) => boardItemId && itemId));
   let changed = false;
   const images = [];
+  const generatedPrefix = `packout-${packoutId}-`;
 
   (Array.isArray(canvas.images) ? canvas.images : []).forEach((image) => {
     const linkedPackoutId = text(image?.decorPackoutId);
@@ -92,6 +102,7 @@ export const buildDecorPackoutCanvas = (canvasValue, packoutValue) => {
     expected.delete(itemId);
     const quantity = Math.max(1, Number(item.quantity) || 1);
     const src = itemImage(item) || text(image?.src) || decorPackoutPlaceholder(item.name);
+    const generated = text(image?.id).startsWith(generatedPrefix);
     const next = {
       ...image,
       src,
@@ -103,8 +114,7 @@ export const buildDecorPackoutCanvas = (canvasValue, packoutValue) => {
       name: text(item.name) || 'Inventory item',
       initialName: text(item.name) || 'Inventory item',
       description: text(item.description),
-      quantity,
-      quantityText: String(quantity),
+      ...(generated ? { quantity, quantityText: String(quantity) } : {}),
     };
     if (JSON.stringify(next) !== JSON.stringify(image)) changed = true;
     images.push(next);

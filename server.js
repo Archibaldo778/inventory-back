@@ -453,6 +453,7 @@ import publicBarReturnsRoutes from './routes/publicBarReturns.js';
 import publicEventWorkspaceRoutes from './routes/publicEventWorkspace.js';
 import publicEventReportsRoutes from './routes/publicEventReports.js';
 import eventReportsRoutes from './routes/eventReports.js';
+import automationAlertRoutes from './routes/automationAlerts.js';
 import dropboxIntegrationRoutes, { runDropboxDiscoverySync } from './routes/dropboxIntegration.js';
 import catereaseIntegrationRoutes, {
   runCatereaseFileSync,
@@ -498,6 +499,7 @@ app.use('/api/public/bar-returns', publicBarReturnsRoutes);
 app.use('/api/public/event-workspace', publicEventWorkspaceRoutes);
 app.use('/api/public/event-reports', publicEventReportsRoutes);
 app.use('/api/event-reports', requireAuth, requireAdmin, eventReportsRoutes);
+app.use('/api/automation-alerts', requireAuth, requireAdmin, automationAlertRoutes);
 app.use('/api/bar', requireAuth, barRoutes);
 app.use('/api/integrations/dropbox', dropboxIntegrationRoutes);
 app.use('/api/integrations/caterease', catereaseIntegrationRoutes);

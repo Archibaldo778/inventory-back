@@ -82,6 +82,7 @@ import {
 } from '../utils/catereaseViewSync.js';
 import { createEmlDraft } from '../utils/emlDraft.js';
 import { createOperationalShareArchive } from '../utils/operationalShareArchive.js';
+import { processAutomationAlerts } from '../utils/automationAlerts.js';
 import {
   buildOutlookAuthorizeUrl,
   createOutlookDraft,
@@ -534,6 +535,7 @@ export const fetchCatereaseOperationalSnapshot = async (eventId, eventDate = '',
 export const syncOperationalEvent = async (event, {
   fetchSnapshot = fetchCatereaseOperationalSnapshot,
   syncBarItems = syncCatereaseOperationalBarItems,
+  processAlerts = processAutomationAlerts,
   primaryFiles = (() => {
     const config = getCatereaseConfig();
     return config.primaryFiles || config.operationalSyncEnabled;
@@ -542,10 +544,14 @@ export const syncOperationalEvent = async (event, {
   const eventId = normalizeCatereaseEventId(event?.externalId);
   if (!eventId) return { status: 'skipped', reason: 'missing_event_id' };
   const snapshot = await fetchSnapshot(eventId, String(event?.date || ''), String(event?.title || ''));
+  const previousSnapshot = event?.catereaseOperations || null;
   const previousChecksum = String(event?.catereaseOperations?.checksum || '');
   event.catereaseOperations = snapshot;
   event.markModified('catereaseOperations');
   await event.save();
+  const automationAlerts = await processAlerts({ event, snapshot, previousSnapshot, previousChecksum }).catch((error) => ([{
+    status: 'failed', error: String(error?.message || 'Automation alert processing failed').slice(0, 300),
+  }]));
   const barSync = primaryFiles
     ? await syncBarItems(event, snapshot)
     : { synced: false, items: 0, reason: 'dropbox_primary' };
@@ -557,6 +563,7 @@ export const syncOperationalEvent = async (event, {
     kitchenMenuRows: snapshot.kitchenMenu.length,
     staffRequestRows: snapshot.staffRequest.length,
     barItems: barSync.items,
+    automationAlerts,
   };
 };
 

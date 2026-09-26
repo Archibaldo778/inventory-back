@@ -35,14 +35,19 @@ test('a full Caterease operational sync leaves manual additions untouched', asyn
     kitchenMenu: [],
     staffRequest: [],
   };
+  const previousSnapshot = event.catereaseOperations;
+  let alertInput = null;
   await syncOperationalEvent(event, {
     fetchSnapshot: async () => snapshot,
+    processAlerts: async (input) => { alertInput = input; return []; },
     primaryFiles: false,
   });
   assert.deepEqual(event.catereaseManualAdditions, additions);
   assert.equal(event.catereaseOperations, snapshot);
   assert.deepEqual(event.markModifiedCalls, ['catereaseOperations']);
   assert.equal(event.saved, true);
+  assert.equal(alertInput.previousSnapshot, previousSnapshot);
+  assert.equal(alertInput.snapshot, snapshot);
 });
 
 test('operational primary mode sends the refreshed snapshot to Bar Operations', async () => {
@@ -72,6 +77,7 @@ test('operational primary mode sends the refreshed snapshot to Bar Operations', 
   try {
     await syncOperationalEvent(event, {
       fetchSnapshot: async () => snapshot,
+      processAlerts: async () => [],
       syncBarItems: async (_event, nextSnapshot) => {
         syncedSnapshot = nextSnapshot;
         return { synced: true, items: 0 };

@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import mongoose from 'mongoose';
+
+import { isCanvasPackoutItem } from '../routes/decorPackouts.js';
 
 const routeSource = await readFile(new URL('../routes/decorPackouts.js', import.meta.url), 'utf8');
 const modelSource = await readFile(new URL('../models/DecorPackout.js', import.meta.url), 'utf8');
@@ -43,4 +46,35 @@ test('Canvas import reconciles first and then restores only unplaced packout ite
   assert.match(mergeBody, /removeGeneratedDecorPackoutDuplicates/);
   assert.match(mergeBody, /preserveUnplacedDecorPackoutItems/);
   assert.match(mergeBody, /if \(decorPackoutNeedsBoardSync/);
+});
+
+test('Canvas import recovers products linked to deleted or completed packouts', () => {
+  const currentId = String(new mongoose.Types.ObjectId());
+  const otherDraftId = String(new mongoose.Types.ObjectId());
+  const ghostId = String(new mongoose.Types.ObjectId());
+  const productId = String(new mongoose.Types.ObjectId());
+  const draftIds = new Set([currentId, otherDraftId]);
+
+  assert.equal(isCanvasPackoutItem({
+    id: 'manual-ghost',
+    productId,
+    decorPackoutId: ghostId,
+  }, currentId, draftIds), true);
+  assert.equal(isCanvasPackoutItem({
+    id: `packout-${ghostId}-generated`,
+    productId,
+    decorPackoutId: ghostId,
+  }, currentId, draftIds), true);
+  assert.equal(isCanvasPackoutItem({
+    id: 'belongs-to-live-draft',
+    productId,
+    decorPackoutId: otherDraftId,
+  }, currentId, draftIds), false);
+});
+
+test('board merge loads all live draft ids for the event before selecting Canvas products', () => {
+  const mergeBody = routeSource.match(/const mergePackoutItemsFromEventBoards[\s\S]+?return packout;\n};/)?.[0] || '';
+  assert.match(mergeBody, /DecorPackout\.find\(\{[\s\S]*eventId: packout\.eventId,[\s\S]*status: 'draft'/);
+  assert.match(mergeBody, /\.select\('_id'\)\.lean\(\)/);
+  assert.match(mergeBody, /isCanvasPackoutItem\(item, packout\._id, draftPackoutIds\)/);
 });

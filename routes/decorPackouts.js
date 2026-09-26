@@ -174,11 +174,17 @@ const uniquePackoutItems = (items = [], fallbackDeckId = '') => {
   return [...unique.values()];
 };
 
-const isCanvasPackoutItem = (item, packoutId) => {
+export const isCanvasPackoutItem = (item, packoutId, draftPackoutIds = new Set()) => {
   if (!item || ['text', 'link', 'table', 'staff'].includes(String(item.type || '').toLowerCase())) return false;
   if (String(item.boardItemType || '').toLowerCase() === 'staff') return false;
   const linkedPackoutId = String(item.decorPackoutId || '');
-  if (linkedPackoutId) return linkedPackoutId === String(packoutId || '');
+  if (linkedPackoutId) {
+    if (linkedPackoutId === String(packoutId || '')) return true;
+    // A Canvas item belongs elsewhere only while that other draft still
+    // exists for this event. Links to deleted or completed packouts are
+    // recoverable metadata, not a reason to hide a visible product.
+    if (draftPackoutIds.has(linkedPackoutId)) return false;
+  }
   return Boolean(
     isObjectId(item.productId)
     || parseDecorInventoryCode(String(item.inventoryCode || '').trim().toUpperCase())
@@ -187,6 +193,11 @@ const isCanvasPackoutItem = (item, packoutId) => {
 
 const mergePackoutItemsFromEventBoards = async (packout) => {
   const previousItemsSignature = packoutItemsSignature(packout.items);
+  const draftPackoutRows = await DecorPackout.find({
+    eventId: packout.eventId,
+    status: 'draft',
+  }).select('_id').lean();
+  const draftPackoutIds = new Set(draftPackoutRows.map((entry) => String(entry._id)));
   const decks = await Deck.find({ eventId: packout.eventId, type: 'decor' }).sort({ createdAt: 1 }).lean();
   const deckIds = decks.map((deck) => deck._id);
   const pages = deckIds.length
@@ -218,7 +229,7 @@ const mergePackoutItemsFromEventBoards = async (packout) => {
         String(item?.decorPackoutId || '') === String(packout._id)
         && String(item?.decorPackoutItemId || '').trim()
       ) canvasPackoutItemIds.add(String(item.decorPackoutItemId).trim());
-      if (isCanvasPackoutItem(item, packout._id)) candidates.push({ item, deck, page, zone });
+      if (isCanvasPackoutItem(item, packout._id, draftPackoutIds)) candidates.push({ item, deck, page, zone });
     });
   });
   await Promise.all(duplicateCleanupTasks);

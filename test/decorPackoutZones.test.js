@@ -53,28 +53,38 @@ test('Canvas import recovers products linked to deleted or completed packouts', 
   const otherDraftId = String(new mongoose.Types.ObjectId());
   const ghostId = String(new mongoose.Types.ObjectId());
   const productId = String(new mongoose.Types.ObjectId());
-  const draftIds = new Set([currentId, otherDraftId]);
+  const currentDeckId = String(new mongoose.Types.ObjectId());
+  const otherDeckId = String(new mongoose.Types.ObjectId());
+  const draftDeckIds = new Map([
+    [currentId, currentDeckId],
+    [otherDraftId, otherDeckId],
+  ]);
 
   assert.equal(isCanvasPackoutItem({
     id: 'manual-ghost',
     productId,
     decorPackoutId: ghostId,
-  }, currentId, draftIds), true);
+  }, currentId, draftDeckIds, currentDeckId), true);
   assert.equal(isCanvasPackoutItem({
     id: `packout-${ghostId}-generated`,
     productId,
     decorPackoutId: ghostId,
-  }, currentId, draftIds), true);
+  }, currentId, draftDeckIds, currentDeckId), true);
   assert.equal(isCanvasPackoutItem({
     id: 'belongs-to-live-draft',
     productId,
     decorPackoutId: otherDraftId,
-  }, currentId, draftIds), false);
+  }, currentId, draftDeckIds, currentDeckId), false);
+  assert.equal(isCanvasPackoutItem({
+    id: 'stale-draft-on-same-deck',
+    productId,
+    decorPackoutId: otherDraftId,
+  }, currentId, draftDeckIds, otherDeckId), true);
 });
 
 test('board merge loads all live draft ids for the event before selecting Canvas products', () => {
   const mergeBody = routeSource.match(/const mergePackoutItemsFromEventBoards[\s\S]+?return packout;\n};/)?.[0] || '';
   assert.match(mergeBody, /DecorPackout\.find\(\{[\s\S]*eventId: packout\.eventId,[\s\S]*status: 'draft'/);
-  assert.match(mergeBody, /\.select\('_id'\)\.lean\(\)/);
-  assert.match(mergeBody, /isCanvasPackoutItem\(item, packout\._id, draftPackoutIds\)/);
+  assert.match(mergeBody, /\.select\('_id deckId'\)\.lean\(\)/);
+  assert.match(mergeBody, /isCanvasPackoutItem\(item, packout\._id, draftPackoutDeckIds, page\.deckId\)/);
 });

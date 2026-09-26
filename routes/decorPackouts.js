@@ -174,16 +174,18 @@ const uniquePackoutItems = (items = [], fallbackDeckId = '') => {
   return [...unique.values()];
 };
 
-export const isCanvasPackoutItem = (item, packoutId, draftPackoutIds = new Set()) => {
+export const isCanvasPackoutItem = (item, packoutId, draftPackoutDeckIds = new Map(), pageDeckId = '') => {
   if (!item || ['text', 'link', 'table', 'staff'].includes(String(item.type || '').toLowerCase())) return false;
   if (String(item.boardItemType || '').toLowerCase() === 'staff') return false;
   const linkedPackoutId = String(item.decorPackoutId || '');
   if (linkedPackoutId) {
     if (linkedPackoutId === String(packoutId || '')) return true;
-    // A Canvas item belongs elsewhere only while that other draft still
-    // exists for this event. Links to deleted or completed packouts are
-    // recoverable metadata, not a reason to hide a visible product.
-    if (draftPackoutIds.has(linkedPackoutId)) return false;
+    // Only a live draft from another Decor deck owns this Canvas item.
+    // Links to deleted/completed packouts or an older draft on this same
+    // deck are recoverable metadata and must be adopted by the active draft.
+    if (draftPackoutDeckIds.has(linkedPackoutId)) {
+      return String(draftPackoutDeckIds.get(linkedPackoutId) || '') === String(pageDeckId || '');
+    }
   }
   return Boolean(
     isObjectId(item.productId)
@@ -196,8 +198,10 @@ const mergePackoutItemsFromEventBoards = async (packout) => {
   const draftPackoutRows = await DecorPackout.find({
     eventId: packout.eventId,
     status: 'draft',
-  }).select('_id').lean();
-  const draftPackoutIds = new Set(draftPackoutRows.map((entry) => String(entry._id)));
+  }).select('_id deckId').lean();
+  const draftPackoutDeckIds = new Map(draftPackoutRows.map((entry) => (
+    [String(entry._id), String(entry.deckId || '')]
+  )));
   const decks = await Deck.find({ eventId: packout.eventId, type: 'decor' }).sort({ createdAt: 1 }).lean();
   const deckIds = decks.map((deck) => deck._id);
   const pages = deckIds.length
@@ -229,7 +233,9 @@ const mergePackoutItemsFromEventBoards = async (packout) => {
         String(item?.decorPackoutId || '') === String(packout._id)
         && String(item?.decorPackoutItemId || '').trim()
       ) canvasPackoutItemIds.add(String(item.decorPackoutItemId).trim());
-      if (isCanvasPackoutItem(item, packout._id, draftPackoutIds)) candidates.push({ item, deck, page, zone });
+      if (isCanvasPackoutItem(item, packout._id, draftPackoutDeckIds, page.deckId)) {
+        candidates.push({ item, deck, page, zone });
+      }
     });
   });
   await Promise.all(duplicateCleanupTasks);

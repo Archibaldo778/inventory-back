@@ -5,6 +5,7 @@ import Event from '../models/Event.js';
 import BarEvent from '../models/BarEvent.js';
 import {
   loadAuthorizedOperationalEvent,
+  recordCatereaseOperationalSyncError,
   syncOperationalEvent,
 } from '../routes/catereaseIntegration.js';
 
@@ -132,6 +133,25 @@ test('a partial Caterease response preserves the last complete snapshot and skip
 
   assert.equal(event.catereaseOperations, previousSnapshot);
   assert.deepEqual(calls, { saved: 0, alerts: 0, bar: 0 });
+});
+
+test('operational sync records every failed event instead of hiding failures after twelve', () => {
+  const summary = { failed: 0, errors: [] };
+  for (let index = 1; index <= 14; index += 1) {
+    recordCatereaseOperationalSyncError(summary, {
+      externalId: `E${String(index).padStart(5, '0')}`,
+      title: `Event ${index}`,
+    }, Object.assign(new Error(`Source ${index} failed`), { statusCode: 502 }));
+  }
+
+  assert.equal(summary.failed, 14);
+  assert.equal(summary.errors.length, 14);
+  assert.deepEqual(summary.errors[13], {
+    eventId: 'E00014',
+    title: 'Event 14',
+    status: 502,
+    message: 'Source 14 failed',
+  });
 });
 
 test('editing and deleting a manual addition targets only the matching subdocument id', () => {

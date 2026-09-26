@@ -581,6 +581,16 @@ export const syncOperationalEvent = async (event, {
   };
 };
 
+export const recordCatereaseOperationalSyncError = (summary, event, error) => {
+  summary.failed += 1;
+  summary.errors.push({
+    eventId: normalizeCatereaseEventId(event?.externalId),
+    title: String(event?.title || ''),
+    status: Number(error?.statusCode) || null,
+    message: String(error?.message || 'Caterease operational sync failed').slice(0, 300),
+  });
+};
+
 export const runCatereaseOperationalSync = async () => {
   if (operationalSyncPromise) return operationalSyncPromise;
   operationalSyncPromise = (async () => {
@@ -604,13 +614,7 @@ export const runCatereaseOperationalSync = async () => {
           summary.kitchenMenuRows += Number(result.kitchenMenuRows || 0);
           summary.staffRequestRows += Number(result.staffRequestRows || 0);
         } catch (error) {
-          summary.failed += 1;
-          if (summary.errors.length < 12) summary.errors.push({
-            eventId: normalizeCatereaseEventId(event.externalId),
-            title: String(event.title || ''),
-            status: Number(error?.statusCode) || null,
-            message: String(error?.message || 'Caterease operational sync failed').slice(0, 300),
-          });
+          recordCatereaseOperationalSyncError(summary, event, error);
         }
       }
       integration.lastOperationalSyncCompletedAt = new Date();

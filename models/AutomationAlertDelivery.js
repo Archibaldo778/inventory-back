@@ -4,6 +4,7 @@ const automationAlertDeliverySchema = new mongoose.Schema({
   ruleId: { type: mongoose.Schema.Types.ObjectId, ref: 'AutomationAlertRule', required: true },
   eventId: { type: mongoose.Schema.Types.ObjectId, ref: 'Event', required: true },
   signature: { type: String, required: true, trim: true },
+  signatureVersion: { type: Number, enum: [1, 2], default: 1 },
   status: { type: String, enum: ['pending', 'sent', 'failed'], default: 'pending' },
   recipients: { type: [String], default: [] },
   matchedItems: { type: [mongoose.Schema.Types.Mixed], default: [] },

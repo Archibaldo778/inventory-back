@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   LEGACY_PO_SCANNER_RECIPIENTS,
   LEGACY_PO_SCANNER_TERMS,
+  automationAlertLegacySignature,
   findAutomationMatches,
   processAutomationAlerts,
   sendAutomationAlertEmail,
@@ -71,6 +72,7 @@ test('parallel forced alert processing atomically claims one delivery', async ()
     ruleId: value.ruleId,
     eventId: value.eventId,
     signature: value.signature,
+    signatureVersion: value.signatureVersion,
     status: value.status,
     recipients: value.recipients,
     matchedItems: value.matchedItems,
@@ -203,4 +205,45 @@ test('renaming or rescheduling an event sends one updated alert and then stays i
     if (previousKey === undefined) delete process.env.RESEND_API_KEY;
     else process.env.RESEND_API_KEY = previousKey;
   }
+});
+
+test('a delivery created with the legacy signature is not resent after deployment', async () => {
+  const rule = {
+    _id: 'rule-1', name: 'Operations equipment', department: 'Operations',
+    recipients: ['ops@ocnyc.com'], matchTerms: ['Heat Lamp'],
+  };
+  const event = { _id: 'event-1', title: 'Renamed after legacy send', date: '2026-09-27' };
+  const snapshot = { checksum: 'same-items', packOut: [{ itemName: 'Heat Lamp', quantity: 2 }] };
+  const matches = findAutomationMatches(snapshot, rule.matchTerms);
+  const legacyDelivery = {
+    ruleId: rule._id,
+    eventId: event._id,
+    signature: automationAlertLegacySignature({ event, rule, matches }),
+    status: 'sent',
+  };
+  const deliveryModel = {
+    findOne: (query) => ({
+      lean: async () => Object.entries(query).every(([key, value]) => String(legacyDelivery[key]) === String(value))
+        ? legacyDelivery
+        : null,
+    }),
+  };
+  let fetchCount = 0;
+
+  const result = await processAutomationAlerts({
+    event,
+    snapshot,
+    previousSnapshot: snapshot,
+    previousChecksum: snapshot.checksum,
+    ruleModel: { find: () => ({ lean: async () => [rule] }) },
+    deliveryModel,
+    ensureDefaultRule: async () => {},
+    fetchImpl: async () => {
+      fetchCount += 1;
+      return { ok: true, json: async () => ({ id: 'must-not-send' }) };
+    },
+  });
+
+  assert.equal(result[0].status, 'already_sent');
+  assert.equal(fetchCount, 0);
 });

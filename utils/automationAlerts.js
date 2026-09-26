@@ -60,7 +60,16 @@ export const findAutomationMatches = (snapshot, matchTerms = []) => {
   });
 };
 
+export const automationAlertLegacySignature = ({ event, rule, matches }) => crypto.createHash('sha256').update(JSON.stringify({
+  eventId: clean(event?._id || event?.externalId, 100),
+  ruleId: clean(rule?._id, 100),
+  items: matches.map((item) => ({
+    name: normalize(item.itemName), quantity: item.quantity, unit: normalize(item.unit), zone: normalize(item.zone),
+  })).sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right))),
+})).digest('hex');
+
 export const automationAlertSignature = ({ event, rule, matches }) => crypto.createHash('sha256').update(JSON.stringify({
+  version: 2,
   eventId: clean(event?._id || event?.externalId, 100),
   eventTitle: normalize(event?.title),
   eventDate: normalize(event?.date),
@@ -138,31 +147,44 @@ export const processAutomationAlerts = async ({
     }
     const deliveryKey = { ruleId: rule._id, eventId: event._id, signature };
     const existing = await deliveryModel.findOne(deliveryKey).lean();
-    const priorSentDelivery = !existing
-      ? await deliveryModel.findOne({ ruleId: rule._id, eventId: event._id, status: 'sent' }).lean()
+    const legacySentDelivery = !existing
+      ? await deliveryModel.findOne({
+        ruleId: rule._id,
+        eventId: event._id,
+        signature: automationAlertLegacySignature({ event, rule, matches }),
+        status: 'sent',
+      }).lean()
+      : null;
+    const priorVersionedDelivery = !existing && !legacySentDelivery
+      ? await deliveryModel.findOne({
+        ruleId: rule._id,
+        eventId: event._id,
+        signatureVersion: 2,
+        status: 'sent',
+      }).lean()
       : null;
     const unchangedSnapshot = String(previousChecksum) === String(snapshot?.checksum || '');
     const pendingIsFresh = existing?.status === 'pending'
       && Date.now() - new Date(existing.lastAttemptAt || existing.updatedAt || 0).getTime() < 10 * 60 * 1000;
-    if (existing?.status === 'sent' || pendingIsFresh) {
-      results.push({ ruleId: rule._id, status: existing.status === 'sent' ? 'already_sent' : 'pending', matches: matches.length });
+    if (existing?.status === 'sent' || legacySentDelivery || pendingIsFresh) {
+      results.push({ ruleId: rule._id, status: existing?.status === 'sent' || legacySentDelivery ? 'already_sent' : 'pending', matches: matches.length });
       continue;
     }
-    if (!force && unchangedSnapshot && !priorSentDelivery && existing?.status !== 'failed' && existing?.status !== 'pending') {
+    if (!force && unchangedSnapshot && !priorVersionedDelivery && existing?.status !== 'failed' && existing?.status !== 'pending') {
       results.push({ ruleId: rule._id, status: 'unchanged', matches: matches.length });
       continue;
     }
     const previousMatches = findAutomationMatches(previousSnapshot, rule.matchTerms);
     const matchesWereAlreadyPresent = previousMatches.length
       && automationAlertSignature({ event, rule, matches: previousMatches }) === signature;
-    if (!force && !existing && !priorSentDelivery && matchesWereAlreadyPresent) {
+    if (!force && !existing && !priorVersionedDelivery && matchesWereAlreadyPresent) {
       results.push({ ruleId: rule._id, status: 'baseline', matches: matches.length });
       continue;
     }
     const lastAttemptAt = new Date();
     const staleBefore = new Date(lastAttemptAt.getTime() - 10 * 60 * 1000);
     const pendingFields = {
-      status: 'pending', recipients: rule.recipients, matchedItems: matches, error: '', lastAttemptAt,
+      status: 'pending', signatureVersion: 2, recipients: rule.recipients, matchedItems: matches, error: '', lastAttemptAt,
     };
     let delivery = await deliveryModel.findOneAndUpdate(
       {

@@ -68,6 +68,7 @@ export const askOccAssistant = async ({ user, message, history = [], context = {
         'Use activeEvent when the user says this event. Explain when information is unavailable.',
         'For decor requests, use only inventoryCandidates. Suggest useful options and return filter_decor so the real catalog is filtered.',
         'When the user asks to add a specific inventory candidate, return add_decor with its exact code, name, requested quantity, and availability. The app performs the real action immediately.',
+        'Inventory candidate availability is the warehouse total on hand, not availability for a particular event date. Describe it as total on hand and never promise that it is unreserved for the event.',
         'Carry references such as "look now" or "that item" across recentConversation. If the requested name or OCC code appears in inventoryCandidates, clearly say it was found.',
         'An inventory item with available 0 exists but is out of stock; never describe it as missing from the catalog.',
         'Do not claim that an item was added before the app returns the action result.',

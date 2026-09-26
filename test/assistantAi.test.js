@@ -13,6 +13,7 @@ test('assistant response normalizes the structured OpenAI result', async () => {
     const request = JSON.parse(options.body);
     assert.equal(request.model, 'test-model');
     assert.match(request.input, /Gold centerpiece/);
+    assert.match(request.instructions, /warehouse total on hand, not availability for a particular event date/);
     return {
       ok: true,
       json: async () => ({

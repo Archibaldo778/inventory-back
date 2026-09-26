@@ -13,6 +13,7 @@ import {
   decorPackoutNeedsBoardSync,
   preserveUnplacedDecorPackoutItems,
   removeGeneratedDecorPackoutDuplicates,
+  selectReusableDecorPackoutDraft,
 } from '../utils/decorPackoutBoard.js';
 import { requireAuth } from '../middleware/auth.js';
 import { renderCatereaseOperationalDocx } from '../utils/catereaseOperations.js';
@@ -360,6 +361,21 @@ router.post('/', async (req, res) => {
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
     const { deck, page } = await resolvePackoutTarget(event._id, req.body?.deckId, req.body?.pageId);
+    const existingDrafts = await DecorPackout.find({
+      eventId: event._id,
+      deckId: deck._id,
+      status: 'draft',
+    }).sort({ updatedAt: -1, createdAt: -1 });
+    const existing = selectReusableDecorPackoutDraft(existingDrafts);
+    if (existing) {
+      existing.eventTitle = event.title || existing.eventTitle || '';
+      existing.eventDate = event.date || existing.eventDate || '';
+      existing.eventClient = event.client || existing.eventClient || '';
+      if (!existing.pageId) existing.pageId = page._id;
+      await existing.save();
+      clearCaches();
+      return res.json(existing);
+    }
     const packout = await DecorPackout.create({
       eventId: event._id,
       deckId: deck._id,

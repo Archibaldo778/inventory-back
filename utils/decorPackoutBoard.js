@@ -71,6 +71,14 @@ export const decorPackoutNeedsBoardSync = (itemsValue, canvasItemIdsValue = new 
   });
 };
 
+export const selectReusableDecorPackoutDraft = (packoutsValue) => {
+  const drafts = (Array.isArray(packoutsValue) ? packoutsValue : [])
+    .filter((packout) => packout?.status === 'draft');
+  return drafts.find((packout) => Array.isArray(packout?.items) && packout.items.length > 0)
+    || drafts[0]
+    || null;
+};
+
 export const buildDecorPackoutCanvas = (canvasValue, packoutValue) => {
   const canvas = canvasValue && typeof canvasValue === 'object' ? canvasValue : {};
   const packoutId = idOf(packoutValue);

@@ -8,6 +8,7 @@ import {
   decorPackoutNeedsBoardSync,
   preserveUnplacedDecorPackoutItems,
   removeGeneratedDecorPackoutDuplicates,
+  selectReusableDecorPackoutDraft,
 } from '../utils/decorPackoutBoard.js';
 
 const objectId = () => new mongoose.Types.ObjectId();
@@ -205,4 +206,13 @@ test('Canvas reconciliation preserves unplaced scans and removes only a missing 
   assert.equal(decorPackoutNeedsBoardSync(result), true);
   assert.equal(decorPackoutNeedsBoardSync([{ ...unplaced, boardItemId: 'canvas-new-scan' }]), false);
   assert.equal(decorPackoutNeedsBoardSync(result, new Set(['unplaced'])), false);
+});
+
+test('creating a packout reuses the populated draft for the same event board', () => {
+  const empty = { _id: 'newer-empty', status: 'draft', items: [] };
+  const populated = { _id: 'existing', status: 'draft', items: [{ _id: 'item-1' }] };
+  const complete = { _id: 'complete', status: 'complete', items: [{ _id: 'item-2' }] };
+  assert.equal(selectReusableDecorPackoutDraft([empty, populated, complete]), populated);
+  assert.equal(selectReusableDecorPackoutDraft([empty, complete]), empty);
+  assert.equal(selectReusableDecorPackoutDraft([complete]), null);
 });

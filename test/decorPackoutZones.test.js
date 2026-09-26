@@ -21,6 +21,13 @@ test('board sync keeps an empty draft and re-materializes unplaced items', () =>
   assert.match(mergeBody, /decorPackoutNeedsBoardSync\(packout\.items, canvasPackoutItemIds\)/);
 });
 
+test('packout creation reuses an existing draft for the same event and Decor deck', () => {
+  const createBody = routeSource.match(/router\.post\('\/',[\s\S]+?context: 'Decor packout creation failed'/)?.[0] || '';
+  assert.match(createBody, /DecorPackout\.find\(\{[\s\S]*eventId: event\._id,[\s\S]*deckId: deck\._id,[\s\S]*status: 'draft'/);
+  assert.match(createBody, /selectReusableDecorPackoutDraft\(existingDrafts\)/);
+  assert.match(createBody, /return res\.json\(existing\)/);
+});
+
 test('Word export groups decor rows by zone before product category', () => {
   assert.match(routeSource, /const exportItems = uniquePackoutItems\(packout\.items, packout\.deckId\)/);
   assert.match(routeSource, /menuGroup: item\.zone \|\| item\.category \|\| 'DECOR'/);

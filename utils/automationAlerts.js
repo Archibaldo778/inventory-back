@@ -89,9 +89,19 @@ export const sendAutomationAlertEmail = async ({ event, rule, matches, fetchImpl
   return { status: 'sent', providerId: clean(payload.id, 200), sentAt: new Date() };
 };
 
-export const processAutomationAlerts = async ({ event, snapshot, previousSnapshot, previousChecksum, fetchImpl = fetch }) => {
+export const processAutomationAlerts = async ({
+  event,
+  snapshot,
+  previousSnapshot,
+  previousChecksum,
+  fetchImpl = fetch,
+  force = false,
+  ruleIds = [],
+}) => {
   await ensureDefaultAutomationRule();
-  const rules = await AutomationAlertRule.find({ enabled: true, source: 'caterease_packout' }).lean();
+  const ruleQuery = { enabled: true, source: 'caterease_packout' };
+  if (Array.isArray(ruleIds) && ruleIds.length) ruleQuery._id = { $in: ruleIds };
+  const rules = await AutomationAlertRule.find(ruleQuery).lean();
   const results = [];
   for (const rule of rules) {
     const matches = findAutomationMatches(snapshot, rule.matchTerms);
@@ -100,7 +110,7 @@ export const processAutomationAlerts = async ({ event, snapshot, previousSnapsho
       continue;
     }
     const signature = automationAlertSignature({ event, rule, matches });
-    if (!previousChecksum) {
+    if (!force && !previousChecksum) {
       results.push({ ruleId: rule._id, status: 'baseline', matches: matches.length });
       continue;
     }
@@ -112,14 +122,14 @@ export const processAutomationAlerts = async ({ event, snapshot, previousSnapsho
       results.push({ ruleId: rule._id, status: existing.status === 'sent' ? 'already_sent' : 'pending', matches: matches.length });
       continue;
     }
-    if (unchangedSnapshot && existing?.status !== 'failed' && existing?.status !== 'pending') {
+    if (!force && unchangedSnapshot && existing?.status !== 'failed' && existing?.status !== 'pending') {
       results.push({ ruleId: rule._id, status: 'unchanged', matches: matches.length });
       continue;
     }
     const previousMatches = findAutomationMatches(previousSnapshot, rule.matchTerms);
     const matchesWereAlreadyPresent = previousMatches.length
       && automationAlertSignature({ event, rule, matches: previousMatches }) === signature;
-    if (!existing && matchesWereAlreadyPresent) {
+    if (!force && !existing && matchesWereAlreadyPresent) {
       results.push({ ruleId: rule._id, status: 'baseline', matches: matches.length });
       continue;
     }

@@ -10,6 +10,7 @@ import { parseDecorInventoryCode } from '../utils/decorInventoryCodes.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import {
   buildDecorPackoutCanvas,
+  buildManualDecorQuantityOverrides,
   decorPackoutNeedsBoardSync,
   preserveUnplacedDecorPackoutItems,
   removeGeneratedDecorPackoutDuplicates,
@@ -64,12 +65,12 @@ const loadPackout = (id) => (
   isObjectId(id) ? DecorPackout.findById(id) : null
 );
 
-const syncPackoutPage = async (packout, pageId, items) => {
+const syncPackoutPage = async (packout, pageId, items, manualQuantityOverrides) => {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const page = await Page.findOne({ _id: pageId, deletedAt: null }).lean();
     if (!page) return false;
     const packoutValue = typeof packout?.toObject === 'function' ? packout.toObject() : packout;
-    const next = buildDecorPackoutCanvas(page.canvas, { ...packoutValue, items });
+    const next = buildDecorPackoutCanvas(page.canvas, { ...packoutValue, items }, { manualQuantityOverrides });
     if (!next.changed) return true;
     const revision = Math.max(0, Number(page.revision) || 0);
     const revisionFilter = revision === 0
@@ -89,8 +90,10 @@ const syncPackoutToBoard = async (packout) => {
   const decks = await Deck.find({ eventId: packout.eventId, type: 'decor' }).select('_id').lean();
   const deckIds = decks.map((deck) => deck._id);
   const pages = deckIds.length
-    ? await Page.find({ deckId: { $in: deckIds }, deletedAt: null }).select('_id').lean()
+    ? await Page.find({ deckId: { $in: deckIds }, deletedAt: null }).select('_id deckId canvas').lean()
     : [];
+  const packoutValue = typeof packout?.toObject === 'function' ? packout.toObject() : packout;
+  const manualQuantityOverrides = buildManualDecorQuantityOverrides(pages, packoutValue);
   const fallbackPageId = String(packout.pageId || '');
   const itemsByPage = new Map();
   (packout.items || []).forEach((item) => {
@@ -103,7 +106,7 @@ const syncPackoutToBoard = async (packout) => {
   const pageIds = new Set([...pages.map((page) => String(page._id)), ...itemsByPage.keys()]);
   let synced = true;
   for (const pageId of pageIds) {
-    if (!await syncPackoutPage(packout, pageId, itemsByPage.get(pageId) || [])) synced = false;
+    if (!await syncPackoutPage(packout, pageId, itemsByPage.get(pageId) || [], manualQuantityOverrides)) synced = false;
   }
   return synced;
 };

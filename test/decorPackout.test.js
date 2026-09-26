@@ -5,6 +5,7 @@ import mongoose from 'mongoose';
 import DecorPackout from '../models/DecorPackout.js';
 import {
   buildDecorPackoutCanvas,
+  buildManualDecorQuantityOverrides,
   decorPackoutNeedsBoardSync,
   preserveUnplacedDecorPackoutItems,
   removeGeneratedDecorPackoutDuplicates,
@@ -115,19 +116,50 @@ test('decor board sync preserves user quantities, removes deleted rows and suppo
 test('decor board sync adopts an existing Canvas product instead of adding a duplicate', () => {
   const packoutId = objectId();
   const itemId = objectId();
-  const result = buildDecorPackoutCanvas({ images: [
+  const canvas = { images: [
     { id: 'canvas-product-1', productId: String(objectId()), name: 'Stage vase', quantity: 4, x: 320, y: 180 },
-  ] }, {
+  ] };
+  const packout = {
     _id: packoutId,
     items: [{ _id: itemId, boardItemId: 'canvas-product-1', name: 'Stage vase', quantity: 9 }],
-  });
+  };
+  const overrides = buildManualDecorQuantityOverrides([{ deckId: '', canvas }], packout);
+  const result = buildDecorPackoutCanvas(canvas, packout, { manualQuantityOverrides: overrides });
 
   assert.equal(result.canvas.images.length, 1);
   assert.equal(result.canvas.images[0].id, 'canvas-product-1');
   assert.equal(result.canvas.images[0].x, 320);
   assert.equal(result.canvas.images[0].decorPackoutId, String(packoutId));
   assert.equal(result.canvas.images[0].decorPackoutItemId, String(itemId));
-  assert.equal(result.canvas.images[0].quantity, 4);
+  assert.equal(result.canvas.images[0].quantity, 9);
+});
+
+test('packout quantity updates distribute across user copies without starting quantity growth', () => {
+  const productId = String(objectId());
+  const packout = {
+    _id: 'packout-quantity-update',
+    deckId: 'deck-1',
+    items: [{ _id: 'item-1', productId, deckId: 'deck-1', boardItemId: 'a', name: 'Stage vase', quantity: 5 }],
+  };
+  let pages = [
+    { _id: 'page-1', deckId: 'deck-1', canvas: { images: [{ id: 'a', productId, quantity: 1 }] } },
+    { _id: 'page-2', deckId: 'deck-1', canvas: { images: [{ id: 'b', productId, quantity: 1 }] } },
+  ];
+
+  for (let cycle = 0; cycle < 5; cycle += 1) {
+    const overrides = buildManualDecorQuantityOverrides(pages, packout);
+    pages = pages.map((page, index) => ({
+      ...page,
+      canvas: buildDecorPackoutCanvas(page.canvas, {
+        ...packout,
+        items: index === 0 ? packout.items : [],
+      }, { manualQuantityOverrides: overrides }).canvas,
+    }));
+    const total = pages.flatMap((page) => page.canvas.images)
+      .reduce((sum, image) => sum + Number(image.quantity || 1), 0);
+    assert.equal(total, 5);
+  }
+  assert.deepEqual(pages.flatMap((page) => page.canvas.images).map((image) => image.quantity), [4, 1]);
 });
 
 test('five merge and build cycles keep two user copies stable on one or two pages', () => {

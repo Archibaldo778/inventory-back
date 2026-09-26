@@ -22,6 +22,40 @@ const canvasProductKey = (item) => {
   return productId || inventoryCode;
 };
 
+export const buildManualDecorQuantityOverrides = (pagesValue, packoutValue) => {
+  const pages = Array.isArray(pagesValue) ? pagesValue : [];
+  const packoutId = idOf(packoutValue);
+  const overrides = new Map();
+  (Array.isArray(packoutValue?.items) ? packoutValue.items : []).forEach((item) => {
+    const boardItemId = text(item?.boardItemId);
+    if (!boardItemId || boardItemId.startsWith(`packout-${packoutId}-`)) return;
+    const itemDeckId = idOf(item?.deckId || packoutValue?.deckId);
+    let targetKey = '';
+    pages.forEach((page) => {
+      if (targetKey || (itemDeckId && idOf(page?.deckId) !== itemDeckId)) return;
+      const target = (Array.isArray(page?.canvas?.images) ? page.canvas.images : [])
+        .find((image) => text(image?.id) === boardItemId);
+      if (target) targetKey = canvasProductKey(target) || text(target?.name || target?.initialName).toLowerCase();
+    });
+    if (!targetKey) return;
+    let siblingQuantity = 0;
+    pages.forEach((page) => {
+      if (itemDeckId && idOf(page?.deckId) !== itemDeckId) return;
+      (Array.isArray(page?.canvas?.images) ? page.canvas.images : []).forEach((image) => {
+        const imageKey = canvasProductKey(image) || text(image?.name || image?.initialName).toLowerCase();
+        if (imageKey !== targetKey || text(image?.id) === boardItemId) return;
+        const quantity = Number(String(image?.quantityText ?? image?.quantity ?? 1).trim().replace(',', '.'));
+        siblingQuantity += Number.isFinite(quantity) && quantity > 0 ? Math.max(1, Math.floor(quantity)) : 1;
+      });
+    });
+    const requestedTotal = Math.max(1, Number(item?.quantity) || 1);
+    if (requestedTotal > siblingQuantity) {
+      overrides.set(boardItemId, requestedTotal - siblingQuantity);
+    }
+  });
+  return overrides;
+};
+
 export const removeGeneratedDecorPackoutDuplicates = (imagesValue, packoutValue) => {
   const images = Array.isArray(imagesValue) ? imagesValue : [];
   const packoutId = idOf(packoutValue);
@@ -79,7 +113,7 @@ export const selectReusableDecorPackoutDraft = (packoutsValue) => {
     || null;
 };
 
-export const buildDecorPackoutCanvas = (canvasValue, packoutValue) => {
+export const buildDecorPackoutCanvas = (canvasValue, packoutValue, options = {}) => {
   const canvas = canvasValue && typeof canvasValue === 'object' ? canvasValue : {};
   const packoutId = idOf(packoutValue);
   if (!packoutId) return { canvas, changed: false };
@@ -111,6 +145,9 @@ export const buildDecorPackoutCanvas = (canvasValue, packoutValue) => {
     const quantity = Math.max(1, Number(item.quantity) || 1);
     const src = itemImage(item) || text(image?.src) || decorPackoutPlaceholder(item.name);
     const generated = text(image?.id).startsWith(generatedPrefix);
+    const manualQuantity = options?.manualQuantityOverrides instanceof Map
+      ? options.manualQuantityOverrides.get(text(image?.id))
+      : null;
     const next = {
       ...image,
       src,
@@ -122,7 +159,9 @@ export const buildDecorPackoutCanvas = (canvasValue, packoutValue) => {
       name: text(item.name) || 'Inventory item',
       initialName: text(item.name) || 'Inventory item',
       description: text(item.description),
-      ...(generated ? { quantity, quantityText: String(quantity) } : {}),
+      ...(generated || Number.isFinite(manualQuantity)
+        ? { quantity: generated ? quantity : manualQuantity, quantityText: String(generated ? quantity : manualQuantity) }
+        : {}),
     };
     if (JSON.stringify(next) !== JSON.stringify(image)) changed = true;
     images.push(next);

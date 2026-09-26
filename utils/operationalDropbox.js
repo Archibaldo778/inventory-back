@@ -1,4 +1,9 @@
 import path from 'node:path';
+import {
+  findDropboxFolderEventMatch,
+  inferDropboxEventFolderPath,
+  inferDropboxPathDate,
+} from './dropboxDocuments.js';
 
 const clean = (value) => String(value || '').trim();
 const safePart = (value, fallback = '') => clean(value)
@@ -11,6 +16,20 @@ export const joinOperationalDropboxPath = (...parts) => `/${parts
   .filter(Boolean)
   .join('/')}`;
 
+export const dropboxFileBelongsToEvent = ({ filePath, fileName, event }) => {
+  const match = findDropboxFolderEventMatch({
+    path: filePath,
+    name: fileName,
+    inferredDate: inferDropboxPathDate(filePath),
+  }, [{
+    _id: event?._id || 'event',
+    externalId: event?.externalId,
+    title: event?.title,
+    date: String(event?.date || '').slice(0, 10),
+  }]);
+  return match.status === 'matched';
+};
+
 export const resolveOperationalDropboxFolder = ({ event = {}, integration = {} } = {}) => {
   const sourceDocuments = [
     ...(Array.isArray(event.documents) ? event.documents : []),
@@ -21,25 +40,24 @@ export const resolveOperationalDropboxFolder = ({ event = {}, integration = {} }
     .map((document) => clean(document?.sourcePath))
     .filter(Boolean);
   if (existingPaths.length) {
-    const firstParentParts = path.posix.dirname(existingPaths[0]).split('/').filter(Boolean);
     const date = clean(event.date);
     const dateMatch = date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
     const dateTokens = dateMatch ? [date, `${dateMatch[2]}-${dateMatch[3]}-${dateMatch[1]}`, `${dateMatch[2]}-${dateMatch[3]}-${dateMatch[1].slice(-2)}`] : [];
     const eventId = clean(event.externalId).toLowerCase();
-    const eventFolderIndex = firstParentParts.findIndex((part) => {
-      const normalized = part.toLowerCase();
-      return dateTokens.some((token) => normalized.includes(token.toLowerCase()))
-        || (eventId && normalized.includes(eventId));
+    const candidateFolders = existingPaths.map((sourcePath) => {
+      const parentParts = path.posix.dirname(sourcePath).split('/').filter(Boolean);
+      const eventFolderIndex = parentParts.findIndex((part) => {
+        const normalized = part.toLowerCase();
+        return dateTokens.some((token) => normalized.includes(token.toLowerCase()))
+          || (eventId && normalized.includes(eventId));
+      });
+      if (eventFolderIndex >= 0) return `/${parentParts.slice(0, eventFolderIndex + 1).join('/')}`;
+      return inferDropboxEventFolderPath(sourcePath) || path.posix.dirname(sourcePath);
     });
-    if (eventFolderIndex >= 0) {
-      return { folderPath: `/${firstParentParts.slice(0, eventFolderIndex + 1).join('/')}`, existing: true };
-    }
-    const parentParts = existingPaths.map((sourcePath) => path.posix.dirname(sourcePath).split('/').filter(Boolean));
-    const commonParts = firstParentParts.filter((_part, index) => parentParts.every((parts) => parts[index] === firstParentParts[index]));
-    return {
-      folderPath: commonParts.length ? `/${commonParts.join('/')}` : path.posix.dirname(existingPaths[0]),
-      existing: true,
-    };
+    const uniqueFolders = [...new Set(candidateFolders.map((folder) => clean(folder).replace(/\/+$/g, '')).filter(Boolean))];
+    // Never fall back to a shared parent (month/year/root). If attached source
+    // documents disagree about their event folder, resolve the event afresh.
+    if (uniqueFolders.length === 1) return { folderPath: uniqueFolders[0], existing: true };
   }
 
   const dateMatch = clean(event.date).match(/^(\d{4})-(\d{2})-(\d{2})$/);

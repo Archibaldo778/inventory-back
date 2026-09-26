@@ -105,6 +105,7 @@ import {
   uploadDropboxFile,
 } from '../utils/dropboxApi.js';
 import {
+  dropboxFileBelongsToEvent,
   joinOperationalDropboxPath,
   resolveOperationalDropboxFolder,
 } from '../utils/operationalDropbox.js';
@@ -1763,7 +1764,11 @@ router.get('/operations/events/:id/dropbox-files', requireAuth, dropboxFileRateL
       (Array.isArray(page.entries) ? page.entries : []).forEach((entry) => {
         if (String(entry?.['.tag'] || '') !== 'file') return;
         const filePath = String(entry.path_display || entry.path_lower || '');
-        if (!dropboxPathInsideFolder(filePath, folderPath) || /^~\$/i.test(String(entry.name || ''))) return;
+        if (
+          !dropboxPathInsideFolder(filePath, folderPath)
+          || /^~\$/i.test(String(entry.name || ''))
+          || !dropboxFileBelongsToEvent({ filePath, fileName: entry.name, event })
+        ) return;
         const relativePath = filePath.slice(String(folderPath).length).replace(/^\/+/, '');
         if (isRestrictedEventDocument(relativePath)) return;
         files.push({
@@ -1803,7 +1808,11 @@ router.get('/operations/events/:id/dropbox-file', requireAuth, dropboxFileRateLi
     const { integration, accessToken } = await loadOperationalDropboxAccess();
     const { folderPath } = await resolveOperationalDropboxFolderForEvent({ event, integration });
     const filePath = String(req.query?.path || '').trim();
-    if (!dropboxPathInsideFolder(filePath, folderPath)) {
+    const fileName = filePath.replace(/\\/g, '/').split('/').filter(Boolean).at(-1) || 'event-file';
+    if (
+      !dropboxPathInsideFolder(filePath, folderPath)
+      || !dropboxFileBelongsToEvent({ filePath, fileName, event })
+    ) {
       return res.status(400).json({ error: 'The requested file is outside this event folder' });
     }
     const relativePath = filePath.slice(String(folderPath).length).replace(/^\/+/, '');
@@ -1813,7 +1822,6 @@ router.get('/operations/events/:id/dropbox-file', requireAuth, dropboxFileRateLi
     const buffer = await downloadDropboxFile(accessToken, filePath, {
       namespaceId: integration.namespaceId || '',
     });
-    const fileName = filePath.split('/').filter(Boolean).pop() || 'event-file';
     res.setHeader('Cache-Control', 'private, no-store');
     res.setHeader('Content-Type', dropboxFileContentType(fileName));
     res.attachment(fileName);
@@ -1876,14 +1884,17 @@ router.post('/operations/events/:id/leadership-print.pdf', requireAuth, leadersh
 
       const filePath = String(requestedFile?.path || '').trim();
       const folderPath = dropboxFolder?.folderPath || '';
-      if (!dropboxPathInsideFolder(filePath, folderPath)) {
+      const fileName = filePath.split('/').filter(Boolean).pop() || 'event-file';
+      if (
+        !dropboxPathInsideFolder(filePath, folderPath)
+        || !dropboxFileBelongsToEvent({ filePath, fileName, event })
+      ) {
         return res.status(400).json({ error: 'A requested file is outside this event folder' });
       }
       const relativePath = filePath.slice(String(folderPath).length).replace(/^\/+/, '');
       if (isRestrictedEventDocument(relativePath)) {
         return res.status(404).json({ error: 'A requested event file is not available' });
       }
-      const fileName = filePath.split('/').filter(Boolean).pop() || 'event-file';
       if (!isLeadershipPrintFileSupported(fileName)) {
         return res.status(400).json({ error: `${fileName} cannot be converted to PDF` });
       }

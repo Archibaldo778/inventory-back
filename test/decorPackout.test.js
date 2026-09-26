@@ -133,3 +133,19 @@ test('Canvas import removes only a generated duplicate when the dragged product 
 
   assert.deepEqual(result.map((item) => item.id), [original.id, unrelated.id]);
 });
+
+test('Canvas import removes a legacy linked duplicate even when its id is not generated', () => {
+  const packoutId = objectId();
+  const productId = objectId();
+  const original = { id: 'canvas-product', productId: String(productId), name: 'Stage vase' };
+  const legacyDuplicate = {
+    id: 'legacy-linked-copy',
+    productId: String(productId),
+    decorPackoutId: String(packoutId),
+    decorPackoutItemId: String(objectId()),
+    name: 'Stage vase',
+  };
+  const result = removeGeneratedDecorPackoutDuplicates([legacyDuplicate, original], packoutId);
+
+  assert.deepEqual(result.map((item) => item.id), [original.id]);
+});

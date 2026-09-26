@@ -135,25 +135,52 @@ const canvasImageUrl = (value) => {
   return image;
 };
 
+const packoutItemsSignature = (items = []) => JSON.stringify((Array.isArray(items) ? items : []).map((item) => ({
+  id: String(item?._id || item?.id || ''),
+  productId: String(item?.productId || ''),
+  inventoryCode: String(item?.inventoryCode || '').trim().toUpperCase(),
+  source: String(item?.source || ''),
+  inventoryType: String(item?.inventoryType || ''),
+  name: String(item?.name || ''),
+  image: String(item?.image || ''),
+  category: String(item?.category || ''),
+  description: String(item?.description || ''),
+  location: String(item?.location || ''),
+  quantity: Number(item?.quantity || 0),
+  zone: String(item?.zone || ''),
+  deckId: String(item?.deckId || ''),
+  pageId: String(item?.pageId || ''),
+  boardItemId: String(item?.boardItemId || ''),
+})));
+
+const uniquePackoutItems = (items = [], fallbackDeckId = '') => {
+  const unique = new Map();
+  (Array.isArray(items) ? items : []).forEach((item) => {
+    const identity = String(item?.productId || '').trim()
+      || String(item?.inventoryCode || '').trim().toUpperCase()
+      || String(item?.name || '').trim().toLowerCase();
+    if (!identity) return;
+    const scope = String(item?.deckId || fallbackDeckId || item?.zone || '').trim();
+    const key = `${scope}:${identity}`;
+    const existing = unique.get(key);
+    if (!existing || Number(item?.quantity || 0) > Number(existing?.quantity || 0)) unique.set(key, item);
+  });
+  return [...unique.values()];
+};
+
 const isCanvasPackoutItem = (item, packoutId) => {
   if (!item || ['text', 'link', 'table', 'staff'].includes(String(item.type || '').toLowerCase())) return false;
   if (String(item.boardItemType || '').toLowerCase() === 'staff') return false;
+  const linkedPackoutId = String(item.decorPackoutId || '');
+  if (linkedPackoutId) return linkedPackoutId === String(packoutId || '');
   return Boolean(
-    String(item.decorPackoutId || '') === String(packoutId || '')
-    || isObjectId(item.productId)
+    isObjectId(item.productId)
     || parseDecorInventoryCode(String(item.inventoryCode || '').trim().toUpperCase())
   );
 };
 
-const packoutProductKey = (item, fallbackDeckId = '') => {
-  const deckId = String(item?.deckId || fallbackDeckId || '');
-  const productId = String(item?.productId || '');
-  const inventoryCode = String(item?.inventoryCode || '').trim().toUpperCase();
-  const identity = productId || inventoryCode;
-  return deckId && identity ? `${deckId}:${identity}` : '';
-};
-
 const mergePackoutItemsFromEventBoards = async (packout) => {
+  const previousItemsSignature = packoutItemsSignature(packout.items);
   const decks = await Deck.find({ eventId: packout.eventId, type: 'decor' }).sort({ createdAt: 1 }).lean();
   const deckIds = decks.map((deck) => deck._id);
   const pages = deckIds.length
@@ -230,6 +257,7 @@ const mergePackoutItemsFromEventBoards = async (packout) => {
     });
   });
 
+  const reconciledItems = [];
   grouped.forEach((value) => {
     const existing = (packout.items || []).find((item) => {
       const itemDeckId = String(item.deckId || packout.deckId || '');
@@ -254,12 +282,13 @@ const mergePackoutItemsFromEventBoards = async (packout) => {
       existing.pageId = value.pageId;
       existing.boardItemId = value.boardItemId;
       existing.updatedAt = new Date();
+      reconciledItems.push(existing);
       return;
     }
-    if (packout.items.length >= MAX_PACKOUT_TYPES) {
+    if (reconciledItems.length >= MAX_PACKOUT_TYPES) {
       throw Object.assign(new Error(`Packout is limited to ${MAX_PACKOUT_TYPES} item types`), { statusCode: 413 });
     }
-    packout.items.push({
+    reconciledItems.push({
       productId: isObjectId(value.productId) ? value.productId : null,
       inventoryCode: parseDecorInventoryCode(value.inventoryCode) ? value.inventoryCode : '',
       source: value.product ? 'inventory' : 'event',
@@ -276,17 +305,13 @@ const mergePackoutItemsFromEventBoards = async (packout) => {
       boardItemId: value.boardItemId,
     });
   });
-  const uniqueItems = new Map();
-  const unkeyedItems = [];
-  packout.items.forEach((item) => {
-    const key = packoutProductKey(item, packout.deckId);
-    if (!key) {
-      unkeyedItems.push(item);
-      return;
-    }
-    if (!uniqueItems.has(key)) uniqueItems.set(key, item);
-  });
-  packout.items = [...uniqueItems.values(), ...unkeyedItems];
+  packout.items = reconciledItems;
+  if (!packout.items.length) {
+    await DecorPackout.deleteOne({ _id: packout._id });
+    clearCaches();
+    return null;
+  }
+  if (packoutItemsSignature(packout.items) === previousItemsSignature) return packout;
   await packout.save();
   clearCaches();
   return packout;
@@ -362,7 +387,8 @@ router.post('/:id/sync-board', async (req, res) => {
     const packout = await loadPackout(req.params.id);
     if (!packout) return res.status(404).json({ error: 'Packout not found' });
     if (packout.status !== 'draft') return res.status(409).json({ error: 'Reopen this packout before syncing the Decor Board' });
-    return res.json(await mergePackoutItemsFromEventBoards(packout));
+    const synced = await mergePackoutItemsFromEventBoards(packout);
+    return res.json(synced || { deleted: true, id: String(packout._id), items: [] });
   } catch (error) {
     return sendApiError(res, error, {
       context: 'Decor Board packout sync failed',
@@ -375,9 +401,11 @@ router.get('/:id/export', requireAuth, async (req, res) => {
   try {
     const packout = await loadPackout(req.params.id);
     if (!packout) return res.status(404).json({ error: 'Packout not found' });
+    if (!packout.items?.length) return res.status(409).json({ error: 'This packout has no items' });
     const event = await Event.findById(packout.eventId).select('externalId title date client managerId meta').lean();
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    const rows = (packout.items || []).map((item) => ({
+    const exportItems = uniquePackoutItems(packout.items, packout.deckId);
+    const rows = exportItems.map((item) => ({
       itemName: item.name,
       quantity: item.quantity,
       menuGroup: item.zone || item.category || 'DECOR',
@@ -385,7 +413,7 @@ router.get('/:id/export', requireAuth, async (req, res) => {
     }));
     const [brandLogoSvg, decorImages] = await Promise.all([
       loadBrandLogoSvg(),
-      loadCloudinaryWordImages((packout.items || []).map((item) => ({ itemName: item.name, url: item.image }))),
+      loadCloudinaryWordImages(exportItems.map((item) => ({ itemName: item.name, url: item.image }))),
     ]);
     const docx = await renderCatereaseOperationalDocx({
       event: { ...event, salesRep: event.managerId || '' },
@@ -560,8 +588,13 @@ router.delete('/:id/items/:itemId', async (req, res) => {
     const item = packout.items.id(req.params.itemId);
     if (!item) return res.status(404).json({ error: 'Packout item not found' });
     item.deleteOne();
-    await packout.save();
     await syncPackoutToBoardSafely(packout);
+    if (!packout.items.length) {
+      await DecorPackout.deleteOne({ _id: packout._id });
+      clearCaches();
+      return res.json({ deleted: true, id: String(packout._id), items: [] });
+    }
+    await packout.save();
     clearCaches();
     return res.json(packout);
   } catch (error) {

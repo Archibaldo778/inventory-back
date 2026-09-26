@@ -27,14 +27,31 @@ export const removeGeneratedDecorPackoutDuplicates = (imagesValue, packoutValue)
   const packoutId = idOf(packoutValue);
   if (!packoutId) return images;
   const generatedPrefix = `packout-${packoutId}-`;
-  const originalKeys = new Set(images
-    .filter((item) => !text(item?.id).startsWith(generatedPrefix))
-    .map(canvasProductKey)
-    .filter(Boolean));
-  return images.filter((item) => {
-    if (!text(item?.id).startsWith(generatedPrefix)) return true;
+  const preferredByKey = new Map();
+  const rank = (item) => {
+    if (text(item?.decorPackoutId) !== packoutId) return 0;
+    return text(item?.id).startsWith(generatedPrefix) ? 2 : 1;
+  };
+  images.forEach((item) => {
     const key = canvasProductKey(item);
-    return !key || !originalKeys.has(key);
+    if (!key) return;
+    const preferred = preferredByKey.get(key);
+    if (!preferred || rank(item) < rank(preferred)) preferredByKey.set(key, item);
+  });
+  const retainedItemIds = new Set();
+  const retainedLinkedKeys = new Set();
+  return images.filter((item) => {
+    const linked = text(item?.decorPackoutId) === packoutId;
+    const generated = text(item?.id).startsWith(generatedPrefix);
+    if (!linked && !generated) return true;
+    const key = canvasProductKey(item);
+    const itemId = text(item?.decorPackoutItemId);
+    if (itemId && retainedItemIds.has(itemId)) return false;
+    if (key && preferredByKey.get(key) !== item) return false;
+    if (key && retainedLinkedKeys.has(key)) return false;
+    if (itemId) retainedItemIds.add(itemId);
+    if (key) retainedLinkedKeys.add(key);
+    return true;
   });
 };
 

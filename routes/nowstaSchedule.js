@@ -6,6 +6,7 @@ import { sendApiError } from '../utils/apiErrors.js';
 
 const router = Router();
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const escapeRegex = (value) => String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 const cleanList = (value, { maxItems = 100, maxLength = 160 } = {}) => [...new Set(
   (Array.isArray(value) ? value : [])
@@ -21,6 +22,26 @@ const serializePreferences = (source = {}) => ({
   showArchived: Boolean(source?.showArchived),
   updatedAt: source?.updatedAt || null,
 });
+
+export const buildNowstaScheduleListQuery = ({ from = '', to = '', search = '' } = {}) => {
+  const tokens = String(search || '').replace(/\s+/g, ' ').trim().slice(0, 160)
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 8);
+  if (tokens.length) {
+    return {
+      $and: tokens.map((token) => {
+        const pattern = new RegExp(escapeRegex(token), 'i');
+        return { $or: [
+          { title: pattern },
+          { departmentName: pattern },
+          { nowstaEventId: pattern },
+        ] };
+      }),
+    };
+  }
+  return { date: { $gte: from, $lte: to } };
+};
 
 const defaultPreferences = async () => {
   const departments = await NowstaScheduleEntry.distinct('departmentName', {
@@ -82,17 +103,19 @@ router.get('/', async (req, res) => {
   try {
     const from = String(req.query?.from || '').trim();
     const to = String(req.query?.to || '').trim();
-    if (!DATE_PATTERN.test(from) || !DATE_PATTERN.test(to) || from > to) {
+    const search = String(req.query?.search || '').replace(/\s+/g, ' ').trim().slice(0, 160);
+    if (!search && (!DATE_PATTERN.test(from) || !DATE_PATTERN.test(to) || from > to)) {
       return res.status(400).json({ message: 'Valid schedule from and to dates are required' });
     }
-    const start = new Date(`${from}T12:00:00Z`);
-    const end = new Date(`${to}T12:00:00Z`);
-    if (((end - start) / 86_400_000) > 93) {
+    const start = search ? null : new Date(`${from}T12:00:00Z`);
+    const end = search ? null : new Date(`${to}T12:00:00Z`);
+    if (!search && ((end - start) / 86_400_000) > 93) {
       return res.status(400).json({ message: 'Schedule range cannot exceed 93 days' });
     }
 
-    const items = await NowstaScheduleEntry.find({ date: { $gte: from, $lte: to } })
+    const items = await NowstaScheduleEntry.find(buildNowstaScheduleListQuery({ from, to, search }))
       .sort({ date: 1, startsAt: 1, title: 1 })
+      .limit(search ? 250 : 0)
       .lean();
     const [catalogDepartments, entryDepartments, entryTypes] = await Promise.all([
       NowstaDepartment.distinct('name', { archived: { $ne: true } }),

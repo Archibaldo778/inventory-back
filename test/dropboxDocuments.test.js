@@ -14,6 +14,7 @@ import {
   inferDropboxDocumentSeries,
   inferDropboxPathDate,
   inferDropboxRevision,
+  isDropboxNotesPath,
   nyToday,
   selectLatestDropboxFileRevisions,
   shouldReplaceDropboxEventDocument,
@@ -30,6 +31,23 @@ test('Dropbox document names identify PO and Kitchen Menu files conservatively',
   assert.equal(inferDropboxDocumentType('E22500 PO.docx'), 'po');
   assert.equal(inferDropboxDocumentType('Kitchen_Menu E22500.docx'), 'kitchen_menu');
   assert.equal(inferDropboxDocumentType('Event documents.docx'), 'review');
+});
+
+test('Dropbox discovery excludes every document inside an event Notes folder', () => {
+  const entry = {
+    '.tag': 'file',
+    id: 'id:bechtel-unpublished-km',
+    name: '09-30-26 Bechtel 620 Loft Luncheon KM.docx',
+    path_display: '/Proposals (1)/2026/09 September/09 George/09-30-26 Bechtel 620 Loft Luncheon/Notes/09-30-26 Bechtel 620 Loft Luncheon KM.docx',
+  };
+  assert.equal(isDropboxNotesPath(entry.path_display), true);
+  assert.deepEqual(classifyDropboxEntry(entry, { today: '2026-09-30' }), {
+    status: 'ignored',
+    reason: 'Files in Notes folders are not published event documents',
+    inferredDate: '2026-09-30',
+    documentType: 'kitchen_menu',
+  });
+  assert.equal(isDropboxNotesPath('/Events/09-30-26 Event/KM/Event Notes.docx'), false);
 });
 
 test('Dropbox document names recognize Caterease KPO and AKM variants', () => {

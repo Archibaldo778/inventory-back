@@ -40,6 +40,7 @@ import {
   findDropboxEventMatch,
   getDropboxRevisionMetadata,
   inferDropboxPathDate,
+  isDropboxNotesPath,
   nyToday,
   shouldReplaceDropboxEventDocument,
 } from '../utils/dropboxDocuments.js';
@@ -367,6 +368,34 @@ const resyncCurrentDropboxBarItems = async () => {
   return { events: events.length, synced, unchanged, failed };
 };
 
+const excludeDropboxNotesDocuments = async (namespaceId) => {
+  if (!namespaceId) return { excluded: 0, detached: 0 };
+  const documents = await DropboxDocument.find({
+    namespaceId,
+    path: /(?:^|[\\/])notes(?:[\\/]|$)/i,
+    sourceOrigin: { $ne: 'occ_generated' },
+  }).select('_id dropboxId path importedEventId').lean();
+  const excluded = documents.filter((document) => isDropboxNotesPath(document.path));
+  if (!excluded.length) return { excluded: 0, detached: 0 };
+  const sourceIds = excluded.map((document) => String(document.dropboxId || '')).filter(Boolean);
+  const eventIds = [...new Set(excluded.map((document) => String(document.importedEventId || '')).filter(Boolean))];
+  if (sourceIds.length && eventIds.length) {
+    await Event.updateMany(
+      { _id: { $in: eventIds } },
+      { $pull: { documents: { sourceProvider: 'dropbox', sourceId: { $in: sourceIds } } } },
+    );
+  }
+  await DropboxDocument.updateMany(
+    { _id: { $in: excluded.map((document) => document._id) } },
+    {
+      $set: { status: 'ignored', reason: 'Files in Notes folders are not published event documents' },
+      $unset: { importedEventId: 1, importedAt: 1 },
+    },
+  );
+  if (eventIds.length) clearApiCacheGroups('events', 'bar');
+  return { excluded: excluded.length, detached: eventIds.length };
+};
+
 const attachDiscoveredDropboxDocuments = async (namespaceId) => {
   const documents = await DropboxDocument.find({
     namespaceId,
@@ -682,6 +711,9 @@ export const runDropboxDiscoverySync = async () => {
       // recursive Dropbox listing. This also lets a retry repair attachments
       // without downloading or rediscovering the files first.
       const emptyAttachments = { attached: 0, unchanged: 0, review: 0, failed: 0 };
+      const preexistingNotesCleanup = integration.namespaceId
+        ? await excludeDropboxNotesDocuments(integration.namespaceId)
+        : { excluded: 0, detached: 0 };
       const preexistingAttachments = !overlayOnly && integration.namespaceId
         ? await attachDiscoveredDropboxDocuments(integration.namespaceId)
         : emptyAttachments;
@@ -845,6 +877,9 @@ export const runDropboxDiscoverySync = async () => {
       stats.skippedOld += reclassified.skippedOld;
       stats.discovered += reclassified.discovered;
       stats.ignored += reclassified.ignored;
+      const notesCleanup = await excludeDropboxNotesDocuments(root.namespaceId);
+      stats.notesExcluded = preexistingNotesCleanup.excluded + notesCleanup.excluded;
+      stats.notesDetached = preexistingNotesCleanup.detached + notesCleanup.detached;
       await reconcileDropboxRevisions(root.namespaceId);
       const directAttachments = overlayOnly
         ? emptyAttachments

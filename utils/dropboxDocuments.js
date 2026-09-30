@@ -491,12 +491,22 @@ const inferYearMonth = (path) => {
   return year && month ? `${year}-${month}` : (year ? `${year}` : '');
 };
 
+export const isDropboxNotesPath = (value) => clean(value)
+  .replace(/\\/g, '/')
+  .split('/')
+  .filter(Boolean)
+  .slice(0, -1)
+  .some((part) => inferDropboxDocumentFamily(part) === 'notes');
+
 export const classifyDropboxEntry = (entry, { today = nyToday() } = {}) => {
   const tag = clean(entry?.['.tag']);
   const path = clean(entry?.path_display || entry?.path_lower);
   const name = clean(entry?.name);
   if (tag === 'deleted') return { status: 'deleted', reason: 'Removed from Dropbox', inferredDate: '', documentType: 'review' };
   const inferredDate = inferDropboxPathDate(path);
+  if (isDropboxNotesPath(path)) {
+    return { status: 'ignored', reason: 'Files in Notes folders are not published event documents', inferredDate, documentType: inferDropboxDocumentType(name) };
+  }
   if (tag !== 'file' || !/\.docx$/i.test(name) || /^~\$/i.test(name)) {
     return { status: 'ignored', reason: 'Not a DOCX PO/Kitchen Menu', inferredDate, documentType: 'review' };
   }

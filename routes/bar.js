@@ -16,6 +16,7 @@ import {
   calculateBarItemAccounting,
   validateBarReturnQuantities,
 } from '../utils/barEventAccounting.js';
+import { prepareBarReturnBatchItem } from '../utils/barReturnBatch.js';
 import { normalizeBarEventDate } from '../utils/barEventDates.js';
 import {
   barEventNumbersMatch,
@@ -1872,23 +1873,27 @@ router.patch('/events/:id/returns', async (req, res) => {
       if (!manager && item.returnConfirmed === true) {
         return res.status(409).json({ message: `${item.name || 'Item'} was already saved` });
       }
-      const returnedQty = Number(row?.returnedQty);
-      if (!Number.isFinite(returnedQty) || returnedQty < 0) {
-        return res.status(400).json({ message: `${item.name || 'Item'} returned quantity must be zero or greater` });
+      const prepared = prepareBarReturnBatchItem(item, row);
+      if (!prepared.valid) {
+        return res.status(400).json({
+          message: `${item.name || 'Item'}: ${prepared.message}`,
+          accounting: prepared.accounting,
+        });
       }
       updates.push({
         item,
-        returnedQty,
+        returnValues: prepared.values,
+        accounting: prepared.accounting,
         captainNotes: cleanString(row?.captainNotes, 1000),
       });
     }
 
     const updatedAt = new Date();
     const updatedBy = String(req.auth?.username || req.auth?.email || '');
-    updates.forEach(({ item, returnedQty, captainNotes }) => {
-      item.returnedFullQty = 0;
-      item.returnedOpenQty = returnedQty;
-      item.lostDamagedQty = 0;
+    updates.forEach(({ item, returnValues, captainNotes }) => {
+      item.returnedFullQty = returnValues.returnedFullQty;
+      item.returnedOpenQty = returnValues.returnedOpenQty;
+      item.lostDamagedQty = returnValues.lostDamagedQty;
       item.captainNotes = captainNotes;
       item.returnConfirmed = true;
       item.updatedBy = updatedBy;
@@ -1896,8 +1901,9 @@ router.patch('/events/:id/returns', async (req, res) => {
     });
     if (event.status === 'ready') event.status = 'in_progress';
     event.revision += 1;
-    const variances = updates.map(({ item, returnedQty }) => {
+    const variances = updates.map(({ item, accounting }) => {
       const outboundQty = Number(item?.deliveredQty ?? item?.sentQty ?? 0) || 0;
+      const returnedQty = Number(accounting?.returnedQty || 0);
       const difference = Math.round((returnedQty - outboundQty) * 10000) / 10000;
       return difference > 0.0001
         ? { itemId: String(item?._id || ''), name: item?.name || 'Item', outboundQty, returnedQty, difference }

@@ -37,6 +37,10 @@ const isPreparedBeverageSupportRow = (item = {}) => (
 export const getPreparedBeverageType = (item = {}) => {
   const section = String(item?.section || '').trim();
   if (isFoodMenuItem(item)) return '';
+  // Catalog-matched bottles sometimes remain under a COCKTAIL heading from the
+  // source PO. Alcohol scope is authoritative: these require bottle accounting,
+  // not cocktail recipe/prep handling.
+  if (String(item?.scope || '') === 'alcohol') return '';
   const explicitType = /^\s*mocktails?\s*$/i.test(section)
     ? 'mocktail'
     : (/^\s*(?:(?:specialty\s+)?cocktails?|specialty\s+beverages?)\s*$/i.test(section) ? 'cocktail' : '');
@@ -44,7 +48,6 @@ export const getPreparedBeverageType = (item = {}) => {
     if (/\b(?:garnish|ice|cups?|glassware|napkins?|straws?|shakers?|skewers?|glitter|mixers?|juices?|sodas?)\b/i.test(String(item?.name || '').trim())) return '';
     return explicitType;
   }
-  if (String(item?.scope || '') === 'alcohol') return '';
   if (isPreparedBeverageSupportRow(item)) return '';
   const source = sourceText(item);
   if (/\bmocktails?\b/i.test(source)) return 'mocktail';

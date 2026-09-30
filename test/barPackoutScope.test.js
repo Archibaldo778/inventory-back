@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  getPreparedBeverageType,
   isBarAccountingItem,
   isBarGlasswareItem,
   isBarInstructionItem,
@@ -10,6 +11,11 @@ import {
   isFoodMenuItem,
   isPackoutMetadataRow,
 } from '../utils/barPackoutScope.js';
+
+test('matched alcohol beneath a cocktail heading remains a bottle item', () => {
+  const item = { name: 'Jean-Marc Millot', section: 'COCKTAIL', scope: 'alcohol' };
+  assert.equal(getPreparedBeverageType(item), '');
+});
 
 test('externally supplied jello shots and jello bars are not bar inventory', () => {
   const rows = [

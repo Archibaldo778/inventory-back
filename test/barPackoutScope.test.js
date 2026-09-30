@@ -77,6 +77,8 @@ test('generic combined alcohol categories wait for a specific PO item', () => {
   };
   assert.equal(isGenericBarCategoryItem(item), true);
   assert.equal(isBarAccountingItem(item), false);
+  assert.equal(isGenericBarCategoryItem({ name: 'Champagne & water' }), true);
+  assert.equal(isBarAccountingItem({ name: 'Champagne & water', scope: 'alcohol' }), false);
   assert.equal(isGenericBarCategoryItem({ name: 'Veuve Clicquot Champagne' }), false);
 });
 

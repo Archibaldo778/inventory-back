@@ -85,7 +85,7 @@ export const isBarInstructionItem = (item = {}) => (
     .test(extendedSourceText(item))
 );
 
-const GENERIC_ALCOHOL_CATEGORY = '(?:wines?|champagne|beers?|liquor|spirits?)';
+const GENERIC_ALCOHOL_CATEGORY = '(?:wines?|champagne|beers?|liquor|spirits?|waters?)';
 const GENERIC_ALCOHOL_MODIFIER = '(?:(?:dinner|house|cocktail|event)\\s+)?(?:(?:red|white|rose|sparkling)\\s+)?';
 
 export const isGenericBarCategoryItem = (item = {}) => {

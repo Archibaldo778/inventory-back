@@ -96,7 +96,7 @@ const parseMetadata = (text) => ({
   eventDate: metadataValue(text, /(?:^|\n)\s*Event\s+Date\s*:\s*([^\n]+)/i),
   salesRep: metadataValue(text, /(?:^|\n)\s*Sales\s+Rep\s*:\s*([^\n]+)/i),
   eventTiming: metadataValue(text, /(?:^|\n)\s*Event\s+Timing\s*:\s*([^\n]+)/i),
-  guests: metadataValue(text, /(?:^|\n)\s*Guests?\s*:\s*([^\n]+)/i),
+  guests: metadataValue(text, /(?:^|\n)\s*(?:Guest\s*Count|Number\s+of\s+Guests|#\s*Guests|Guests?|PAX)\s*:\s*([^\n]+)/i),
   deliveryTime: metadataValue(text, /(?:^|\n)\s*Delivery\s+Time\s*:\s*([^\n]+)/i),
   eventNumber: metadataValue(text, /(?:^|\n)\s*Event\s+Number\s*:\s*([^\n]+)/i),
   modifiedAt: metadataValue(text, /(?:^|\n)\s*Date\s+PO\s+Modified\s*:\s*([^\n]+)/i),
@@ -174,7 +174,7 @@ const parseFallbackText = (text, startIndex = 0) => {
   let section = '';
   let scope = 'review';
   rows.forEach((line) => {
-    if (/^(?:event|sales rep|guests?|delivery time|date po modified)\s*:/i.test(line)) return;
+    if (/^(?:event|sales rep|guest\s*count|number\s+of\s+guests|#\s*guests|guests?|pax|delivery time|date po modified)\s*:/i.test(line)) return;
     const match = line.match(/^(.+?)(?:\t+| {2,})(\d+(?:[.,]\d+)?)(?:(?:\t+| {2,})(.*))?$/);
     const classified = classifyRecognizedSection(line);
     if (!match && (classified !== 'review' || isUppercaseSection(line))) {

@@ -45,6 +45,25 @@ test('recognized Form Parser rows preserve sections and quantities', () => {
   assert.equal(result.metadata.eventName, 'Sample Event');
 });
 
+test('recognized PO metadata accepts Guest Count and PAX labels', () => {
+  const guestCount = parseRecognizedPackout({
+    text: 'Event: Guest Count Test\nGuest Count: 275',
+    tables: [{
+      headerRows: [['Name', 'Qty']],
+      bodyRows: [['VODKA', ''], ['Tito’s', '2']],
+    }],
+  });
+  const pax = parseRecognizedPackout({
+    text: 'Event: PAX Test\nPAX: 180',
+    tables: [{
+      headerRows: [['Name', 'Qty']],
+      bodyRows: [['GIN', ''], ['Hendrick’s', '2']],
+    }],
+  });
+  assert.equal(guestCount.metadata.guests, '275');
+  assert.equal(pax.metadata.guests, '180');
+});
+
 test('server parser keeps every Milken alcohol section instead of only OTHER LIQUOR and BEER', () => {
   const sections = [
     ['HOUSE COCKTAIL/ DINNER WINE', 'Sancerre, Domaine Reverdy'],

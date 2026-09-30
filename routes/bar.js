@@ -49,6 +49,7 @@ import {
 } from '../utils/barPackoutScope.js';
 import { estimateBarItemUnitCost } from '../utils/barCostEstimates.js';
 import { collectBarCatalogMatchTargets } from '../utils/barCatalogMatching.js';
+import { dashboardEventGuestCount } from '../utils/barGuestCount.js';
 
 const router = Router();
 const BAR_MANAGER_ROLES = new Set(['bar admin']);
@@ -328,12 +329,7 @@ const eventVenue = (event) => cleanString(
   240
 );
 
-const eventGuestCount = (event) => cleanNumber(
-  event?.meta?.guestCount
-  ?? event?.meta?.guest_count
-  ?? event?.meta?.guests,
-  { fallback: null }
-);
+const eventGuestCount = (event) => dashboardEventGuestCount(event);
 
 const eventSalesRep = (event) => cleanString(
   event?.managerName
@@ -379,7 +375,8 @@ const syncDashboardEventsToBar = async ({ eventId = null } = {}) => {
       salesRep: eventSalesRep(event),
       assignedUserIds: matchNowstaCaptainUserIds({ event, users: captainUsers }),
     };
-    const preserveBarGuestCount = ['manual', 'packout'].includes(String(current?.guestCountSource || ''));
+    const preserveBarGuestCount = ['manual', 'packout'].includes(String(current?.guestCountSource || ''))
+      && Number(current?.guestCount) > 0;
     if (!preserveBarGuestCount) {
       next.guestCount = eventGuestCount(event);
       next.guestCountSource = 'dashboard';

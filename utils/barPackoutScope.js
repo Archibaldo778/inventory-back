@@ -82,11 +82,24 @@ export const isBarInstructionItem = (item = {}) => (
     .test(extendedSourceText(item))
 );
 
+const GENERIC_ALCOHOL_CATEGORY = '(?:wines?|champagne|beers?|liquor|spirits?)';
+const GENERIC_ALCOHOL_MODIFIER = '(?:(?:dinner|house|cocktail|event)\\s+)?(?:(?:red|white|rose|sparkling)\\s+)?';
+
+export const isGenericBarCategoryItem = (item = {}) => {
+  const name = String(item?.name || '').trim();
+  if (!name) return false;
+  return new RegExp(
+    `^${GENERIC_ALCOHOL_MODIFIER}${GENERIC_ALCOHOL_CATEGORY}(?:\\s*(?:and|&|/)\\s*${GENERIC_ALCOHOL_MODIFIER}${GENERIC_ALCOHOL_CATEGORY})+$`,
+    'i'
+  ).test(name);
+};
+
 export const isBarAccountingItem = (item = {}) => (
   !isExternalJelloItem(item)
   && !isBarGarnishItem(item)
   && !isBarGlasswareItem(item)
   && !isBarInstructionItem(item)
+  && !isGenericBarCategoryItem(item)
   && !isFoodMenuItem(item)
   && !isPackoutMetadataRow(item)
   && hasReasonableBarQuantity(item)

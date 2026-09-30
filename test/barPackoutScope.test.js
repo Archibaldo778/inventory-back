@@ -5,6 +5,7 @@ import {
   isBarAccountingItem,
   isBarGlasswareItem,
   isBarInstructionItem,
+  isGenericBarCategoryItem,
   isExternalJelloItem,
   isFoodMenuItem,
   isPackoutMetadataRow,
@@ -60,6 +61,17 @@ test('wine glasses and tumblers never become alcohol PO items', () => {
   };
   assert.equal(isBarGlasswareItem(item), true);
   assert.equal(isBarAccountingItem(item), false);
+});
+
+test('generic combined alcohol categories wait for a specific PO item', () => {
+  const item = {
+    name: 'DINNER WINES AND CHAMPAGNE',
+    section: 'SPARKLING WINE',
+    scope: 'alcohol',
+  };
+  assert.equal(isGenericBarCategoryItem(item), true);
+  assert.equal(isBarAccountingItem(item), false);
+  assert.equal(isGenericBarCategoryItem({ name: 'Veuve Clicquot Champagne' }), false);
 });
 
 test('impossible imported quantities never enter bar accounting', () => {

@@ -48,6 +48,7 @@ import {
   requiresBarReturn,
 } from '../utils/barPackoutScope.js';
 import { estimateBarItemUnitCost } from '../utils/barCostEstimates.js';
+import { collectBarCatalogMatchTargets } from '../utils/barCatalogMatching.js';
 
 const router = Router();
 const BAR_MANAGER_ROLES = new Set(['bar admin']);
@@ -134,6 +135,54 @@ const addAudit = (event, auth, action, details = {}) => {
   if (event.audit.length > MAX_AUDIT_ENTRIES) {
     event.audit.splice(0, event.audit.length - MAX_AUDIT_ENTRIES);
   }
+};
+
+const rememberCatalogMatchAcrossEvents = async ({ catalogItem, names, auth }) => {
+  const catalogId = String(catalogItem?._id || '').trim();
+  const rememberedNames = (Array.isArray(names) ? names : [])
+    .map((value) => cleanString(value, 240))
+    .filter(Boolean);
+  if (!catalogId || !rememberedNames.length) return 0;
+
+  const events = await BarEvent.find({ 'items.0': { $exists: true } })
+    .select('_id items._id items.name items.beverageItemId')
+    .lean();
+  const targets = collectBarCatalogMatchTargets(events, rememberedNames, catalogId);
+  if (!targets.length) return 0;
+
+  const changedAt = new Date();
+  const username = String(auth?.username || auth?.email || '');
+  const auditEntry = {
+    action: 'catalog_match_applied_globally',
+    userId: String(auth?.userId || ''),
+    username,
+    at: changedAt,
+    details: { beverageItemId: catalogId, names: rememberedNames },
+  };
+  await BarEvent.bulkWrite(targets.map(({ eventId, itemIds }) => ({
+    updateOne: {
+      filter: { _id: eventId },
+      update: {
+        $set: {
+          'items.$[item].beverageItemId': catalogItem._id,
+          'items.$[item].unitCostSnapshot': resolveCatalogUnitCost(catalogItem),
+          'items.$[item].bottleSizeMl': cleanNumber(catalogItem.bottleSizeMl, { fallback: null }),
+          'items.$[item].costEstimate': {
+            estimated: false,
+            kind: '',
+            basis: '',
+            needsPriceCheck: false,
+          },
+          'items.$[item].updatedBy': username,
+          'items.$[item].updatedAt': changedAt,
+        },
+        $inc: { revision: 1 },
+        $push: { audit: { $each: [auditEntry], $slice: -MAX_AUDIT_ENTRIES } },
+      },
+      arrayFilters: [{ 'item._id': { $in: itemIds.map((id) => new mongoose.Types.ObjectId(id)) } }],
+    },
+  })));
+  return targets.reduce((sum, entry) => sum + entry.itemIds.length, 0);
 };
 
 const serializeBarEvent = (source, { includeFinancials = false } = {}) => {
@@ -1597,6 +1646,7 @@ router.patch('/events/:id/items/:itemId', requireBarManager, async (req, res) =>
         aliasesChanged = true;
       });
       if (aliasesChanged) await catalogItem.save();
+      await rememberCatalogMatchAcrossEvents({ catalogItem, names: rememberedNames, auth: req.auth });
       item.beverageItemId = catalogItem._id;
     } else if (requestedCatalogValue === null || requestedCatalogValue === '') {
       item.beverageItemId = null;

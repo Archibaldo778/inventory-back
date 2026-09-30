@@ -52,6 +52,8 @@ import {
 import { estimateBarItemUnitCost } from '../utils/barCostEstimates.js';
 import { collectBarCatalogMatchTargets } from '../utils/barCatalogMatching.js';
 import { dashboardEventGuestCount } from '../utils/barGuestCount.js';
+import { issueGuestBarSession } from '../utils/guestBarAccess.js';
+import { createBarEventShareLink } from '../utils/barReturnsLinks.js';
 
 const router = Router();
 const BAR_MANAGER_ROLES = new Set(['bar admin']);
@@ -289,6 +291,18 @@ const requireBarOperator = (req, res, next) => {
   }
   return next();
 };
+
+router.post('/returns-session', requireBarOperator, (req, res) => {
+  try {
+    const session = issueGuestBarSession();
+    return res.json({ ok: true, sessionToken: session.token, expiresIn: session.expiresIn });
+  } catch (error) {
+    return sendApiError(res, error, {
+      context: 'Authenticated bar returns session failed',
+      fallbackMessage: 'Could not open Bar Returns',
+    });
+  }
+});
 
 const limitPackoutRecognition = (req, res, next) => {
   const now = Date.now();
@@ -1155,6 +1169,31 @@ router.get('/events/by-linked/:linkedEventId', async (req, res) => {
     return sendApiError(res, error, {
       context: 'Linked event bar report lookup failed',
       fallbackMessage: 'Failed to load the event bar report',
+    });
+  }
+});
+
+router.post('/events/:id/share-link', requireBarOperator, async (req, res) => {
+  try {
+    const event = await loadEvent(req, res);
+    if (!event) return undefined;
+    if (!canOperateEvent(event, req.auth)) {
+      return res.status(403).json({ message: 'You can only share an event assigned to your account' });
+    }
+    if (!isObjectId(event.linkedEventId)) {
+      return res.status(409).json({ message: 'This bar report is not linked to a Dashboard event' });
+    }
+    const share = createBarEventShareLink({
+      dashboardEventId: String(event.linkedEventId),
+      issuerId: String(req.auth?.userId || ''),
+    });
+    addAudit(event, req.auth, 'bartender_share_link_created', { expiresAt: share.expiresAt });
+    await event.save();
+    return res.json(share);
+  } catch (error) {
+    return sendApiError(res, error, {
+      context: 'Bar event share link failed',
+      fallbackMessage: 'Could not create the bartender link',
     });
   }
 });

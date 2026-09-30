@@ -59,6 +59,16 @@ test('OCC handling instructions are notes rather than alcohol products', () => {
   assert.equal(isBarAccountingItem(item), false);
 });
 
+test('sales narratives about possible alcohol service remain notes', () => {
+  const item = {
+    name: 'Laura (bride) liked the idea of having some various whiskeys available at the bar for people to try, or perhaps doing a whiskey with dessert',
+    section: 'SPIRITS',
+    scope: 'alcohol',
+  };
+  assert.equal(isBarInstructionItem(item), true);
+  assert.equal(isBarAccountingItem(item), false);
+});
+
 test('wine glasses and tumblers never become alcohol PO items', () => {
   const item = {
     name: 'Stockholm White Wine Glass or Tumbler',

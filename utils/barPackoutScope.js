@@ -80,10 +80,15 @@ export const isClientProvidedBarItem = (item = {}) => (
     .test(extendedSourceText(item))
 );
 
-export const isBarInstructionItem = (item = {}) => (
-  /\bocc\s+(?:to|will|is)\s+(?:handle|handling|provide|providing|source|sourcing|purchase|purchasing|supply|supplying)\b/i
-    .test(extendedSourceText(item))
-);
+export const isBarInstructionItem = (item = {}) => {
+  const name = String(item?.name || '').trim();
+  if (/\bocc\s+(?:to|will|is)\s+(?:handle|handling|provide|providing|source|sourcing|purchase|purchasing|supply|supplying)\b/i
+    .test(extendedSourceText(item))) return true;
+  return name.length >= 60
+    && /\b(?:liked?|requested|suggested|discussed|mentioned|asked\s+about)\b/i.test(name)
+    && /\b(?:wine|champagne|beer|liquor|spirits?|whisk(?:e)?y|vodka|gin|tequila|rum|cocktails?)\b/i.test(name)
+    && /\b(?:idea|having|serving|available|perhaps|maybe|would\s+like)\b/i.test(name);
+};
 
 const GENERIC_ALCOHOL_CATEGORY = '(?:wines?|champagne|beers?|liquor|spirits?|waters?)';
 const GENERIC_ALCOHOL_MODIFIER = '(?:(?:dinner|house|cocktail|event)\\s+)?(?:(?:red|white|rose|sparkling)\\s+)?';

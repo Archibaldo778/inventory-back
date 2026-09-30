@@ -1573,11 +1573,30 @@ router.patch('/events/:id/items/:itemId', requireBarManager, async (req, res) =>
     const item = event.items.id(req.params.itemId);
     if (!item) return res.status(404).json({ message: 'Packout item not found' });
     const requestedCatalogValue = req.body?.beverageItemId;
-    const catalogId = isObjectId(requestedCatalogValue) ? String(requestedCatalogValue) : null;
+    const existingCatalogId = isObjectId(item.beverageItemId) ? String(item.beverageItemId) : null;
+    const catalogId = isObjectId(requestedCatalogValue)
+      ? String(requestedCatalogValue)
+      : (requestedCatalogValue === undefined && req.body?.name !== undefined ? existingCatalogId : null);
     let catalogItem = null;
     if (catalogId) {
       catalogItem = await BeverageItem.findById(catalogId).select('+purchaseCost +caseCost');
       if (!catalogItem) return res.status(400).json({ message: 'Beverage catalog item not found' });
+      const rememberedNames = [item.name, req.body?.name]
+        .map((value) => cleanString(value, 240))
+        .filter(Boolean);
+      const aliasKeys = new Set((Array.isArray(catalogItem.aliases) ? catalogItem.aliases : [])
+        .map((value) => normalizeOcrCatalogName(value))
+        .filter(Boolean));
+      aliasKeys.add(normalizeOcrCatalogName(catalogItem.name));
+      let aliasesChanged = false;
+      rememberedNames.forEach((value) => {
+        const key = normalizeOcrCatalogName(value);
+        if (!key || aliasKeys.has(key)) return;
+        catalogItem.aliases.push(value);
+        aliasKeys.add(key);
+        aliasesChanged = true;
+      });
+      if (aliasesChanged) await catalogItem.save();
       item.beverageItemId = catalogItem._id;
     } else if (requestedCatalogValue === null || requestedCatalogValue === '') {
       item.beverageItemId = null;
@@ -1680,6 +1699,26 @@ router.patch('/events/:id/items/:itemId', requireBarManager, async (req, res) =>
     return sendApiError(res, error, {
       context: 'Bar packout item update failed',
       fallbackMessage: 'Failed to update packout item',
+    });
+  }
+});
+
+router.delete('/events/:id/items/:itemId', requireBarManager, async (req, res) => {
+  try {
+    const event = await loadEvent(req, res);
+    if (!event) return undefined;
+    const item = event.items.id(req.params.itemId);
+    if (!item) return res.status(404).json({ message: 'Packout item not found' });
+    const deletedName = item.name;
+    event.items.pull(item._id);
+    event.revision += 1;
+    addAudit(event, req.auth, 'packout_item_deleted', { itemId: req.params.itemId, name: deletedName });
+    await event.save();
+    return res.json(serializeBarEvent(event, { includeFinancials: canSeeBarFinancials(req.auth) }));
+  } catch (error) {
+    return sendApiError(res, error, {
+      context: 'Bar packout item deletion failed',
+      fallbackMessage: 'Failed to delete packout item',
     });
   }
 });

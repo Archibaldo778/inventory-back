@@ -1,4 +1,5 @@
 import { inferDropboxRevision } from './dropboxDocuments.js';
+import { isRestrictedEventDocument } from './eventFileVisibility.js';
 
 const clean = (value) => String(value ?? '').replace(/\s+/g, ' ').trim();
 
@@ -69,6 +70,7 @@ export const buildOperationalDocumentStatus = (files, {
   const grouped = { sr: [], km: [], po: [], rental: [] };
   (Array.isArray(files) ? files : []).forEach((file) => {
     const identity = clean(file?.relativePath || file?.path || file?.name);
+    if (isRestrictedEventDocument(identity)) return;
     const fileName = identity.replace(/\\/g, '/').split('/').at(-1) || '';
     if (!/\.[a-z0-9]{2,5}$/i.test(fileName)) return;
     const type = inferOperationalStatusType(identity);

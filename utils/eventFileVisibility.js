@@ -57,8 +57,17 @@ export const isLeadershipEventDocument = (value) => {
   return /^leadership files?$/i.test(firstFolder);
 };
 
+export const isUnpublishedNotesDocument = (value) => String(value || '')
+  .replace(/\\/g, '/')
+  .split('/')
+  .map((part) => part.trim())
+  .filter(Boolean)
+  .slice(0, -1)
+  .some((part) => /^notes$/i.test(part));
+
 export const isRestrictedEventDocument = (value) => (
-  isFinancialEventDocument(value)
+  isUnpublishedNotesDocument(value)
+  || isFinancialEventDocument(value)
   || isInsuranceEventDocument(value)
   || isVideoEventDocument(value)
 );

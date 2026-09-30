@@ -21,6 +21,14 @@ test('Dropbox operational status recognizes SR KM PO and Rental files', () => {
   assert.equal(inferOperationalStatusType('Leadership File/SR/Event RENTAL CHECK IN SR.xlsx'), 'sr');
 });
 
+test('Dropbox operational status never counts documents inside Notes folders', () => {
+  const status = buildOperationalDocumentStatus([
+    { path: '/Events/Bechtel 620 Loft Luncheon/Notes/Bechtel KM.docx', name: 'Bechtel KM.docx', serverModifiedAt: '2026-09-23T12:00:00Z' },
+  ]);
+  assert.equal(status.km.available, false);
+  assert.equal(status.km.value, '');
+});
+
 test('Dropbox operational status uses the highest revision and its update time', () => {
   const status = buildOperationalDocumentStatus([
     { path: '/Event/KM/Event KM REV1.docx', serverModifiedAt: '2026-09-20T10:00:00Z' },

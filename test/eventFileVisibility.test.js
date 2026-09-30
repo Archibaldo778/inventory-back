@@ -4,6 +4,7 @@ import {
   isFinancialEventDocument,
   isLeadershipEventDocument,
   isRestrictedEventDocument,
+  isUnpublishedNotesDocument,
 } from '../utils/eventFileVisibility.js';
 
 test('event files hide invoices, proposals, and other financial documents', () => {
@@ -39,6 +40,12 @@ test('restricted file rules keep operational leadership files available', () => 
   assert.equal(isRestrictedEventDocument('Pack Out/Beverage PO.docx'), false);
   assert.equal(isRestrictedEventDocument('Rental Order.xlsx'), false);
   assert.equal(isRestrictedEventDocument('Tape Key.pdf'), false);
+});
+
+test('event files hide unpublished Notes folders but not files merely named notes', () => {
+  assert.equal(isUnpublishedNotesDocument('/Events/Bechtel 620 Loft Luncheon/Notes/Event KM.docx'), true);
+  assert.equal(isRestrictedEventDocument('/Events/Bechtel 620 Loft Luncheon/NOTES/Event KM.docx'), true);
+  assert.equal(isRestrictedEventDocument('/Events/Bechtel 620 Loft Luncheon/KM/Event Notes.docx'), false);
 });
 
 test('public event workspace exposes only the Leadership File folder', () => {

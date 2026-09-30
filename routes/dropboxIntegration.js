@@ -20,6 +20,7 @@ import {
 } from '../utils/dropboxBarSync.js';
 import { normalizePackoutItems } from './bar.js';
 import { syncDropboxCocktailRecipes } from '../utils/dropboxCocktailRecipes.js';
+import { recordBarSourceChangeAfterReturns } from '../utils/barSourceChangeProtection.js';
 import { getCatereaseConfig } from '../utils/catereaseApi.js';
 import {
   buildDropboxAuthorizeUrl,
@@ -319,6 +320,14 @@ const syncDropboxBarItems = async (event, { force = false } = {}) => {
       guestCountSource: 'dashboard',
       status: 'draft',
     });
+  }
+  const protectedResult = recordBarSourceChangeAfterReturns(barEvent, {
+    source: 'Dropbox automatic sync',
+    checksum: sourceChecksum,
+  });
+  if (protectedResult.locked) {
+    if (protectedResult.changed) await barEvent.save();
+    return protectedResult.changed;
   }
   const existingItems = Array.isArray(barEvent.items) ? barEvent.items : [];
   const merged = runImportedBarItemMergePipeline({

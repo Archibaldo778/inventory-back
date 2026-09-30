@@ -46,6 +46,11 @@ const barPackoutItemSchema = new mongoose.Schema(
     },
     bottleSizeMl: { type: Number, default: null, min: 0 },
     notes: { type: String, default: '', trim: true },
+    sourceChangedAfterReturns: {
+      at: { type: Date, default: null },
+      source: { type: String, default: '', trim: true },
+      checksum: { type: String, default: '', trim: true },
+    },
     captainNotes: { type: String, default: '', trim: true },
     cocktailRecipeKey: { type: String, default: '', trim: true },
     cocktailServingsAuto: { type: Boolean, default: true },

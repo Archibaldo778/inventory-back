@@ -85,6 +85,10 @@ import { createEmlDraft } from '../utils/emlDraft.js';
 import { createOperationalShareArchive } from '../utils/operationalShareArchive.js';
 import { processAutomationAlerts } from '../utils/automationAlerts.js';
 import {
+  buildBarImportChecksum,
+  recordBarSourceChangeAfterReturns,
+} from '../utils/barSourceChangeProtection.js';
+import {
   buildOutlookAuthorizeUrl,
   createOutlookDraft,
   createOutlookState,
@@ -240,6 +244,19 @@ const syncCatereaseBarItems = async (event) => {
       status: 'draft',
     });
   }
+  const protectedResult = recordBarSourceChangeAfterReturns(barEvent, {
+    source: 'Caterease automatic sync',
+    checksum: buildBarImportChecksum(sourceDocuments.map((document) => ({
+      id: String(document?.sourceId || ''),
+      revision: String(document?.sourceRevision || ''),
+      type: String(document?.type || ''),
+      items: Array.isArray(document?.barItems) ? document.barItems : [],
+    }))),
+  });
+  if (protectedResult.locked) {
+    if (protectedResult.changed) await barEvent.save();
+    return protectedResult.changed;
+  }
   const existingItems = Array.isArray(barEvent.items) ? barEvent.items : [];
   const merged = runImportedBarItemMergePipeline({
     existingItems,
@@ -299,12 +316,25 @@ const syncCatereaseOperationalBarItems = async (event, snapshot) => {
       guestCountSource,
       status: 'draft',
     });
-  } else if (shouldUpdateCatereaseOperationalGuestCount(barEvent, guestCount, guestCountSource)) {
+  }
+  const guestCountChanged = shouldUpdateCatereaseOperationalGuestCount(barEvent, guestCount, guestCountSource);
+  const clientChanged = Boolean(catereaseClient && String(barEvent?.client || '') !== catereaseClient);
+  if (barEvent && guestCountChanged) {
     barEvent.guestCount = guestCount;
     barEvent.guestCountSource = guestCountSource;
   }
-  if (catereaseClient && String(barEvent.client || '') !== catereaseClient) {
+  if (clientChanged) {
     barEvent.client = catereaseClient;
+  }
+  const protectedResult = recordBarSourceChangeAfterReturns(barEvent, {
+    source: 'Caterease operational sync',
+    checksum: String(snapshot?.checksum || buildBarImportChecksum(rawItems)),
+  });
+  if (protectedResult.locked) {
+    if (protectedResult.changed || guestCountChanged || clientChanged) {
+      await barEvent.save();
+    }
+    return { synced: protectedResult.changed, items: 0, reason: 'returns_locked' };
   }
   const existingItems = Array.isArray(barEvent.items) ? barEvent.items : [];
   const merged = runImportedBarItemMergePipeline({

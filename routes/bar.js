@@ -1496,6 +1496,7 @@ router.post('/events/:id/items', requireBarOperator, async (req, res) => {
           ? { estimated: false, kind: '', basis: '', needsPriceCheck: false }
           : (costFallback?.estimate || { estimated: false, kind: '', basis: '', needsPriceCheck: false }),
         bottleSizeMl: cleanNumber(catalogItem?.bottleSizeMl, { fallback: null }),
+        notes: cleanString(req.body?.notes, 1000),
         cocktailServingsAuto: false,
         entrySource: 'manual',
       };

@@ -68,6 +68,10 @@ export const isBarGarnishItem = (item = {}) => (
   /(?:^|\b)garnish(?:es)?(?:\b|\s*:)/i.test(sourceText(item))
 );
 
+export const isBarGlasswareItem = (item = {}) => (
+  /\b(?:glass(?:es)?|tumblers?|stemware)\b/i.test(sourceText(item))
+);
+
 export const isClientProvidedBarItem = (item = {}) => (
   /\b(?:client\s+(?:provides?|provided|providing)|provided\s+by\s+(?:the\s+)?client)\b/i.test(extendedSourceText(item))
 );
@@ -80,6 +84,7 @@ export const isBarInstructionItem = (item = {}) => (
 export const isBarAccountingItem = (item = {}) => (
   !isExternalJelloItem(item)
   && !isBarGarnishItem(item)
+  && !isBarGlasswareItem(item)
   && !isBarInstructionItem(item)
   && !isFoodMenuItem(item)
   && !isPackoutMetadataRow(item)

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   isBarAccountingItem,
+  isBarGlasswareItem,
   isBarInstructionItem,
   isExternalJelloItem,
   isFoodMenuItem,
@@ -48,6 +49,16 @@ test('OCC handling instructions are notes rather than alcohol products', () => {
     scope: 'alcohol',
   };
   assert.equal(isBarInstructionItem(item), true);
+  assert.equal(isBarAccountingItem(item), false);
+});
+
+test('wine glasses and tumblers never become alcohol PO items', () => {
+  const item = {
+    name: 'Stockholm White Wine Glass or Tumbler',
+    section: 'WINE',
+    scope: 'alcohol',
+  };
+  assert.equal(isBarGlasswareItem(item), true);
   assert.equal(isBarAccountingItem(item), false);
 });
 

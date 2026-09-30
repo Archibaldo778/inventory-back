@@ -136,6 +136,11 @@ const barEventSchema = new mongoose.Schema(
       sourceFileName: { type: String, default: '', trim: true },
       importedAt: { type: Date, default: null },
       importedBy: { type: String, default: '', trim: true },
+      allocationMethod: { type: String, enum: ['', 'guest_count', 'equal'], default: '' },
+      seriesTotal: { type: Number, default: null, min: 0 },
+      seriesShare: { type: Number, default: null, min: 0 },
+      seriesSourceBarEventId: { type: String, default: '', trim: true },
+      seriesEventCount: { type: Number, default: null, min: 1 },
     },
     catereaseClientChargeSnapshot: {
       beverageTotal: { type: Number, default: null, min: 0 },

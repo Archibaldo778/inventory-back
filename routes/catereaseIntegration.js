@@ -24,6 +24,7 @@ import {
 import { createMemoryRateLimiter } from '../middleware/rateLimit.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import { clearApiCacheGroups } from '../utils/apiCache.js';
+import { allocateSeriesCharge, findManualSeriesChargeConflict, selectBarEventSeries } from '../utils/barSeriesCharges.js';
 import { mergeEventDocumentHistory } from '../utils/documentImportAudit.js';
 import { readDropboxDocxMetadata } from '../utils/dropboxDocxMetadata.js';
 import {
@@ -1109,6 +1110,89 @@ router.get('/financial-preview/:eventId', ...requireCatereaseAdmin, async (req, 
   }
 });
 
+const isoDateOffset = (value, days) => {
+  const date = new Date(`${String(value || '').slice(0, 10)}T12:00:00Z`);
+  if (Number.isNaN(date.getTime())) return '';
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+};
+
+const distributeCatereaseSeriesCharge = async (sourceBarEvent, total, actor) => {
+  const sourceDate = String(sourceBarEvent?.eventDate || '').slice(0, 10);
+  const start = isoDateOffset(sourceDate, -14);
+  const end = isoDateOffset(sourceDate, 14);
+  if (!start || !end) return null;
+  const candidates = await BarEvent.find({ eventDate: { $gte: start, $lte: end } })
+    .select('_id name eventDate client guestCount clientCharge clientChargeDetails')
+    .lean();
+  const source = {
+    ...(typeof sourceBarEvent.toObject === 'function' ? sourceBarEvent.toObject() : sourceBarEvent),
+    _id: sourceBarEvent._id,
+  };
+  const series = selectBarEventSeries(candidates, source);
+  if (series.length < 2) return null;
+  const manualConflict = findManualSeriesChargeConflict(series, sourceBarEvent._id);
+  if (manualConflict) {
+    return { blocked: true, reason: 'manual_charge', barEventId: String(manualConflict._id), eventName: manualConflict.name };
+  }
+  const allocations = allocateSeriesCharge(series, total);
+  const alreadyApplied = allocations.every(({ event, amount, method }) => (
+    Number(event?.clientCharge) === amount
+    && Number(event?.clientChargeDetails?.seriesTotal) === Number(total)
+    && Number(event?.clientChargeDetails?.seriesShare) === amount
+    && String(event?.clientChargeDetails?.allocationMethod || '') === method
+    && Number(event?.clientChargeDetails?.seriesEventCount) === allocations.length
+  ));
+  if (alreadyApplied) {
+    return {
+      blocked: false, unchanged: true, total: Number(total), method: allocations[0]?.method || '',
+      events: allocations.map(({ event, amount }) => ({ barEventId: String(event._id), name: event.name, amount })),
+    };
+  }
+  const distributedAt = new Date();
+  const sourceId = String(sourceBarEvent._id);
+  await BarEvent.bulkWrite(allocations.map(({ event, amount, method, weight, totalWeight }) => ({
+    updateOne: {
+      filter: {
+        _id: event._id,
+        $or: [
+          { 'clientChargeDetails.source': { $ne: 'manual' } },
+          { clientCharge: { $in: [0, null] } },
+        ],
+      },
+      update: {
+        $set: {
+          clientCharge: amount,
+          clientChargeDetails: {
+            beverageSubtotal: amount,
+            liquorSubtotal: null,
+            source: 'caterease',
+            sourceFileName: 'Caterease live billing · series allocation',
+            importedAt: distributedAt,
+            importedBy: actor,
+            allocationMethod: method,
+            seriesTotal: Number(total),
+            seriesShare: amount,
+            seriesSourceBarEventId: sourceId,
+            seriesEventCount: allocations.length,
+          },
+        },
+        $inc: { revision: 1 },
+        $push: { audit: { $each: [{
+          action: 'caterease_series_charge_allocated', username: actor, at: distributedAt,
+          details: { sourceBarEventId: sourceId, total: Number(total), amount, method, weight, totalWeight },
+        }], $slice: -200 } },
+      },
+    },
+  })), { ordered: false });
+  return {
+    blocked: false,
+    total: Number(total),
+    method: allocations[0]?.method || '',
+    events: allocations.map(({ event, amount }) => ({ barEventId: String(event._id), name: event.name, amount })),
+  };
+};
+
 router.post('/financials/sync/:barEventId', requireAuth, viewSyncRateLimit, async (req, res) => {
   try {
     if (!/^[a-f\d]{24}$/i.test(String(req.params.barEventId || ''))) {
@@ -1128,7 +1212,7 @@ router.post('/financials/sync/:barEventId', requireAuth, viewSyncRateLimit, asyn
         summary: {
           billedBeverageLineItems: lines.length,
           billedBeverageTotal: Number(barEvent.catereaseClientChargeSnapshot?.beverageTotal) || 0,
-          appliedClientCharge: Number(barEvent.catereaseClientChargeSnapshot?.beverageTotal) || null,
+          appliedClientCharge: Number(barEvent.clientCharge) || null,
         },
       });
     }
@@ -1173,14 +1257,21 @@ router.post('/financials/sync/:barEventId', requireAuth, viewSyncRateLimit, asyn
         });
         barEvent.audit = barEvent.audit.slice(-200);
         await barEvent.save();
+        const seriesAllocation = summary.billedBeverageLineItems > 0
+          ? await distributeCatereaseSeriesCharge(barEvent, summary.billedBeverageTotal, syncedBy)
+          : null;
         clearApiCacheGroups('bar');
+        auditSummary.seriesAllocation = seriesAllocation;
       }
       return {
         ok: true,
         catereaseEventId,
         summary: {
           ...summary,
-          appliedClientCharge: summary.billedBeverageLineItems > 0 ? summary.billedBeverageTotal : null,
+          appliedClientCharge: auditSummary.seriesAllocation?.events
+            ?.find((entry) => entry.barEventId === String(barEvent._id))?.amount
+            ?? (summary.billedBeverageLineItems > 0 ? summary.billedBeverageTotal : null),
+          seriesAllocation: auditSummary.seriesAllocation,
         },
       };
     });

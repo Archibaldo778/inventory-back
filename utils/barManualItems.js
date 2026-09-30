@@ -149,8 +149,20 @@ export const preservePackoutOperationalState = (existingItems, nextItems) => {
       ))
       .sort((left, right) => operationalStateScore(right) - operationalStateScore(left))[0];
     if (!match) return item;
+    const matchedCatalogId = match.beverageItemId?._id || match.beverageItemId || null;
+    const incomingCatalogId = item.beverageItemId?._id || item.beverageItemId || null;
     const next = {
       ...item,
+      beverageItemId: incomingCatalogId || matchedCatalogId,
+      unitCostSnapshot: incomingCatalogId
+        ? item.unitCostSnapshot
+        : (match.unitCostSnapshot ?? item.unitCostSnapshot ?? 0),
+      bottleSizeMl: incomingCatalogId
+        ? item.bottleSizeMl
+        : (match.bottleSizeMl ?? item.bottleSizeMl ?? null),
+      costEstimate: incomingCatalogId
+        ? item.costEstimate
+        : (match.costEstimate || item.costEstimate),
       deliveredQty: match.deliveredQty ?? item.deliveredQty ?? null,
       returnedFullQty: Number(match.returnedFullQty ?? item.returnedFullQty ?? 0),
       returnedOpenQty: Number(match.returnedOpenQty ?? item.returnedOpenQty ?? 0),

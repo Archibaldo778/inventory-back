@@ -147,3 +147,36 @@ test('reimport preserves an existing pack task assignment, priority and completi
   assert.equal(preserved.prepTask.priority, 'important');
   assert.equal(preserved.prepTask.completedBy, 'Aidan Collis');
 });
+
+test('reimport preserves a manually confirmed catalog match on the same PO row', () => {
+  const existing = [{
+    _id: 'old-row',
+    name: 'Sancerre, Andre Dezat',
+    scope: 'alcohol',
+    beverageItemId: 'catalog-sancerre',
+    unitCostSnapshot: 22.5,
+    bottleSizeMl: 750,
+    costEstimate: { estimated: false, kind: '', basis: '', needsPriceCheck: false },
+    updatedBy: 'Ivan',
+  }];
+  const next = preservePackoutOperationalState(existing, [{
+    name: 'Sancerre, Andre Dezat',
+    scope: 'alcohol',
+    beverageItemId: null,
+    sentQtyPending: true,
+  }]);
+  assert.equal(next[0].beverageItemId, 'catalog-sancerre');
+  assert.equal(next[0].unitCostSnapshot, 22.5);
+  assert.equal(next[0].bottleSizeMl, 750);
+  assert.equal(next[0].updatedBy, 'Ivan');
+});
+
+test('a new authoritative catalog match replaces the catalog carried by the old row', () => {
+  const next = preservePackoutOperationalState([
+    { name: 'House Wine', scope: 'alcohol', beverageItemId: 'old-catalog', unitCostSnapshot: 10 },
+  ], [
+    { name: 'House Wine', scope: 'alcohol', beverageItemId: 'new-catalog', unitCostSnapshot: 18 },
+  ]);
+  assert.equal(next[0].beverageItemId, 'new-catalog');
+  assert.equal(next[0].unitCostSnapshot, 18);
+});

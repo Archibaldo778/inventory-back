@@ -269,13 +269,15 @@ const syncCatereaseBarItems = async (event) => {
 
 const syncCatereaseOperationalBarItems = async (event, snapshot) => {
   let barEvent = await BarEvent.findOne({ linkedEventId: event._id });
+  const catereaseClient = String(snapshot?.client || '').trim().slice(0, 180);
   const dashboardGuestCount = dashboardEventGuestCount(event);
   const snapshotGuestCount = Number(snapshot?.guestCount);
   const hasSnapshotGuestCount = Number.isFinite(snapshotGuestCount) && snapshotGuestCount > 0;
   const guestCount = hasSnapshotGuestCount ? snapshotGuestCount : dashboardGuestCount;
   const guestCountSource = hasSnapshotGuestCount ? 'packout' : 'dashboard';
   if (hasAppliedCatereaseOperationalChecksum(barEvent, snapshot?.checksum)
-    && !shouldUpdateCatereaseOperationalGuestCount(barEvent, guestCount, guestCountSource)) {
+    && !shouldUpdateCatereaseOperationalGuestCount(barEvent, guestCount, guestCountSource)
+    && (!catereaseClient || String(barEvent?.client || '') === catereaseClient)) {
     return { synced: false, items: 0, reason: 'unchanged' };
   }
   const operationalPackOutRows = Array.isArray(snapshot?.packOut) && snapshot.packOut.length
@@ -299,6 +301,9 @@ const syncCatereaseOperationalBarItems = async (event, snapshot) => {
   } else if (shouldUpdateCatereaseOperationalGuestCount(barEvent, guestCount, guestCountSource)) {
     barEvent.guestCount = guestCount;
     barEvent.guestCountSource = guestCountSource;
+  }
+  if (catereaseClient && String(barEvent.client || '') !== catereaseClient) {
+    barEvent.client = catereaseClient;
   }
   const existingItems = Array.isArray(barEvent.items) ? barEvent.items : [];
   const merged = runImportedBarItemMergePipeline({
@@ -410,6 +415,34 @@ const normalizedEventTitle = (value) => String(value || '')
   .toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
   .replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, ' ');
 
+const EVENT_SERIES_DAY_WORDS = '(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)';
+
+export const normalizedEventSeriesTitle = (value) => normalizedEventTitle(value)
+  .replace(new RegExp(`\\bday\\s+(?:\\d+|${EVENT_SERIES_DAY_WORDS})\\b`, 'g'), ' ')
+  .replace(/\s+/g, ' ')
+  .trim();
+
+export const selectCatereaseOperationalEvent = ({ rows = [], eventId = '', eventTitle = '' } = {}) => {
+  const requestedNumber = normalizedPrintedEventNumber(eventId);
+  const numberMatches = rows.filter((row) => (
+    requestedNumber
+    && [row?.EventNum, row?.EvtNum].some((value) => normalizedPrintedEventNumber(value) === requestedNumber)
+  ));
+  if (numberMatches.length === 1 && String(numberMatches[0]?.EvtNum || '').trim()) return numberMatches[0];
+
+  const title = normalizedEventTitle(eventTitle);
+  const titleMatches = rows.filter((row) => title && normalizedEventTitle(row?.PartyName) === title);
+  if (titleMatches.length === 1 && String(titleMatches[0]?.EvtNum || '').trim()) return titleMatches[0];
+
+  const seriesTitle = normalizedEventSeriesTitle(eventTitle);
+  const seriesMatches = rows.filter((row) => (
+    seriesTitle.length >= 8
+    && normalizedEventSeriesTitle(row?.PartyName) === seriesTitle
+  ));
+  if (seriesMatches.length === 1 && String(seriesMatches[0]?.EvtNum || '').trim()) return seriesMatches[0];
+  return null;
+};
+
 const CATEREASE_OPERATIONAL_EVENT_FIELDS = [
   'EvtNum',
   'EventNum',
@@ -439,7 +472,6 @@ const CATEREASE_OPERATIONAL_EVENT_FIELDS = [
 ].join(',');
 
 const resolveCatereaseOperationalEvent = async (eventId, eventDate = '', eventTitle = '') => {
-  const requestedNumber = normalizedPrintedEventNumber(eventId);
   if (!eventDate) return { eventId, eventRow: null };
   const rows = [];
   let cursor = '';
@@ -458,17 +490,9 @@ const resolveCatereaseOperationalEvent = async (eventId, eventDate = '', eventTi
     pages += 1;
     if (pages > 100) throw new Error('Caterease event pagination did not finish');
   } while (cursor);
-  const numberMatches = rows.filter((row) => (
-    requestedNumber
-    && [row?.EventNum, row?.EvtNum].some((value) => normalizedPrintedEventNumber(value) === requestedNumber)
-  ));
-  if (numberMatches.length === 1 && String(numberMatches[0]?.EvtNum || '').trim()) {
-    return { eventId: String(numberMatches[0].EvtNum).trim(), eventRow: numberMatches[0] };
-  }
-  const title = normalizedEventTitle(eventTitle);
-  const titleMatches = rows.filter((row) => title && normalizedEventTitle(row?.PartyName) === title);
-  if (titleMatches.length === 1 && String(titleMatches[0]?.EvtNum || '').trim()) {
-    return { eventId: String(titleMatches[0].EvtNum).trim(), eventRow: titleMatches[0] };
+  const matchedEvent = selectCatereaseOperationalEvent({ rows, eventId, eventTitle });
+  if (matchedEvent) {
+    return { eventId: String(matchedEvent.EvtNum).trim(), eventRow: matchedEvent };
   }
   return { eventId, eventRow: null };
 };
@@ -562,6 +586,8 @@ export const syncOperationalEvent = async (event, {
   const previousChecksum = String(event?.catereaseOperations?.checksum || '');
   event.catereaseOperations = snapshot;
   event.markModified('catereaseOperations');
+  const catereaseClient = String(snapshot?.client || '').trim().slice(0, 300);
+  if (catereaseClient) event.client = catereaseClient;
   await event.save();
   const automationAlerts = await processAlerts({ event, snapshot, previousSnapshot, previousChecksum }).catch((error) => ([{
     status: 'failed', error: String(error?.message || 'Automation alert processing failed').slice(0, 300),

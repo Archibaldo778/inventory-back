@@ -576,6 +576,9 @@ const applyNowstaApiRows = async (sourceRows, actor = {}) => {
       }
 
       if (existing) {
+        const preservedClient = event.client
+          || trimImportValue(existing.catereaseOperations?.client, 300)
+          || String(existing.client || '');
         const currentComparable = {
           externalId: String(existing.externalId || ''),
           importSource: String(existing.importSource || ''),
@@ -594,7 +597,7 @@ const applyNowstaApiRows = async (sourceRows, actor = {}) => {
           importSource: 'nowsta',
           title: event.title,
           date: event.date,
-          client: event.client,
+          client: preservedClient,
           managerId: event.managerId || currentComparable.managerId,
           nowsta: incomingNowsta,
           venue: meta?.venue || '',
@@ -609,12 +612,15 @@ const applyNowstaApiRows = async (sourceRows, actor = {}) => {
       }
 
       const before = existing ? snapshotImportedEvent(existing) : null;
+      const preservedClient = event.client
+        || trimImportValue(existing?.catereaseOperations?.client, 300)
+        || String(existing?.client || '');
       const setFields = {
         externalId: event.externalId,
         importSource: 'nowsta',
         title: event.title,
         date: event.date,
-        client: event.client,
+        client: preservedClient,
         'meta.nowsta': incomingNowsta,
         'meta.venue': meta?.venue || '',
         'meta.address': meta?.address || '',

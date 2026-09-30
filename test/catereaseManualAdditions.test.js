@@ -5,9 +5,42 @@ import Event from '../models/Event.js';
 import BarEvent from '../models/BarEvent.js';
 import {
   loadAuthorizedOperationalEvent,
+  normalizedEventSeriesTitle,
   recordCatereaseOperationalSyncError,
+  selectCatereaseOperationalEvent,
   syncOperationalEvent,
 } from '../routes/catereaseIntegration.js';
+
+test('Caterease matching recognizes a moved event whose series day label changed', () => {
+  const rows = [
+    { EvtNum: '00001-00000000022894', EventNum: 'E22894', PartyName: 'Gucci Wooster Private Appointments- Day One' },
+    { EvtNum: '00001-00000000022900', EventNum: 'E22900', PartyName: 'Unrelated Event' },
+  ];
+  assert.equal(
+    selectCatereaseOperationalEvent({
+      rows,
+      eventId: 'E22895 - S62805',
+      eventTitle: 'Gucci Wooster Private Appointments- Day Two',
+    })?.EvtNum,
+    '00001-00000000022894',
+  );
+  assert.equal(
+    normalizedEventSeriesTitle('Gucci Wooster Private Appointments — Day 2'),
+    'gucci wooster private appointments',
+  );
+});
+
+test('Caterease series matching refuses ambiguous same-date candidates', () => {
+  const rows = [
+    { EvtNum: 'first', PartyName: 'Gucci Wooster Private Appointments- Day One' },
+    { EvtNum: 'second', PartyName: 'Gucci Wooster Private Appointments- Day Two' },
+  ];
+  assert.equal(selectCatereaseOperationalEvent({
+    rows,
+    eventId: 'E99999',
+    eventTitle: 'Gucci Wooster Private Appointments- Day 3',
+  }), null);
+});
 
 test('a full Caterease operational sync leaves manual additions untouched', async () => {
   const additions = [{
@@ -49,6 +82,37 @@ test('a full Caterease operational sync leaves manual additions untouched', asyn
   assert.equal(event.saved, true);
   assert.equal(alertInput.previousSnapshot, previousSnapshot);
   assert.equal(alertInput.snapshot, snapshot);
+});
+
+test('operational sync promotes the Caterease client before syncing Bar Operations', async () => {
+  const event = {
+    externalId: 'E22851 - S62638',
+    date: '2026-09-24',
+    title: 'Prada Uomo Appts- Day 1',
+    client: '',
+    catereaseOperations: null,
+    markModified() {},
+    async save() { this.savedClient = this.client; },
+  };
+  let barClient = '';
+  await syncOperationalEvent(event, {
+    fetchSnapshot: async () => ({
+      checksum: 'client-sync',
+      client: 'PRADA USA Corp.',
+      packOut: [],
+      kitchenPackOut: [],
+      kitchenMenu: [],
+      staffRequest: [],
+    }),
+    processAlerts: async () => [],
+    syncBarItems: async (nextEvent) => {
+      barClient = nextEvent.client;
+      return { synced: true, items: 0 };
+    },
+    primaryFiles: true,
+  });
+  assert.equal(event.savedClient, 'PRADA USA Corp.');
+  assert.equal(barClient, 'PRADA USA Corp.');
 });
 
 test('operational primary mode sends the refreshed snapshot to Bar Operations', async () => {

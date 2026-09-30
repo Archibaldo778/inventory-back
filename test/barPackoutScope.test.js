@@ -6,11 +6,19 @@ import {
   isBarAccountingItem,
   isBarGlasswareItem,
   isBarInstructionItem,
+  isClientProvidedBarItem,
   isGenericBarCategoryItem,
   isExternalJelloItem,
   isFoodMenuItem,
   isPackoutMetadataRow,
 } from '../utils/barPackoutScope.js';
+
+test('alcohol provided by a named client or venue is external supply', () => {
+  const item = { name: 'Spirits & Wine provided by MoMA', section: 'WINE', scope: 'alcohol' };
+  assert.equal(isClientProvidedBarItem(item), true);
+  assert.equal(isBarAccountingItem(item), false);
+  assert.equal(isClientProvidedBarItem({ name: 'Wine provided by OCC', scope: 'alcohol' }), false);
+});
 
 test('matched alcohol beneath a cocktail heading remains a bottle item', () => {
   const item = { name: 'Jean-Marc Millot', section: 'COCKTAIL', scope: 'alcohol' };

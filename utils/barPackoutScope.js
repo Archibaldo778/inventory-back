@@ -75,10 +75,12 @@ export const isBarGlasswareItem = (item = {}) => (
   /\b(?:glass(?:es)?|tumblers?|stemware)\b/i.test(sourceText(item))
 );
 
-export const isClientProvidedBarItem = (item = {}) => (
-  /\b(?:client\s+(?:(?:will|shall|to|is\s+going\s+to)\s+)?provid(?:e|es|ed|ing)|provided\s+by\s+(?:the\s+)?client)\b/i
+export const isClientProvidedBarItem = (item = {}) => {
+  const name = String(item?.name || '').trim();
+  return /\b(?:client\s+(?:(?:will|shall|to|is\s+going\s+to)\s+)?provid(?:e|es|ed|ing)|provided\s+by\s+(?:the\s+)?client)\b/i
     .test(extendedSourceText(item))
-);
+    || /\bprovided\s+by\s+(?!(?:the\s+)?occ\b)[a-z0-9]/i.test(name);
+};
 
 export const isBarInstructionItem = (item = {}) => {
   const name = String(item?.name || '').trim();
@@ -97,7 +99,7 @@ export const isGenericBarCategoryItem = (item = {}) => {
   const name = String(item?.name || '').trim();
   if (!name) return false;
   return new RegExp(
-    `^${GENERIC_ALCOHOL_MODIFIER}${GENERIC_ALCOHOL_CATEGORY}(?:\\s*(?:and|&|/)\\s*${GENERIC_ALCOHOL_MODIFIER}${GENERIC_ALCOHOL_CATEGORY})+$`,
+    `^${GENERIC_ALCOHOL_MODIFIER}${GENERIC_ALCOHOL_CATEGORY}(?:\\s*(?:and|&|/)\\s*${GENERIC_ALCOHOL_MODIFIER}${GENERIC_ALCOHOL_CATEGORY})+(?:\\s+provided\\s+by\\s+.+)?$`,
     'i'
   ).test(name);
 };

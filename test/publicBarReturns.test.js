@@ -11,6 +11,9 @@ import {
   serializeGuestBarItem,
   selectGuestEventNameMatch,
   selectGuestEventNumberMatch,
+  buildGuestEventNumberRegex,
+  guestEventDateVariants,
+  loadGuestEventNumberCandidates,
 } from '../routes/publicBarReturns.js';
 
 test('captain treats an imported zero-return PO as attached', () => {
@@ -148,6 +151,32 @@ test('guest event id lookup does not require a date and supports the PO base id'
   ]);
   assert.equal(result.match?.id, 'expected');
   assert.equal(result.ambiguous, false);
+});
+
+test('database event-number lookup finds the requested event beyond 500 unrelated records', async () => {
+  const records = Array.from({ length: 501 }, (_, index) => ({ _id: `event-${index}`, eventNumber: `E${10000 + index}` }));
+  records.push({ _id: 'expected', eventNumber: 'E22346 - S60940' });
+  const queryResult = (rows) => ({ select: () => ({ lean: async () => rows }) });
+  const BarEventModel = {
+    find: (query) => Promise.resolve(records.filter((row) => query.eventNumber.test(row.eventNumber))),
+  };
+  const EventModel = {
+    find: (query) => queryResult(records.filter((row) => query.externalId.test(row.eventNumber))
+      .map((row) => ({ ...row, externalId: row.eventNumber }))),
+  };
+  const { reports } = await loadGuestEventNumberCandidates('E22346', { BarEventModel, EventModel });
+  assert.equal(reports.length, 1);
+  assert.equal(reports[0]._id, 'expected');
+  assert.equal(buildGuestEventNumberRegex('E22346').test('E22346-S60940'), true);
+});
+
+test('date lookup variants cover every stored ISO and US date form', () => {
+  const variants = guestEventDateVariants('10/1/2026');
+  assert.equal(variants.includes('2026-10-01'), true);
+  assert.equal(variants.includes('10/01/2026'), true);
+  assert.equal(variants.includes('10/1/2026'), true);
+  assert.equal(variants.includes('10-1-2026'), true);
+  assert.equal(variants.includes('October 1, 2026'), true);
 });
 
 test('guest pending reports deduplicate normalized event names and exact dates', () => {

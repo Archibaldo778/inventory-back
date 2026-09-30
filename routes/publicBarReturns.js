@@ -40,6 +40,7 @@ const badPinBuckets = new Map();
 const scanBuckets = new Map();
 
 const clean = (value, max = 500) => String(value ?? '').trim().slice(0, max);
+const escapeRegex = (value) => String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const isObjectId = (value) => mongoose.Types.ObjectId.isValid(String(value || ''));
 const normalizedName = (value) => clean(value, 240).toLowerCase().normalize('NFKD')
   .replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
@@ -165,6 +166,59 @@ const equalPin = (provided, configured) => {
 
 export const safeGuestReturnsPinEqual = equalPin;
 export const buildGuestEventDedupeKey = dedupeKey;
+
+export const guestEventDateVariants = (value) => {
+  const normalized = normalizeBarEventDate(value);
+  const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return [];
+  const [, year, month, day] = match;
+  const shortMonth = String(Number(month));
+  const shortDay = String(Number(day));
+  const date = new Date(`${normalized}T00:00:00Z`);
+  const longMonth = new Intl.DateTimeFormat('en-US', { month: 'long', timeZone: 'UTC' }).format(date);
+  const abbreviatedMonth = new Intl.DateTimeFormat('en-US', { month: 'short', timeZone: 'UTC' }).format(date);
+  return [...new Set([
+    normalized,
+    `${month}/${day}/${year}`, `${shortMonth}/${shortDay}/${year}`,
+    `${month}-${day}-${year}`, `${shortMonth}-${shortDay}-${year}`,
+    `${longMonth} ${shortDay}, ${year}`, `${abbreviatedMonth} ${shortDay}, ${year}`,
+    `${shortDay} ${longMonth} ${year}`, `${shortDay} ${abbreviatedMonth} ${year}`,
+  ])];
+};
+
+export const buildGuestEventNumberRegex = (value) => {
+  const normalized = normalizeBarEventNumber(value);
+  const base = normalized.match(/^E\d+/)?.[0] || normalized;
+  const pieces = base.split('').map(escapeRegex);
+  return new RegExp(`^\\s*${pieces.join('\\s*')}(?=\\s*(?:[-/]?\\s*S\\s*\\d+)?\\s*$)`, 'i');
+};
+
+export const loadGuestEventNumberCandidates = async (requestedEventNumber, {
+  BarEventModel = BarEvent,
+  EventModel = Event,
+} = {}) => {
+  const numberPattern = buildGuestEventNumberRegex(requestedEventNumber);
+  const [reports, dashboardCandidates] = await Promise.all([
+    BarEventModel.find({ eventNumber: numberPattern }),
+    EventModel.find({ externalId: numberPattern, status: { $not: /^deleted$/i } })
+      .select('title date client meta externalId').lean(),
+  ]);
+  return { reports, dashboardCandidates };
+};
+
+export const loadGuestEventDateCandidates = async (eventDate, {
+  BarEventModel = BarEvent,
+  EventModel = Event,
+} = {}) => {
+  const variants = guestEventDateVariants(eventDate);
+  const isoDatePrefix = new RegExp(`^${escapeRegex(normalizeBarEventDate(eventDate))}(?:T|$)`);
+  const [reports, dashboardCandidates] = await Promise.all([
+    BarEventModel.find({ $or: [{ eventDate: { $in: variants } }, { eventDate: isoDatePrefix }] }),
+    EventModel.find({ $or: [{ date: { $in: variants } }, { date: isoDatePrefix }], status: { $not: /^deleted$/i } })
+      .select('title date client meta externalId').lean(),
+  ]);
+  return { reports, dashboardCandidates };
+};
 
 const requirePin = (req, res, next) => {
   const key = ipKey(req);
@@ -389,11 +443,7 @@ router.post('/find-event', async (req, res) => {
     const eventDate = normalizeBarEventDate(req.body?.eventDate);
     const requestedEventNumber = normalizeBarEventNumber(clean(req.body?.eventNumber, 120));
     if (requestedEventNumber) {
-      const [reports, dashboardCandidates] = await Promise.all([
-        BarEvent.find({ eventNumber: { $ne: '' } }).limit(500),
-        Event.find({ externalId: { $ne: '' }, status: { $not: /^deleted$/i } })
-          .select('title date client meta externalId').limit(500).lean(),
-      ]);
+      const { reports, dashboardCandidates } = await loadGuestEventNumberCandidates(requestedEventNumber);
       const choices = dateChoices(reports, dashboardCandidates);
       const numberMatch = selectGuestEventNumberMatch(requestedEventNumber, choices);
       if (numberMatch.ambiguous) return res.json({ event: null, events: choices.filter((choice) => barEventNumbersMatch(requestedEventNumber, choice.eventNumber)) });
@@ -406,19 +456,15 @@ router.post('/find-event', async (req, res) => {
       return res.json({ event: event ? publicEvent(event) : null });
     }
     if (name.length < 2 || !eventDate) return res.status(400).json({ message: 'Enter an Event ID, or at least 2 name characters and an exact event date' });
-    const [reports, dashboardCandidates] = await Promise.all([
-      BarEvent.find({ eventDate }).limit(100),
-      Event.find({ status: { $not: /^deleted$/i } }).select('title date client meta externalId').limit(500).lean(),
-    ]);
-    const sameDate = dashboardCandidates.filter((candidate) => normalizeBarEventDate(candidate.date) === eventDate);
-    const choices = dateChoices(reports, sameDate);
+    const { reports, dashboardCandidates } = await loadGuestEventDateCandidates(eventDate);
+    const choices = dateChoices(reports, dashboardCandidates);
     const choiceMatch = selectGuestEventNameMatch(name, choices);
     if (choiceMatch.ambiguous) return res.json({ event: null, events: choices });
     let event = null;
     if (choiceMatch.match?.source === 'bar') {
       event = reports.find((candidate) => String(candidate._id) === choiceMatch.match.id) || null;
     } else if (choiceMatch.match?.source === 'dashboard') {
-      const dashboardEvent = sameDate.find((candidate) => String(candidate._id) === choiceMatch.match.id);
+      const dashboardEvent = dashboardCandidates.find((candidate) => String(candidate._id) === choiceMatch.match.id);
       if (dashboardEvent) event = await syncDashboardEvent(dashboardEvent);
     }
     return res.json({ event: event ? publicEvent(event) : null });

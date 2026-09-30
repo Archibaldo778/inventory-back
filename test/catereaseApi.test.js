@@ -217,6 +217,23 @@ test('Caterease event bundle client requests the composite event base id safely'
   } finally { global.fetch = originalFetch; }
 }));
 
+test('Caterease event bundle retries temporary upstream failures', async () => withApiKey(async () => {
+  const originalFetch = global.fetch;
+  let calls = 0;
+  const sleeps = [];
+  global.fetch = async () => {
+    calls += 1;
+    if (calls < 3) return new Response(JSON.stringify({ error: 'temporary' }), { status: 500 });
+    return new Response(JSON.stringify({ event: { eventId: 'E00470' } }), { status: 200 });
+  };
+  try {
+    const bundle = await getCatereaseEventBundle('E00470', { sleep: async (milliseconds) => sleeps.push(milliseconds) });
+    assert.equal(bundle.event.eventId, 'E00470');
+    assert.equal(calls, 3);
+    assert.deepEqual(sleeps, [1000, 2000]);
+  } finally { global.fetch = originalFetch; }
+}));
+
 test('Caterease operational client scopes rows to one event and date', async () => withApiKey(async () => {
   const originalFetch = global.fetch;
   let requestedUrl = '';

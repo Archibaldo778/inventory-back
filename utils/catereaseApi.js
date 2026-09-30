@@ -160,15 +160,23 @@ export const listCatereaseOperationalResource = async (resource, eventId, option
   };
 };
 
-export const getCatereaseEventBundle = async (eventId) => {
+const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+export const getCatereaseEventBundle = async (eventId, { attempts = 3, sleep = wait } = {}) => {
   const safeEventId = clean(eventId);
   if (!safeEventId) throw Object.assign(new Error('Caterease event ID is required'), { statusCode: 400 });
-  const response = await catereaseFetch(`/v1/events/${encodeURIComponent(safeEventId)}/bundle`);
-  if (!response.ok) throw await responseError(response, `Caterease event bundle failed (${response.status})`);
-  return response.json();
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const response = await catereaseFetch(`/v1/events/${encodeURIComponent(safeEventId)}/bundle`);
+    if (response.ok) return response.json();
+    const retryable = response.status === 408 || response.status === 429 || response.status >= 500;
+    if (!retryable || attempt === attempts) {
+      throw await responseError(response, `Caterease event bundle failed (${response.status})`);
+    }
+    const retrySeconds = Math.max(1, Math.min(5, Number(response.headers.get('retry-after')) || attempt));
+    await sleep(retrySeconds * 1000);
+  }
+  throw Object.assign(new Error('Caterease event bundle failed'), { statusCode: 502 });
 };
-
-const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 export const downloadCatereaseEventFile = async (uid, { attempts = 3 } = {}) => {
   const safeUid = Number(uid);

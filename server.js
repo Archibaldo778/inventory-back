@@ -126,6 +126,14 @@ export const resolveProductWorkspaceGuard = (req) => {
 };
 const requireProductWorkspaceAccess = requireMethodGuards(resolveProductWorkspaceGuard);
 
+export const resolveToolAccessGuard = (req) => (
+  String(req.method || '').toUpperCase() === 'POST'
+    && /^\/remove-background\/?$/i.test(String(req.path || ''))
+    ? requireInventoryManager
+    : requireAdmin
+);
+const requireToolAccess = requireMethodGuards(resolveToolAccessGuard);
+
 export const resolveUsersGuard = (req) => {
   const method = String(req.method || '').toUpperCase();
   if (['GET', 'HEAD'].includes(method)) {
@@ -494,7 +502,7 @@ app.use('/api/cocktail-recipes', requireAuth, requireBeverageManagerForMutations
 app.use('/api/clients', requireAuth, requireWorkspaceAccess, requireAdminForPatchDelete, clientRoutes);
 app.use('/api/proposals', requireAuth, requireProposalAccess, proposalRoutes);
 app.use('/api/proposal-templates', requireAuth, requireProposalTemplateAccess, proposalTemplateRoutes);
-app.use('/api/tools', requireAuth, requireAdmin, toolsRoutes);
+app.use('/api/tools', requireAuth, requireToolAccess, toolsRoutes);
 app.use('/api/public/bar-returns', publicBarReturnsRoutes);
 app.use('/api/public/event-workspace', publicEventWorkspaceRoutes);
 app.use('/api/public/event-reports', publicEventReportsRoutes);

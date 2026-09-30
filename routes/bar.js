@@ -17,6 +17,7 @@ import {
   validateBarReturnQuantities,
 } from '../utils/barEventAccounting.js';
 import { prepareBarReturnBatchItem } from '../utils/barReturnBatch.js';
+import { buildDashboardBarSyncQuery, DASHBOARD_BAR_SYNC_SELECT } from '../utils/barDashboardSync.js';
 import { normalizeBarEventDate } from '../utils/barEventDates.js';
 import {
   barEventNumbersMatch,
@@ -346,12 +347,15 @@ const eventSalesRep = (event) => cleanString(
 );
 
 const syncDashboardEventsToBar = async ({ eventId = null } = {}) => {
-  const query = {
-    status: { $not: /^deleted$/i },
-    ...(eventId && isObjectId(eventId) ? { _id: eventId } : {}),
-  };
-  const dashboardEvents = await Event.find(query).lean();
-  if (!dashboardEvents.length) return [];
+  const query = buildDashboardBarSyncQuery({
+    eventId: eventId && isObjectId(eventId) ? eventId : null,
+  });
+  const dashboardEvents = await Event.find(query).select(DASHBOARD_BAR_SYNC_SELECT).lean();
+  if (!dashboardEvents.length) {
+    if (eventId) return [];
+    const activeEvents = await Event.find({ status: { $not: /^deleted$/i } }).select('_id').lean();
+    return activeEvents.map((event) => event._id);
+  }
   const linkedIds = dashboardEvents.map((event) => event._id);
   const existingReports = await BarEvent.find({ linkedEventId: { $in: linkedIds } })
     .select('linkedEventId eventNumber name eventDate client venue salesRep guestCount guestCountSource assignedUserIds')
@@ -414,7 +418,9 @@ const syncDashboardEventsToBar = async ({ eventId = null } = {}) => {
   if (operations.length) {
     await BarEvent.bulkWrite(operations, { ordered: false });
   }
-  return linkedIds;
+  if (eventId) return linkedIds;
+  const activeEvents = await Event.find({ status: { $not: /^deleted$/i } }).select('_id').lean();
+  return activeEvents.map((event) => event._id);
 };
 
 const normalizePackage = (value = {}, fallback = {}) => {

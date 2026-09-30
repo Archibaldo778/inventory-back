@@ -1,7 +1,9 @@
-import { getPreparedBeverageType } from './barPackoutScope.js';
+import { getPreparedBeverageType, isClientProvidedBarItem } from './barPackoutScope.js';
 
 export const summarizeBarEventReadiness = (event = {}) => {
-  const items = (Array.isArray(event?.items) ? event.items : []).filter((item) => item?.included !== false);
+  const items = (Array.isArray(event?.items) ? event.items : []).filter((item) => (
+    item?.included !== false && !isClientProvidedBarItem(item)
+  ));
   const unmatchedAlcohol = items.filter((item) => (
     String(item?.scope || '') === 'alcohol' && !item?.beverageItemId
   )).length;

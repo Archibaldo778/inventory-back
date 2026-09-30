@@ -154,6 +154,21 @@ test('equipment containing wine champagne or rose words is excluded from captain
   assert.deepEqual(result.items.map((item) => item.name), ['Bitters']);
 });
 
+test('garnishes are never included in the Bar PO even inside an alcohol section', () => {
+  const result = parseRecognizedPackout({
+    tables: [{
+      headerRows: [['Name', 'Qty', 'Notes/Comments', 'Delivered', 'Returned']],
+      bodyRows: [
+        ['VODKA', '', '', '', ''],
+        ['Tito’s Vodka', '4', '', '', ''],
+        ['Garnish: Lemon Twists', '50', '', '', ''],
+      ],
+    }],
+  });
+
+  assert.deepEqual(result.items.map((item) => item.name), ['Tito’s Vodka']);
+});
+
 test('culinary sections containing alcohol words do not send food ingredients to Bar Operations', () => {
   assert.equal(classifyRecognizedSection('CHAMPAGNE VINAIGRETTE'), 'non_bar');
 

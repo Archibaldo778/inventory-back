@@ -11,6 +11,8 @@ test('bar readiness reports only included unmatched alcohol and prepared drinks 
       { name: 'Known wine', scope: 'alcohol', beverageItemId: 'inventory-id' },
       { name: 'House Smash', scope: 'bar_support', section: 'SPECIALTY COCKTAILS' },
       { name: 'Ready Mocktail', scope: 'bar_support', section: 'MOCKTAIL', cocktailRecipeKey: 'ready' },
+      { name: 'Client provides wine', scope: 'alcohol', beverageItemId: null },
+      { name: 'House Cocktail', scope: 'bar_support', section: 'COCKTAIL', notes: 'Provided by client' },
       { name: 'Excluded wine', scope: 'alcohol', beverageItemId: null, included: false },
     ],
   });

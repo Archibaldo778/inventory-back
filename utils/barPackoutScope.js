@@ -4,6 +4,7 @@ export const PREPARED_BEVERAGE_RATES = Object.freeze({
 });
 
 const sourceText = (item = {}) => `${String(item?.section || '')} ${String(item?.name || '')}`.trim();
+const extendedSourceText = (item = {}) => `${sourceText(item)} ${String(item?.notes || '')}`.trim();
 export const MAX_REASONABLE_BAR_ITEM_QUANTITY = 100000;
 const PACKOUT_METADATA_ROW_PATTERN = /^(?:event(?:\s+name|\s+date|\s+number)?|guest\s+count|client|location|address|delivery|date\s+po\s+modified)\s*:/i;
 
@@ -63,8 +64,17 @@ export const isExternalJelloItem = (item = {}) => (
   /\b(?:jell[\s-]*o|jello)\s*(?:shots?|bar|station|wiggles?)\b/i.test(sourceText(item))
 );
 
+export const isBarGarnishItem = (item = {}) => (
+  /(?:^|\b)garnish(?:es)?(?:\b|\s*:)/i.test(sourceText(item))
+);
+
+export const isClientProvidedBarItem = (item = {}) => (
+  /\b(?:client\s+(?:provides?|provided)|provided\s+by\s+(?:the\s+)?client)\b/i.test(extendedSourceText(item))
+);
+
 export const isBarAccountingItem = (item = {}) => (
   !isExternalJelloItem(item)
+  && !isBarGarnishItem(item)
   && !isFoodMenuItem(item)
   && !isPackoutMetadataRow(item)
   && hasReasonableBarQuantity(item)

@@ -61,6 +61,7 @@ export const getPreparedBeverageRate = (item = {}) => (
 
 export const isTrackedBarWater = (item = {}) => (
   /\b(?:acqua\s+)?panna\b|\b(?:s\.?\s*)?pellegrino\b/i.test(String(item?.name || '').trim())
+  || /^(?:(?:bottled|still|sparkling)\s+)?waters?(?:\s+(?:bottles?|cases?|\d[\w .-]*))?$/i.test(String(item?.name || '').trim())
 );
 
 export const isExternalJelloItem = (item = {}) => (
@@ -86,6 +87,7 @@ export const isBarInstructionItem = (item = {}) => {
   const name = String(item?.name || '').trim();
   if (/\bocc\s+(?:to|will|is)\s+(?:handle|handling|provide|providing|source|sourcing|purchase|purchasing|supply|supplying)\b/i
     .test(extendedSourceText(item))) return true;
+  if (/\b(?:mocktail|cocktail)\s+version\b/i.test(name) && /\b(?:subbing|substitut(?:e|ing))\b/i.test(name)) return true;
   return name.length >= 60
     && /\b(?:liked?|requested|suggested|discussed|mentioned|asked\s+about)\b/i.test(name)
     && /\b(?:wine|champagne|beer|liquor|spirits?|whisk(?:e)?y|vodka|gin|tequila|rum|cocktails?)\b/i.test(name)

@@ -100,6 +100,15 @@ test('generic combined alcohol categories wait for a specific PO item', () => {
   assert.equal(isGenericBarCategoryItem({ name: 'Veuve Clicquot Champagne' }), false);
 });
 
+test('explicit bottled water is tracked while a substitution instruction is only a note', () => {
+  assert.equal(isBarAccountingItem({ name: 'Sparkling Water', scope: 'bar_support', sentQty: 12 }), true);
+  assert.equal(isBarAccountingItem({
+    name: 'MOCKTAIL VERSION TO BE AVAILABLE BY SUBBING SPARKLING WINE FOR SELTZER',
+    scope: 'alcohol',
+    sentQty: 0,
+  }), false);
+});
+
 test('impossible imported quantities never enter bar accounting', () => {
   assert.equal(isBarAccountingItem({
     name: 'House Cocktail',

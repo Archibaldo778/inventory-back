@@ -73,7 +73,8 @@ export const isBarGlasswareItem = (item = {}) => (
 );
 
 export const isClientProvidedBarItem = (item = {}) => (
-  /\b(?:client\s+(?:provides?|provided|providing)|provided\s+by\s+(?:the\s+)?client)\b/i.test(extendedSourceText(item))
+  /\b(?:client\s+(?:(?:will|shall|to|is\s+going\s+to)\s+)?provid(?:e|es|ed|ing)|provided\s+by\s+(?:the\s+)?client)\b/i
+    .test(extendedSourceText(item))
 );
 
 export const isBarInstructionItem = (item = {}) => (

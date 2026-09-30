@@ -3,6 +3,7 @@ import DropboxIntegration from '../models/DropboxIntegration.js';
 import DropboxDocument from '../models/DropboxDocument.js';
 import Event from '../models/Event.js';
 import BarEvent from '../models/BarEvent.js';
+import CocktailRecipe from '../models/CocktailRecipe.js';
 import { requireAdmin, requireAuth } from '../middleware/auth.js';
 import { createMemoryRateLimiter } from '../middleware/rateLimit.js';
 import { sendApiError } from '../utils/apiErrors.js';
@@ -17,6 +18,7 @@ import {
   hasAppliedDropboxBarSourceChecksum,
 } from '../utils/dropboxBarSync.js';
 import { normalizePackoutItems } from './bar.js';
+import { syncDropboxCocktailRecipes } from '../utils/dropboxCocktailRecipes.js';
 import { getCatereaseConfig } from '../utils/catereaseApi.js';
 import {
   buildDropboxAuthorizeUrl,
@@ -48,7 +50,7 @@ import {
   transportationFileName,
 } from '../utils/dropboxTransportation.js';
 
-const DROPBOX_CONTENT_PARSER_VERSION = 4;
+const DROPBOX_CONTENT_PARSER_VERSION = 5;
 
 const router = Router();
 const syncRateLimit = createMemoryRateLimiter({ windowMs: 10 * 60 * 1000, max: 8, message: 'Too many Dropbox sync requests' });
@@ -303,6 +305,7 @@ const syncDropboxBarItems = async (event, { force = false } = {}) => {
   const sourceChecksum = buildDropboxBarSourceChecksum(sourceDocuments);
   if (!force && barEvent && hasAppliedDropboxBarSourceChecksum(barEvent, sourceChecksum)) return false;
   if (!rawItems.length && !barEvent) return false;
+  const recipeSync = await syncDropboxCocktailRecipes({ documents: sourceDocuments, RecipeModel: CocktailRecipe });
   if (!barEvent) {
     barEvent = new BarEvent({
       linkedEventId: event._id,
@@ -338,7 +341,7 @@ const syncDropboxBarItems = async (event, { force = false } = {}) => {
     action: 'dropbox_documents_synced',
     username: 'Dropbox automatic sync',
     at: new Date(),
-    details: { documents: sourceDocuments.length, items: merged.importedItems.length, checksum: sourceChecksum },
+    details: { documents: sourceDocuments.length, items: merged.importedItems.length, recipes: recipeSync, checksum: sourceChecksum },
   }].slice(-200);
   await barEvent.save();
   return true;

@@ -167,9 +167,11 @@ export const parseDropboxKitchenBarItems = (text) => {
       continue;
     }
     if (/^(?:QTY|ITEM|COMMENT|LABEL|BEVERAGE|MENU|STAFF|GLASS|GARNISH|ICE|WATER|JUICE|SODA)\b/i.test(line)) continue;
-    const next = lines[index + 1] || '';
-    const ingredientList = isRecipeDetailLine(next);
-    if (preparedType && !isRecipeDetailLine(line) && ingredientList) {
+    const recipeDetails = [];
+    for (let detailIndex = index + 1; detailIndex < stop && isRecipeDetailLine(lines[detailIndex]); detailIndex += 1) {
+      recipeDetails.push(lines[detailIndex]);
+    }
+    if (preparedType && !isRecipeDetailLine(line) && recipeDetails.length) {
       const key = `prepared:${normalizeKitchenName(line)}`;
       if (!seen.has(key)) {
         seen.add(key);
@@ -183,10 +185,10 @@ export const parseDropboxKitchenBarItems = (text) => {
           unitCostSnapshot: preparedType === 'mocktail' ? 1.5 : 3,
           quantity: null,
           quantityText: '',
-          notes: `Kitchen Menu ingredients: ${next}`,
+          notes: `Kitchen Menu recipe: ${recipeDetails.join(' | ')}`,
         });
       }
-      index += 1;
+      index += recipeDetails.length;
       continue;
     }
     // A recipe or service note can contain a spirit name, but it is not a

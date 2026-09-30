@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import User from '../models/Users.js';
 import { getJwtSecret } from '../middleware/auth.js';
 import { sendApiError } from '../utils/apiErrors.js';
+import { hashUserInviteToken } from '../utils/userInvitations.js';
 
 const router = Router();
 const ACCESS_TOKEN_TTL = '15m';
@@ -210,6 +211,48 @@ router.post('/login', enforceLoginRateLimit, async (req, res) => {
       context: 'Login failed',
       fallbackMessage: 'Login service unavailable',
     });
+  }
+});
+
+router.get('/invitations/:token', async (req, res) => {
+  try {
+    const user = await User.findOne({
+      inviteTokenHash: hashUserInviteToken(req.params.token),
+      inviteExpiresAt: { $gt: new Date() },
+      inviteAcceptedAt: null,
+    }).select('_id username email role inviteExpiresAt');
+    if (!user) return res.status(404).json({ message: 'This invitation is invalid or has expired' });
+    res.setHeader('Cache-Control', 'no-store');
+    return res.json({ name: user.username, email: user.email, expiresAt: user.inviteExpiresAt });
+  } catch (e) {
+    return sendApiError(res, e, { field: 'message', context: 'Validate invitation failed', fallbackMessage: 'Could not validate invitation' });
+  }
+});
+
+router.post('/invitations/:token/accept', enforceLoginRateLimit, async (req, res) => {
+  try {
+    const password = String(req.body?.password || '');
+    if (password.length < 8) return res.status(400).json({ message: 'Password must be at least 8 characters' });
+    const passwordHash = await bcrypt.hash(password, 10);
+    const user = await User.findOneAndUpdate({
+      inviteTokenHash: hashUserInviteToken(req.params.token),
+      inviteExpiresAt: { $gt: new Date() },
+      inviteAcceptedAt: null,
+    }, {
+      $set: {
+        password: passwordHash,
+        isActive: true,
+        inviteTokenHash: '',
+        inviteExpiresAt: null,
+        inviteAcceptedAt: new Date(),
+      },
+      $inc: { tokenVersion: 1 },
+    }, { new: true }).select('email');
+    if (!user) return res.status(404).json({ message: 'This invitation is invalid or has expired' });
+    res.setHeader('Cache-Control', 'no-store');
+    return res.json({ ok: true, email: user.email });
+  } catch (e) {
+    return sendApiError(res, e, { field: 'message', context: 'Accept invitation failed', fallbackMessage: 'Could not complete registration' });
   }
 });
 

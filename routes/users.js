@@ -1,8 +1,10 @@
 // /routes/users.js
 import express from 'express';
 import bcrypt from 'bcryptjs';
+import crypto from 'node:crypto';
 import User from '../models/Users.js';
 import { sendApiError } from '../utils/apiErrors.js';
+import { createUserInviteToken, sendUserInviteEmail, userInviteUrl } from '../utils/userInvitations.js';
 
 const router = express.Router();
 
@@ -106,6 +108,11 @@ const serializeUser = (source) => {
     canSeeBarFinancials: seeBarFinancials,
     permissions: buildPermissionsPayload(user?.permissions, seeProposals, seeBarFinancials),
     isActive: user?.isActive !== false,
+    inviteStatus: user?.inviteAcceptedAt
+      ? 'accepted'
+      : (user?.inviteExpiresAt && new Date(user.inviteExpiresAt).getTime() > Date.now() ? 'invited' : ''),
+    inviteSentAt: user?.inviteSentAt || null,
+    inviteAcceptedAt: user?.inviteAcceptedAt || null,
     createdAt: user?.createdAt,
     updatedAt: user?.updatedAt,
   };
@@ -333,6 +340,44 @@ router.post('/', async (req, res) => {
       context: 'Create user failed',
       fallbackMessage: 'Ошибка при создании пользователя',
     });
+  }
+});
+
+router.post('/invite', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const username = String(body.username ?? body.name ?? '').trim();
+    const email = normalizeEmail(body.email);
+    const nowstaName = String(body.nowstaName || username).trim().slice(0, 240);
+    if (!username || !email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ message: 'A name and valid email are required' });
+    }
+    let user = await User.findOne({ email }).select('+inviteTokenHash +tokenVersion');
+    if (user && normalizeRole(user.role) !== 'bar captain') {
+      return res.status(409).json({ message: 'This email already belongs to a different account role' });
+    }
+    if (user?.isActive !== false) {
+      return res.status(409).json({ message: 'This captain already has an active account' });
+    }
+    if (!user) {
+      const temporaryPassword = await bcrypt.hash(`invite-${crypto.randomUUID()}-${crypto.randomUUID()}`, 10);
+      user = await User.create({ username, email, nowstaName, role: 'bar captain', password: temporaryPassword, isActive: false });
+    }
+    const invite = createUserInviteToken();
+    user.username = username;
+    user.nowstaName = nowstaName;
+    user.role = 'bar captain';
+    user.isActive = false;
+    user.inviteTokenHash = invite.tokenHash;
+    user.inviteExpiresAt = invite.expiresAt;
+    user.inviteSentAt = new Date();
+    user.inviteAcceptedAt = null;
+    await user.save();
+    const delivery = await sendUserInviteEmail({ email, name: username, inviteUrl: userInviteUrl(invite.token) });
+    if (delivery.status !== 'sent') return res.status(502).json({ message: `Invitation was created but email failed: ${delivery.error}` });
+    return res.status(201).json({ user: serializeUser(user), delivery });
+  } catch (e) {
+    return sendApiError(res, e, { field: 'message', context: 'Invite user failed', fallbackMessage: 'Could not invite this captain' });
   }
 });
 

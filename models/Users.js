@@ -49,6 +49,10 @@ const userSchema = new mongoose.Schema(
     password: { type: String, required: true, select: false },
     isActive: { type: Boolean, default: true },
     tokenVersion: { type: Number, default: 0, min: 0, select: false },
+    inviteTokenHash: { type: String, default: '', select: false },
+    inviteExpiresAt: { type: Date, default: null },
+    inviteSentAt: { type: Date, default: null },
+    inviteAcceptedAt: { type: Date, default: null },
   },
   { timestamps: true }
 );

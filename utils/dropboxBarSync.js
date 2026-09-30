@@ -1,4 +1,18 @@
 import crypto from 'node:crypto';
+import { selectLatestDropboxFileRevisions } from './dropboxDocuments.js';
+
+export const selectDropboxBarSourceDocuments = (documents = []) => selectLatestDropboxFileRevisions(
+  (Array.isArray(documents) ? documents : [])
+    .filter((document) => String(document?.sourceProvider || '') === 'dropbox')
+    .map((document) => {
+      const source = typeof document?.toObject === 'function' ? document.toObject() : { ...document };
+      return {
+        ...source,
+        relativePath: String(source?.sourcePath || source?.fileName || ''),
+        modifiedAt: source?.uploadedAt,
+      };
+    }),
+);
 
 const sourceDocumentSignature = (document = {}) => ({
   sourceId: String(document?.sourceId || ''),

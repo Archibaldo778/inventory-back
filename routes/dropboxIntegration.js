@@ -16,6 +16,7 @@ import {
 import {
   buildDropboxBarSourceChecksum,
   hasAppliedDropboxBarSourceChecksum,
+  selectDropboxBarSourceDocuments,
 } from '../utils/dropboxBarSync.js';
 import { normalizePackoutItems } from './bar.js';
 import { syncDropboxCocktailRecipes } from '../utils/dropboxCocktailRecipes.js';
@@ -291,8 +292,7 @@ const dashboardEventGuestCount = (event) => {
 };
 
 const syncDropboxBarItems = async (event, { force = false } = {}) => {
-  const sourceDocuments = (Array.isArray(event?.documents) ? event.documents : [])
-    .filter((document) => String(document?.sourceProvider || '') === 'dropbox');
+  const sourceDocuments = selectDropboxBarSourceDocuments(event?.documents);
   const rawItems = sourceDocuments.flatMap((document) => (
     Array.isArray(document?.barItems) ? document.barItems : []
   ));
@@ -1096,8 +1096,7 @@ router.post('/events/:eventId/rebuild-bar', ...requireDropboxAdmin, async (req, 
     const event = await Event.findById(req.params.eventId)
       .select('externalId title date client managerId meta documents');
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    const sourceDocuments = (Array.isArray(event.documents) ? event.documents : [])
-      .filter((document) => String(document?.sourceProvider || '') === 'dropbox');
+    const sourceDocuments = selectDropboxBarSourceDocuments(event.documents);
     if (!sourceDocuments.length) return res.status(409).json({ error: 'This event has no current Dropbox documents' });
     const sourceItems = sourceDocuments.reduce(
       (total, document) => total + (Array.isArray(document?.barItems) ? document.barItems.length : 0),

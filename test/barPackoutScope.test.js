@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   isBarAccountingItem,
+  isBarInstructionItem,
   isExternalJelloItem,
   isFoodMenuItem,
   isPackoutMetadataRow,
@@ -38,6 +39,16 @@ test('document metadata accidentally parsed as a cocktail never enters bar accou
 
   assert.equal(isPackoutMetadataRow(row), true);
   assert.equal(isBarAccountingItem(row), false);
+});
+
+test('OCC handling instructions are notes rather than alcohol products', () => {
+  const item = {
+    name: 'OCC to handling sparkling wine for cocktail',
+    section: 'COCKTAIL',
+    scope: 'alcohol',
+  };
+  assert.equal(isBarInstructionItem(item), true);
+  assert.equal(isBarAccountingItem(item), false);
 });
 
 test('impossible imported quantities never enter bar accounting', () => {

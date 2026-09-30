@@ -72,9 +72,15 @@ export const isClientProvidedBarItem = (item = {}) => (
   /\b(?:client\s+(?:provides?|provided|providing)|provided\s+by\s+(?:the\s+)?client)\b/i.test(extendedSourceText(item))
 );
 
+export const isBarInstructionItem = (item = {}) => (
+  /\bocc\s+(?:to|will|is)\s+(?:handle|handling|provide|providing|source|sourcing|purchase|purchasing|supply|supplying)\b/i
+    .test(extendedSourceText(item))
+);
+
 export const isBarAccountingItem = (item = {}) => (
   !isExternalJelloItem(item)
   && !isBarGarnishItem(item)
+  && !isBarInstructionItem(item)
   && !isFoodMenuItem(item)
   && !isPackoutMetadataRow(item)
   && hasReasonableBarQuantity(item)

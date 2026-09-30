@@ -41,7 +41,7 @@ test('captain invitation email is sent from Ivan with a reply address', async ()
   let request;
   try {
     const result = await sendUserInviteEmail({
-      email: 'itsuppoort@ocnyc.com',
+      email: 'itsupport@ocnyc.com',
       name: 'Test Captain',
       inviteUrl: 'https://occdecks.com/accept-invite?token=test',
       fetchImpl: async (url, options) => {
@@ -52,7 +52,7 @@ test('captain invitation email is sent from Ivan with a reply address', async ()
     assert.equal(result.status, 'sent');
     assert.equal(request.body.from, 'Ivan at OCC <reports@reports.occdecks.com>');
     assert.equal(request.body.reply_to, 'ivan@ocnyc.com');
-    assert.deepEqual(request.body.to, ['itsuppoort@ocnyc.com']);
+    assert.deepEqual(request.body.to, ['itsupport@ocnyc.com']);
   } finally {
     if (previousKey === undefined) delete process.env.RESEND_API_KEY;
     else process.env.RESEND_API_KEY = previousKey;

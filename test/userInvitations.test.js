@@ -4,10 +4,19 @@ import {
   INVITE_TTL_MS,
   createUserInviteToken,
   hashUserInviteToken,
+  isExistingActiveInviteAccount,
   renderUserInviteEmail,
   sendUserInviteEmail,
   userInviteUrl,
 } from '../utils/userInvitations.js';
+
+test('a new email is not mistaken for an existing active captain account', () => {
+  assert.equal(isExistingActiveInviteAccount(null), false);
+  assert.equal(isExistingActiveInviteAccount(undefined), false);
+  assert.equal(isExistingActiveInviteAccount({ isActive: false }), false);
+  assert.equal(isExistingActiveInviteAccount({ isActive: true }), true);
+  assert.equal(isExistingActiveInviteAccount({}), true);
+});
 
 test('captain invitation creates a hashed 72 hour one-time credential', () => {
   const now = Date.parse('2026-09-30T12:00:00Z');

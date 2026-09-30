@@ -10,6 +10,7 @@ const escapeHtml = (value) => clean(value, 2000)
 
 export const INVITE_TTL_MS = 72 * 60 * 60 * 1000;
 export const normalizeInviteEmail = (value) => clean(value, 320).toLowerCase();
+export const isExistingActiveInviteAccount = (user) => Boolean(user && user.isActive !== false);
 
 export const hashUserInviteToken = (token) => crypto
   .createHash('sha256')

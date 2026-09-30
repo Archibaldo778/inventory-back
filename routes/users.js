@@ -4,7 +4,12 @@ import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
 import User from '../models/Users.js';
 import { sendApiError } from '../utils/apiErrors.js';
-import { createUserInviteToken, sendUserInviteEmail, userInviteUrl } from '../utils/userInvitations.js';
+import {
+  createUserInviteToken,
+  isExistingActiveInviteAccount,
+  sendUserInviteEmail,
+  userInviteUrl,
+} from '../utils/userInvitations.js';
 
 const router = express.Router();
 
@@ -356,7 +361,7 @@ router.post('/invite', async (req, res) => {
     if (user && normalizeRole(user.role) !== 'bar captain') {
       return res.status(409).json({ message: 'This email already belongs to a different account role' });
     }
-    if (user?.isActive !== false) {
+    if (isExistingActiveInviteAccount(user)) {
       return res.status(409).json({ message: 'This captain already has an active account' });
     }
     if (!user) {

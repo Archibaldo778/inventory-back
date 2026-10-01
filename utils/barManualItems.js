@@ -6,6 +6,7 @@ const normalizedName = (value) => {
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/\b(?:signature|cocktails?)\b/g, ' ')
+    .replace(/\b\d+(?:[.,]\d+)?\s*(?:bottles?|cases?)\b/g, ' ')
     .replace(/[^a-z0-9]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
@@ -79,10 +80,31 @@ export const combineImportedBarItems = (items) => {
 
 const barItemNameKey = (item) => normalizedName(item?.name);
 
+const applyAuthoritativeImportedQuantity = (manualItems, importedItems) => manualItems.map((manual) => {
+  if (manual?.sentQtyPending !== true) return manual;
+  const identity = barItemIdentityKey(manual);
+  const name = barItemNameKey(manual);
+  const imported = (Array.isArray(importedItems) ? importedItems : []).find((candidate) => (
+    candidate?.sentQtyPending !== true
+    && ((identity && barItemIdentityKey(candidate) === identity) || (name && barItemNameKey(candidate) === name))
+  ));
+  if (!imported) return manual;
+  return {
+    ...manual,
+    beverageItemId: imported.beverageItemId || manual.beverageItemId,
+    sentQty: Math.max(0, Number(imported.sentQty) || 0),
+    sentQtyText: String(imported.sentQtyText || imported.sentQty || 0),
+    sentQtyPending: false,
+    unitCostSnapshot: imported.unitCostSnapshot ?? manual.unitCostSnapshot,
+    bottleSizeMl: imported.bottleSizeMl ?? manual.bottleSizeMl,
+    costEstimate: imported.costEstimate || manual.costEstimate,
+  };
+});
+
 export const mergeManualItemsWithPackout = (existingItems, importedItems) => {
-  const manualItems = (Array.isArray(existingItems) ? existingItems : [])
+  const manualItems = applyAuthoritativeImportedQuantity((Array.isArray(existingItems) ? existingItems : [])
     .filter((item) => item?.entrySource === 'manual')
-    .map((item) => typeof item?.toObject === 'function' ? item.toObject() : { ...item });
+    .map((item) => typeof item?.toObject === 'function' ? item.toObject() : { ...item }), importedItems);
   const manualKeys = new Set(manualItems.map(barItemIdentityKey).filter(Boolean));
   const manualNameKeys = new Set(manualItems.map(barItemNameKey).filter(Boolean));
   const newPackoutItems = (Array.isArray(importedItems) ? importedItems : [])
@@ -103,9 +125,9 @@ export const mergePackoutDocumentItems = (existingItems, importedItems, document
   }
   const preservePrepared = types.has('po');
   const source = Array.isArray(existingItems) ? existingItems : [];
-  const manualItems = source
+  const manualItems = applyAuthoritativeImportedQuantity(source
     .filter((item) => item?.entrySource === 'manual')
-    .map((item) => typeof item?.toObject === 'function' ? item.toObject() : { ...item });
+    .map((item) => typeof item?.toObject === 'function' ? item.toObject() : { ...item }), importedItems);
   const manualKeys = new Set(manualItems.map(barItemIdentityKey).filter(Boolean));
   const manualNames = new Set(manualItems.map(barItemNameKey).filter(Boolean));
   const retained = source

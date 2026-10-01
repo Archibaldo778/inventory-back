@@ -32,6 +32,36 @@ test('a counted PO row overrides a pending KM row for the same beverage', () => 
   assert.equal(result[0].sentQtyPending, false);
 });
 
+test('a counted PO clears No PO yet on a manually matched placeholder without duplicating it', () => {
+  const existing = [{
+    name: 'LA Caravelle Champagne 1 Case',
+    beverageItemId: 'champagne-id',
+    scope: 'alcohol',
+    entrySource: 'manual',
+    sentQty: 0,
+    sentQtyText: 'No PO yet',
+    sentQtyPending: true,
+    updatedBy: 'Ivan',
+  }];
+  const imported = [{
+    name: 'LA Caravelle Champagne',
+    beverageItemId: 'champagne-id',
+    scope: 'alcohol',
+    sentQty: 12,
+    sentQtyText: '12 bottles (1 case × 12)',
+    sentQtyPending: false,
+  }];
+
+  const result = mergeManualItemsWithPackout(existing, imported);
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0].entrySource, 'manual');
+  assert.equal(result[0].sentQty, 12);
+  assert.equal(result[0].sentQtyText, '12 bottles (1 case × 12)');
+  assert.equal(result[0].sentQtyPending, false);
+  assert.equal(result[0].updatedBy, 'Ivan');
+});
+
 test('an explicit PO cocktail count overrides the automatic KM placeholder', () => {
   const result = combineImportedBarItems([
     { name: 'Orange Blossom', cocktailRecipeKey: 'orange-blossom', preparedBeverageType: 'cocktail', cocktailServingsAuto: true, sentQty: 0 },

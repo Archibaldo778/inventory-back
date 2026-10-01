@@ -25,6 +25,7 @@ import { createMemoryRateLimiter } from '../middleware/rateLimit.js';
 import { clearApiCacheGroups, createGroupedApiCache } from '../utils/apiCache.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import { fetchNowstaImportRows, resolveNowstaSyncRange } from '../utils/nowstaApi.js';
+import { missingNowstaScheduleIds } from '../utils/nowstaReconciliation.js';
 import { buildOperationsPeople, matchStaffByName, normalizePersonName } from '../utils/operationsRoster.js';
 import { runWithTransactionFallback } from '../utils/mongoTransaction.js';
 import {
@@ -746,12 +747,40 @@ export const runNowstaSync = async ({ from, to, actor } = {}) => {
   nowstaSyncPromise = (async () => {
     const fetched = await fetchNowstaImportRows({ from, to });
     const result = await applyNowstaApiRows(fetched.events, actor);
+    const rangeFrom = String(fetched.range?.from || '').slice(0, 10);
+    const rangeTo = String(fetched.range?.to || '').slice(0, 10);
+    const previouslySynced = rangeFrom && rangeTo
+      ? await NowstaScheduleEntry.find({ date: { $gte: rangeFrom, $lte: rangeTo }, archived: { $ne: true } })
+        .select('nowstaEventId')
+        .lean()
+      : [];
+    const missingScheduleIds = missingNowstaScheduleIds(previouslySynced, fetched.scheduleEvents);
+    if (missingScheduleIds.length) {
+      const removedAt = new Date();
+      await Promise.all([
+        NowstaScheduleEntry.updateMany(
+          { nowstaEventId: { $in: missingScheduleIds } },
+          { $set: { archived: true, lastSyncedAt: removedAt } },
+        ),
+        Event.updateMany(
+          { 'meta.nowsta.apiEventId': { $in: missingScheduleIds } },
+          {
+            $set: {
+              'meta.nowsta.shifts': [],
+              'meta.nowsta.excluded': true,
+              'meta.nowsta.exclusionReason': 'Removed or cancelled in Nowsta',
+              'meta.nowsta.excludedAt': removedAt,
+            },
+          },
+        ),
+      ]);
+    }
     if (fetched.scheduleEvents.length) {
       const syncedAt = new Date();
       await NowstaScheduleEntry.bulkWrite(fetched.scheduleEvents.map((entry) => ({
         updateOne: {
           filter: { nowstaEventId: entry.nowstaEventId },
-          update: { $set: { ...entry, lastSyncedAt: syncedAt } },
+          update: { $set: { ...entry, archived: false, lastSyncedAt: syncedAt } },
           upsert: true,
         },
       })), { ordered: false });
@@ -807,6 +836,7 @@ export const runNowstaSync = async ({ from, to, actor } = {}) => {
         matched: excludedResult.matchedCount || 0,
         hidden: excludedResult.modifiedCount || 0,
       },
+      removed: missingScheduleIds.length,
     };
   })();
   try {

@@ -106,6 +106,7 @@ const buildAuthContext = (payload) => {
     username: String(payload?.username || '').trim(),
     email: String(payload?.email || '').trim().toLowerCase(),
     nowstaName: String(payload?.nowstaName || '').trim(),
+    jobTitle: String(payload?.jobTitle || '').trim().toLowerCase(),
     role: normalizeRole(payload?.role),
     seeProposals,
     seeBarFinancials,
@@ -151,7 +152,7 @@ export const requireAuth = async (req, res, next) => {
 
   try {
     const persistedUser = await User.findById(tokenAuth.userId)
-      .select('_id username email nowstaName role seeProposals seeBarFinancials permissions isActive +tokenVersion')
+      .select('_id username email nowstaName jobTitle role seeProposals seeBarFinancials permissions isActive +tokenVersion')
       .lean();
     if (!persistedUser) {
       return res.status(401).json({ message: 'User not found' });
@@ -168,6 +169,7 @@ export const requireAuth = async (req, res, next) => {
       sub: String(persistedUser._id),
       username: persistedUser.username,
       nowstaName: persistedUser.nowstaName,
+      jobTitle: persistedUser.jobTitle,
       email: persistedUser.email,
       role: persistedUser.role,
       seeProposals: persistedUser.seeProposals,

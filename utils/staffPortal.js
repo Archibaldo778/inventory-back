@@ -1,3 +1,5 @@
+import { canUseKitchenReport } from './eventStaffAccess.js';
+
 const clean = (value) => String(value || '').trim();
 const nameKey = (value) => clean(value).normalize('NFKC').toLowerCase().replace(/\s+/g, ' ');
 const emailKey = (value) => clean(value).toLowerCase();
@@ -30,6 +32,6 @@ export const serializeStaffEvent = (entry, user) => {
   return {
     id: String(entry.nowstaEventId), title: entry.title, client: entry.client, date: entry.date,
     venue: entry.venue, address: entry.address, guestCount: entry.guestCount,
-    timeZone: entry.timeZone, shifts,
+    timeZone: entry.timeZone, shifts, canUseKitchenReport: canUseKitchenReport(user),
   };
 };

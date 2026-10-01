@@ -102,7 +102,7 @@ test('inventory route requires permission and has no mutation endpoints', async 
   const allowed = response();
   await handler(router, '/inventory')({ auth: user }, allowed);
   assert.deepEqual(allowed.body.items, [{ name: 'Plate', quantity: 12 }]);
-  assert.ok(router.stack.every((layer) => !layer.route || Object.keys(layer.route.methods).every((method) => method === 'get')));
+  assert.ok(router.stack.filter((layer) => layer.route?.path === '/inventory').every((layer) => Object.keys(layer.route.methods).every((method) => method === 'get')));
 });
 
 test('admin can save Executive Chef as Event Staff and revoke inventory viewing', async (t) => {

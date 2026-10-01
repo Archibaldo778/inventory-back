@@ -5,6 +5,8 @@ import { requireRoles } from '../middleware/auth.js';
 import { canReadStaffInventory } from '../utils/eventStaffAccess.js';
 import { serializeStaffEvent, staffScheduleQuery } from '../utils/staffPortal.js';
 import { sendApiError } from '../utils/apiErrors.js';
+import { openStaffKitchenReport } from '../utils/staffKitchenReport.js';
+import { issueEventGuestAccess } from '../utils/eventGuestAccess.js';
 
 const router = Router();
 const eventFields = 'nowstaEventId title client date venue address guestCount timeZone shifts archived';
@@ -43,6 +45,18 @@ router.get('/inventory', async (req, res) => {
       .sort({ name: 1 }).lean();
     return res.json({ items });
   } catch (error) { return sendApiError(res, error, { fallbackMessage: 'Could not load inventory' }); }
+});
+
+router.post('/events/:id/kitchen-report-link', requireEventStaff, async (req, res) => {
+  try {
+    const { event, report } = await openStaffKitchenReport(req.auth, String(req.params.id));
+    const access = issueEventGuestAccess({
+      eventIds: [String(event._id)], capability: 'event:report', subjectId: report.slackUserId,
+      context: `staff-kitchen:${req.auth.userId}`,
+      expiresAt: new Date(Date.now() + 120 * 86400000),
+    });
+    return res.json({ path: `/event-report/${event._id}?access=${encodeURIComponent(access)}` });
+  } catch (error) { return sendApiError(res, error, { fallbackMessage: 'Could not open the Kitchen Report' }); }
 });
 
 export default router;

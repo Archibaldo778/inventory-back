@@ -8,6 +8,7 @@ import { sendApiError } from '../utils/apiErrors.js';
 import { verifyEventGuestAccess } from '../utils/eventGuestAccess.js';
 import { sendEventReportEmail } from '../utils/eventReportEmail.js';
 import { EVENT_REPORT_CONTEXT_SELECT, resolveReportSalesRep } from '../utils/eventReportSalesRep.js';
+import { validateStaffKitchenReportAccess } from '../utils/staffKitchenReport.js';
 
 const router = Router();
 const limiter = createMemoryRateLimiter({ windowMs: 10 * 60 * 1000, max: 60, message: 'Too many event report requests' });
@@ -75,6 +76,7 @@ router.get('/:eventId', limiter, async (req, res) => {
     if (!access) return undefined;
     const report = await EventReport.findOne({ eventId: req.params.eventId, slackUserId: clean(access.subjectId, 100) });
     if (!report) return res.status(404).json({ message: 'Event report was not found' });
+    await validateStaffKitchenReportAccess(access, report);
     const event = await Event.findById(report.eventId).select(EVENT_REPORT_CONTEXT_SELECT).lean();
     return res.json({ report: { ...publicReport(report), salesRep: resolveReportSalesRep(report, event) } });
   } catch (error) {
@@ -88,6 +90,7 @@ router.post('/:eventId', limiter, async (req, res) => {
     if (!access) return undefined;
     const report = await EventReport.findOne({ eventId: req.params.eventId, slackUserId: clean(access.subjectId, 100) });
     if (!report) return res.status(404).json({ message: 'Event report was not found' });
+    await validateStaffKitchenReportAccess(access, report);
     if (report.status === 'submitted') return res.status(409).json({ message: 'This report has already been submitted' });
     const kitchenReport = report.reportType === 'kitchen';
     const stringFields = kitchenReport ? KITCHEN_REPORT_STRING_FIELDS : REPORT_STRING_FIELDS;

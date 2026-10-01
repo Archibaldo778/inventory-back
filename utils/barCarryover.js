@@ -28,15 +28,15 @@ export const buildBarCarryoverPlan = (source, target, { at = new Date(), by = 'B
   const positive = sourceItems.filter((item) => remaining(item) > 0);
   const existing = (target.items || []).filter((item) => item.carryover?.sourceEventId === id(source));
   if (existing.length) {
-    const matches = existing.length === positive.length && positive.every((item) => existing.some((row) => (
+    const matches = existing.every((row) => positive.some((item) => (
       row.carryover.sourceItemId === id(item) && row.carryover.quantity === remaining(item)
     )));
     if (!matches) throw new Error('Stock was already transferred and the source count changed. A bar admin must review both days.');
-    return { status: 'unchanged', items: [] };
   }
-  if (!positive.length) return { status: 'empty', items: [] };
+  const pending = positive.filter((item) => !existing.some((row) => row.carryover.sourceItemId === id(item)));
+  if (!pending.length) return { status: existing.length ? 'unchanged' : 'empty', items: [] };
   if (finalStatuses.has(target.status)) throw new Error('The next day already has a submitted report. Its quantities were not changed.');
-  return { status: 'ready', items: positive.map((item) => {
+  return { status: 'ready', items: pending.map((item) => {
     const quantity = remaining(item);
     if (!Number.isFinite(quantity)) throw new Error('Remaining stock contains an invalid quantity.');
     return {
@@ -56,7 +56,11 @@ export const buildBarCarryoverPlan = (source, target, { at = new Date(), by = 'B
 export const barCarryoverWrite = (source, target, plan, { at = new Date(), by = 'Bar Returns carryover' } = {}) => ({
   filter: {
     _id: target._id, revision: target.revision ?? { $exists: false }, __v: target.__v ?? { $exists: false },
-    status: { $nin: [...finalStatuses] }, 'items.carryover.sourceEventId': { $ne: id(source) },
+    status: { $nin: [...finalStatuses] },
+    items: { $not: { $elemMatch: {
+      'carryover.sourceEventId': id(source),
+      'carryover.sourceItemId': { $in: plan.items.map((item) => item.carryover.sourceItemId) },
+    } } },
   },
   update: {
     ...(target.status === 'draft' ? { $set: { status: 'ready' } } : {}),

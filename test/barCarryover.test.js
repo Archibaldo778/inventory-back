@@ -115,7 +115,8 @@ function mockStorage(t, first, next) {
     assert.equal(String(filter._id), targetId);
     assert.equal(filter.revision, next.revision);
     assert.equal(filter.__v, next.__v);
-    assert.deepEqual(filter['items.carryover.sourceEventId'], { $ne: sourceId });
+    assert.equal(filter.items.$not.$elemMatch['carryover.sourceEventId'], sourceId);
+    assert.deepEqual(filter.items.$not.$elemMatch['carryover.sourceItemId'].$in, update.$push.items.$each.map((item) => item.carryover.sourceItemId));
     assert.deepEqual(filter.status, { $nin: ['submitted', 'reviewed', 'closed'] });
     next.items.push(...update.$push.items.$each);
     next.status = update.$set?.status || next.status;
@@ -149,6 +150,29 @@ test('cancelled linked events are never transfer targets', async (t) => {
   });
   assert.equal((await carryBarReturnsForward(first)).status, 'no_next_day');
   assert.equal(writes(), 0);
+});
+
+test('late water counts transfer only the new rows, preserving champagne already carried over and edited', async (t) => {
+  const first = source();
+  const next = target();
+  const writes = mockStorage(t, first, next);
+  assert.equal((await carryBarReturnsForward(first)).status, 'transferred');
+  next.items[0].deliveredQty = 10;
+  next.items[0].returnedOpenQty = 4;
+  const champagne = JSON.stringify(next.items[0]);
+  first.items.push({ _id: 'panna', name: 'Panna', scope: 'bar_support', sentQty: 12, returnedOpenQty: 7, returnConfirmed: false });
+  first.items.push({ _id: 'pellegrino', name: 'Pellegrino', scope: 'bar_support', sentQty: 16, returnedOpenQty: 9, returnConfirmed: false });
+  assert.throws(() => buildBarCarryoverPlan(first, next), /Confirm all/);
+  first.items.slice(1).forEach((item) => { item.returnConfirmed = true; });
+  const result = await carryBarReturnsForward(first);
+  assert.equal(result.status, 'transferred');
+  assert.equal(result.itemCount, 2);
+  assert.equal(result.quantity, 16);
+  assert.deepEqual(next.items.slice(1).map((item) => [item.name, item.deliveredQty]), [['Panna', 7], ['Pellegrino', 9]]);
+  assert.equal(JSON.stringify(next.items[0]), champagne);
+  assert.equal((await carryBarReturnsForward(first)).status, 'unchanged');
+  assert.equal(next.items.length, 3);
+  assert.equal(writes(), 2);
 });
 
 test('authenticated submission saves the report before transferring stock and retry remains idempotent', async (t) => {

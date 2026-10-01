@@ -79,6 +79,14 @@ export const KITCHEN_REPORT_EMAIL_SECTIONS = [
 const emailSections = (report) => report?.reportType === 'kitchen' ? KITCHEN_REPORT_EMAIL_SECTIONS : EVENT_REPORT_EMAIL_SECTIONS;
 const emailReportTitle = (report) => report?.reportType === 'kitchen' ? 'Kitchen Report' : "Captain's Report";
 
+export const CAPTAIN_REPORT_RECIPIENTS = [
+  'captainreport@ocnyc.com',
+  'olivier@ocnyc.com',
+  'heidi@ocnyc.com',
+  'sebastian@ocnyc.com',
+  'ashley@ocnyc.com',
+];
+
 export const renderEventReportEmail = (report = {}) => {
   const answers = report.answers || {};
   const sections = emailSections(report).map(([title, fields]) => {
@@ -138,7 +146,7 @@ export const sendEventReportEmail = async ({ report, event, configuredRecipients
   const isTest = event?.meta?.eventReportTest === true;
   const to = [...new Set((isTest
     ? ['ivan@ocnyc.com', 'iurie@ocnyc.com']
-    : configuredRecipients
+    : (report?.reportType === 'kitchen' ? configuredRecipients : CAPTAIN_REPORT_RECIPIENTS)
   ).map(email).filter(Boolean))];
   if (!to.length) return { status: 'not_sent', recipients: [], cc: [], error: '' };
   const reporterEmail = email(report?.reporterEmail);
@@ -149,7 +157,7 @@ export const sendEventReportEmail = async ({ report, event, configuredRecipients
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      from: clean(process.env.EVENT_REPORT_FROM, 320) || 'OCC Staffing & Service <reports@reports.occdecks.com>',
+      from: clean(process.env.EVENT_REPORT_FROM, 320) || 'Staffing and Service Department <reports@reports.occdecks.com>',
       to,
       ...(cc.length ? { cc } : {}),
       subject: `${emailReportTitle(report)} · ${clean(report.eventTitle, 300)} · ${clean(report.reporterName, 200)}`,

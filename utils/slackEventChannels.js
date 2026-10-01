@@ -289,9 +289,9 @@ const eventUrl = (event, seriesEvents = [], endDate = '') => {
   return `${frontendBaseUrl()}/event-access/${encodeURIComponent(String(event._id))}?token=${encodeURIComponent(token)}`;
 };
 
-const captainBarUrl = (event, seriesEvents = [], endDate = '') => {
+const captainBarUrl = (event, seriesEvents = [], endDate = '', captainEmail = '') => {
   const eventIds = (seriesEvents.length ? seriesEvents : [event]).map((item) => String(item?._id || '')).filter(Boolean);
-  const token = issueEventGuestAccess({ eventIds, capability: 'bar:returns', expiresAt: guestExpiry(endDate || event.date) });
+  const token = issueEventGuestAccess({ eventIds, capability: 'bar:returns', subjectId: clean(captainEmail).toLowerCase(), expiresAt: guestExpiry(endDate || event.date) });
   return `${frontendBaseUrl()}/bar/returns?event=${encodeURIComponent(String(event._id))}&access=${encodeURIComponent(token)}`;
 };
 
@@ -497,8 +497,8 @@ export const runSlackEventChannelSync = async ({ now = new Date(), eventId = '',
         if (!force && Number.isFinite(startsAt) && startsAt > now.getTime() + DAY_MS) continue;
         const eventEndsAt = seriesSchedule?.endsAt || `${seriesSchedule?.date}T23:59:59-04:00`;
         const barRecipients = matchSlackBarReturnRecipients({ schedules: [seriesSchedule], slackUsers, linkedSlackByNowstaId });
-        const barUrl = captainBarUrl(seriesEvent, [seriesEvent], seriesSchedule.date);
         for (const captain of barRecipients.matched) {
+          const barUrl = captainBarUrl(seriesEvent, [seriesEvent], seriesSchedule.date, captain.email);
           const sentKey = `${seriesEvent._id}:${captain.id}`;
           if (barLinksSent.has(sentKey)) continue;
           try {

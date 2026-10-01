@@ -25,6 +25,7 @@ import {
   verifyGuestBarSession,
 } from '../utils/guestBarAccess.js';
 import { verifyEventGuestAccess } from '../utils/eventGuestAccess.js';
+import { sendBarReturnEmail } from '../utils/barReturnEmail.js';
 
 const router = Router();
 const WINDOW_MS = 10 * 60 * 1000;
@@ -716,6 +717,14 @@ router.patch('/:eventId/returns', async (req, res) => {
         unverifiedReceived: unverifiedReceived.slice(0, 50),
       }),
     });
+    await event.save();
+    const captainEmail = String(req.guestAccess?.subjectId || '').trim().toLowerCase();
+    try {
+      const delivery = await sendBarReturnEmail({ event: event.toObject(), captainEmail });
+      event.audit.push({ action: 'guest_returns_email_sent', username: reporterName, at: new Date(), details: delivery });
+    } catch (emailError) {
+      event.audit.push({ action: 'guest_returns_email_failed', username: reporterName, at: new Date(), details: { error: clean(emailError?.message || 'Email delivery failed', 1000) } });
+    }
     await event.save();
     return res.json({
       ok: true,

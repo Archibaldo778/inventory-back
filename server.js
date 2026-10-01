@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
 import express from 'express';
+import staffPortalRoutes from './routes/staffPortal.js';
 import cors from 'cors';
 import compression from 'compression';
 import helmet from 'helmet';
@@ -478,6 +479,7 @@ import { runSlackEventChannelSync, runSlackEventReportReminders, slackEventChann
 import { getCatereaseConfig } from './utils/catereaseApi.js';
 
 app.use('/api/auth', authRoutes);
+app.use('/api/staff-portal', requireAuth, staffPortalRoutes);
 app.use('/api/brother-labels', brotherLabelRoutes);
 app.use('/api/public/products', publicProductRoutes);
 app.use('/api/products', requireAuth, requireProductWorkspaceAccess, requireProductMutationAccess, productRoutes);

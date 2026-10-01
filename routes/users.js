@@ -157,6 +157,14 @@ const applyUserPayload = async (user, body, { allowPassword = false } = {}) => {
     user.role = normalizeRole(payload.role);
   }
 
+  if (payload.permissions?.inventoryRead !== undefined) {
+    if (typeof payload.permissions.inventoryRead !== 'boolean') {
+      throw Object.assign(new Error('Inventory viewing permission must be on or off'), { statusCode: 400 });
+    }
+    const rawPermissions = typeof user.permissions?.toObject === 'function' ? user.permissions.toObject() : user.permissions;
+    user.permissions = { ...rawPermissions, inventoryRead: payload.permissions.inventoryRead };
+  }
+
   if (typeof payload.isActive !== 'undefined' || typeof payload.active !== 'undefined') {
     const nextIsActive = toBool(payload.isActive ?? payload.active);
     if (typeof nextIsActive === 'boolean') user.isActive = nextIsActive;
@@ -340,6 +348,9 @@ router.post('/', async (req, res) => {
       typeof resolveSeeBarFinancials(body) === 'boolean' ? resolveSeeBarFinancials(body) : false;
 
     const teamProfile = await userTeamProfile(body);
+    if (body.permissions?.inventoryRead !== undefined && typeof body.permissions.inventoryRead !== 'boolean') {
+      return res.status(400).json({ message: 'Inventory viewing permission must be on or off' });
+    }
     const user = await User.create({
       username,
       email,

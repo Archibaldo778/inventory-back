@@ -6,7 +6,7 @@ export const userTeamProfile = async (payload, current = {}) => {
   const changes = {};
   if (payload.jobTitle !== undefined) {
     const title = String(payload.jobTitle || '').trim().toLowerCase();
-    if (!['', 'sales', 'team manager', 'assistant'].includes(title)) throw createApiError(400, 'Choose Sales, Team Manager or Assistant');
+    if (!['', 'sales', 'team manager', 'assistant', 'executive chef'].includes(title)) throw createApiError(400, 'Choose Sales, Team Manager, Assistant or Executive Chef');
     changes.jobTitle = title;
   }
   if (payload.teamId !== undefined) {

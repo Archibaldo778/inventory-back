@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken';
 import User from '../models/Users.js';
+import { eventStaffRequestAllowed } from '../utils/eventStaffAccess.js';
 
 export const ADMIN_ROLES = Object.freeze(['admin', 'super admin']);
 export const WORKSPACE_ROLES = Object.freeze([
@@ -104,6 +105,7 @@ const buildAuthContext = (payload) => {
     userId: String(payload?.sub || payload?.userId || payload?.id || '').trim(),
     username: String(payload?.username || '').trim(),
     email: String(payload?.email || '').trim().toLowerCase(),
+    nowstaName: String(payload?.nowstaName || '').trim(),
     role: normalizeRole(payload?.role),
     seeProposals,
     seeBarFinancials,
@@ -149,7 +151,7 @@ export const requireAuth = async (req, res, next) => {
 
   try {
     const persistedUser = await User.findById(tokenAuth.userId)
-      .select('_id username email role seeProposals seeBarFinancials permissions isActive +tokenVersion')
+      .select('_id username email nowstaName role seeProposals seeBarFinancials permissions isActive +tokenVersion')
       .lean();
     if (!persistedUser) {
       return res.status(401).json({ message: 'User not found' });
@@ -165,12 +167,14 @@ export const requireAuth = async (req, res, next) => {
       ...payload,
       sub: String(persistedUser._id),
       username: persistedUser.username,
+      nowstaName: persistedUser.nowstaName,
       email: persistedUser.email,
       role: persistedUser.role,
       seeProposals: persistedUser.seeProposals,
       seeBarFinancials: persistedUser.seeBarFinancials,
       permissions: persistedUser.permissions,
     });
+    if (!eventStaffRequestAllowed(auth, req)) return res.status(403).json({ message: 'Event Staff can only view assigned events and permitted inventory' });
     req.auth = auth;
     req.user = auth;
     return next();

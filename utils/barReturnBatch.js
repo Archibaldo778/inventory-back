@@ -8,9 +8,14 @@ export const prepareBarReturnBatchItem = (item, row = {}) => {
     returnedOpenQty: currentQuantity(item, 'returnedOpenQty'),
     lostDamagedQty: currentQuantity(item, 'lostDamagedQty'),
   };
+  // The returns table edits one total (full + open). When only that total is
+  // sent it replaces both parts; keeping the old full count would add it twice.
+  const totalOnly = row?.returnedQty !== undefined
+    && row?.returnedFullQty === undefined
+    && row?.returnedOpenQty === undefined;
   const supplied = {
-    returnedFullQty: row?.returnedFullQty,
-    returnedOpenQty: row?.returnedOpenQty ?? row?.returnedQty,
+    returnedFullQty: totalOnly ? 0 : row?.returnedFullQty,
+    returnedOpenQty: totalOnly ? row.returnedQty : row?.returnedOpenQty,
     lostDamagedQty: row?.lostDamagedQty,
   };
   for (const field of Object.keys(values)) {

@@ -11,13 +11,14 @@ test('batch return rejects returned plus lost quantities above the sent quantity
   assert.match(result.message, /cannot exceed 5 sent/i);
 });
 
-test('batch return preserves previously saved full and lost quantities when the UI sends only returnedQty', () => {
+test('batch returnedQty is the full returned total and keeps saved lost quantities', () => {
   const result = prepareBarReturnBatchItem({
     name: 'Gin', sentQty: 10, deliveredQty: 10,
     returnedFullQty: 2, returnedOpenQty: 1, lostDamagedQty: 1,
   }, { returnedQty: 3 });
   assert.equal(result.valid, true);
-  assert.deepEqual(result.values, { returnedFullQty: 2, returnedOpenQty: 3, lostDamagedQty: 1 });
+  assert.deepEqual(result.values, { returnedFullQty: 0, returnedOpenQty: 3, lostDamagedQty: 1 });
+  assert.equal(result.accounting.returnedQty, 3);
 });
 
 test('batch return accepts explicit detailed return fields', () => {

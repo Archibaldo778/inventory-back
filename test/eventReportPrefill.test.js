@@ -9,7 +9,7 @@ import EventReport from '../models/EventReport.js';
 import EventReportSettings from '../models/EventReportSettings.js';
 import ReportTeam from '../models/ReportTeam.js';
 import User from '../models/Users.js';
-import { issueEventGuestAccess } from '../utils/eventGuestAccess.js';
+import { issueEventGuestAccess, verifyEventGuestAccess } from '../utils/eventGuestAccess.js';
 
 const eventId = '507f1f77bcf86cd799439011';
 const reportId = '507f1f77bcf86cd799439012';
@@ -32,6 +32,7 @@ const mockEvent = (t) => t.mock.method(Event, 'findById', (id) => {
 test('captain portal creates a report with the Dashboard account rep even when Bar Event is stale', async (t) => {
   env(t, 'JWT_SECRET', 'report-prefill-test-secret');
   mockEvent(t);
+  t.mock.method(EventReport, 'findOne', () => ({ sort: async () => null }));
   t.mock.method(BarEvent, 'findById', async () => ({ linkedEventId: eventId, salesRep: 'Old Rep', assignedUserIds: ['captain1'], audit: [], save: async () => {} }));
   let inserted;
   t.mock.method(EventReport, 'findOneAndUpdate', async (_filter, update) => {
@@ -45,18 +46,36 @@ test('captain portal creates a report with the Dashboard account rep even when B
   assert.match(res.body.path, /event-report/);
 });
 
+test('captain portal reuses the emailed or Slack report and signs its existing identity', async (t) => {
+  env(t, 'JWT_SECRET', 'report-prefill-test-secret');
+  mockEvent(t);
+  t.mock.method(BarEvent, 'findById', async () => ({ linkedEventId: eventId, assignedUserIds: ['captain1'], audit: [], save: async () => {} }));
+  t.mock.method(EventReport, 'findOne', (query) => {
+    assert.equal(query.reportType, 'captain');
+    assert.deepEqual(query.$or[1], { reporterEmail: 'captain@example.com' });
+    return { sort: async () => ({ _id: reportId, slackUserId: 'slack-captain', status: 'submitted' }) };
+  });
+  t.mock.method(EventReport, 'findOneAndUpdate', () => assert.fail('Must not create a second report'));
+  const res = response();
+  await handler(barRouter, '/events/:id/captain-report-link', 'post')({ params: { id: eventId }, auth: { userId: 'captain1', role: 'captain', email: 'captain@example.com' } }, res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.report.status, 'submitted');
+  const token = new URL(res.body.path, 'https://example.com').searchParams.get('access');
+  assert.equal(verifyEventGuestAccess(token, eventId, 'event:report').subjectId, 'slack-captain');
+});
+
 test('captains and bar captains can reopen an unfilled report for a closed event from 14 days ago', async (t) => {
   t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-10-15T16:00:00Z') });
   env(t, 'JWT_SECRET', 'report-prefill-test-secret');
   t.mock.method(Event, 'findById', () => ({ select: () => ({ lean: async () => ({ _id: eventId, title: 'Past dinner', date: '2026-10-01' }) }) }));
   t.mock.method(BarEvent, 'findById', async () => ({ linkedEventId: eventId, eventDate: '2026-10-01', status: 'closed', assignedUserIds: ['captain1'], audit: [], save: async () => {} }));
-  const report = { _id: reportId, eventId, eventDate: '2026-10-01', status: 'pending', answers: { overallFeedback: 'Existing draft' } };
+  const report = { _id: reportId, eventId, slackUserId: 'account:captain1', eventDate: '2026-10-01', status: 'pending', answers: { overallFeedback: 'Existing draft' } };
   t.mock.method(EventReport, 'findOneAndUpdate', async (filter, update) => {
     assert.deepEqual(filter, { eventId, slackUserId: 'account:captain1' });
     assert.deepEqual(Object.keys(update), ['$setOnInsert']);
     return report;
   });
-  t.mock.method(EventReport, 'findOne', async () => report);
+  t.mock.method(EventReport, 'findOne', () => Object.assign(Promise.resolve(report), { sort: async () => report }));
   for (const role of ['captain', 'bar captain']) {
     const opened = response();
     await handler(barRouter, '/events/:id/captain-report-link', 'post')({ params: { id: eventId }, auth: { userId: 'captain1', role } }, opened);

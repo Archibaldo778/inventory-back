@@ -518,7 +518,6 @@ export const runSlackEventChannelSync = async ({ now = new Date(), eventId = '',
 
         if (slackEventReportsEnabledForEvent(seriesEvent)) {
           const reportGroups = [
-            { reportType: 'captain', label: "Captain's Report", actionId: 'open_event_report', reporters: matchSlackCaptainReporters({ schedules: [seriesSchedule], slackUsers, linkedSlackByNowstaId }) },
             { reportType: 'kitchen', label: 'Kitchen Report', actionId: 'open_kitchen_report', reporters: matchSlackKitchenReporters({ schedules: [seriesSchedule], slackUsers, linkedSlackByNowstaId }) },
           ];
           for (const group of reportGroups) for (const reporter of group.reporters.matched) {
@@ -615,7 +614,7 @@ export const runSlackEventReportReminders = async ({ now = new Date() } = {}) =>
   if (!clean(process.env.SLACK_BOT_TOKEN)) return { configured: false, sent: 0, failed: 0 };
   const globalReportsEnabled = slackEventReportsEnabled();
   const pendingFilter = {
-    status: 'pending', requestSentAt: { $ne: null }, nextReminderAt: { $ne: null, $lte: now },
+    reportType: 'kitchen', status: 'pending', requestSentAt: { $ne: null }, nextReminderAt: { $ne: null, $lte: now },
   };
   if (!globalReportsEnabled) {
     const testEventIds = await Event.find({ 'meta.eventReportTest': true }).distinct('_id');
@@ -623,7 +622,7 @@ export const runSlackEventReportReminders = async ({ now = new Date() } = {}) =>
     pendingFilter.eventId = { $in: testEventIds };
     const testReminderAt = new Date(now.getTime() + DAY_MS);
     await EventReport.updateMany({
-      eventId: { $in: testEventIds }, status: 'pending', requestSentAt: { $ne: null },
+      eventId: { $in: testEventIds }, reportType: 'kitchen', status: 'pending', requestSentAt: { $ne: null },
       $or: [{ nextReminderAt: null }, { nextReminderAt: { $gt: testReminderAt } }],
     }, { $set: { nextReminderAt: testReminderAt } });
   }

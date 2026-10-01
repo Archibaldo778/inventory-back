@@ -66,6 +66,7 @@ const loadAccess = (req, res) => {
 const publicReport = (report) => ({
   id: String(report._id), eventId: String(report.eventId), eventTitle: report.eventTitle,
   eventDate: report.eventDate, reporterName: report.reporterName, reporterEmail: report.reporterEmail,
+  eventEndsAt: report.eventEndsAt || null,
   position: report.position, salesRep: report.salesRep, reportType: report.reportType || 'captain',
   status: report.status, submittedAt: report.submittedAt, answers: report.answers || {}, emailDelivery: report.emailDelivery,
 });

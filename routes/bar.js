@@ -7,7 +7,6 @@ import BarTask from '../models/BarTask.js';
 import BeverageItem from '../models/BeverageItem.js';
 import CocktailRecipe from '../models/CocktailRecipe.js';
 import Event from '../models/Event.js';
-import EventReport from '../models/EventReport.js';
 import Staff from '../models/Staff.js';
 import User from '../models/Users.js';
 import DocumentImportRun from '../models/DocumentImportRun.js';
@@ -32,7 +31,7 @@ import {
 } from '../utils/barChargeImport.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import { issueEventGuestAccess } from '../utils/eventGuestAccess.js';
-import { resolveEventSalesRep } from '../utils/eventReportSalesRep.js';
+import { openCaptainReport } from '../utils/captainReports.js';
 import {
   INVALID_PACKOUT_UPLOAD_RESPONSE,
   isAllowedPackoutDocumentUpload,
@@ -1269,27 +1268,12 @@ router.post('/events/:id/captain-report-link', async (req, res) => {
     }
     const event = await Event.findById(barEvent.linkedEventId).select('_id title date managerId meta catereaseOperations').lean();
     if (!event) return res.status(404).json({ message: 'Dashboard event was not found' });
-    const subjectId = `account:${String(req.auth.userId)}`;
-    const reporterName = cleanString(req.auth.username || req.auth.email, 200);
-    const reporterEmail = cleanString(req.auth.email, 320).toLowerCase();
-    const report = await EventReport.findOneAndUpdate(
-      { eventId: event._id, slackUserId: subjectId },
-      { $setOnInsert: {
-        eventId: event._id,
-        eventTitle: cleanString(event.title || barEvent.name, 300),
-        eventDate: cleanString(event.date || barEvent.eventDate, 20),
-        reportType: 'captain',
-        slackUserId: subjectId,
-        reporterName,
-        reporterEmail,
-        position: 'Captain',
-        salesRep: resolveEventSalesRep(event, barEvent.salesRep),
-        status: 'pending',
-      } },
-      { upsert: true, new: true, setDefaultsOnInsert: true },
-    );
+    const report = await openCaptainReport({
+      event: { ...event, title: cleanString(event.title || barEvent.name, 300), date: cleanString(event.date || barEvent.eventDate, 20) },
+      user: req.auth, fallbackSalesRep: barEvent.salesRep,
+    });
     const accessToken = issueEventGuestAccess({
-      eventIds: [String(event._id)], capability: 'event:report', subjectId,
+      eventIds: [String(event._id)], capability: 'event:report', subjectId: report.slackUserId,
       expiresAt: new Date(Date.now() + (120 * 24 * 60 * 60 * 1000)),
       context: 'captain-portal',
     });

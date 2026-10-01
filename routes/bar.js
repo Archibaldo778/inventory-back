@@ -54,6 +54,7 @@ import { collectBarCatalogMatchTargets } from '../utils/barCatalogMatching.js';
 import { dashboardEventGuestCount } from '../utils/barGuestCount.js';
 import { issueGuestBarSession } from '../utils/guestBarAccess.js';
 import { createBarEventShareLink } from '../utils/barReturnsLinks.js';
+import { buildSharedBarPackoutPlan, selectBarPackoutSeries } from '../utils/barSeriesCharges.js';
 
 const router = Router();
 const BAR_MANAGER_ROLES = new Set(['bar admin']);
@@ -1173,6 +1174,31 @@ router.get('/events/by-linked/:linkedEventId', async (req, res) => {
   }
 });
 
+router.get('/events/:id/packout-series', requireBarOperator, async (req, res) => {
+  try {
+    const event = await loadEvent(req, res);
+    if (!event) return undefined;
+    if (!canOperateEvent(event, req.auth)) return res.status(403).json({ message: 'Bar operation access required' });
+    const sourceDate = new Date(`${event.eventDate}T12:00:00Z`);
+    if (!Number.isFinite(sourceDate.getTime())) return res.json({ events: [] });
+    const from = new Date(sourceDate.getTime() - (14 * 86400000)).toISOString().slice(0, 10);
+    const to = new Date(sourceDate.getTime() + (14 * 86400000)).toISOString().slice(0, 10);
+    const candidates = await BarEvent.find({ eventDate: { $gte: from, $lte: to } })
+      .select('_id name eventDate client status assignedUserIds packout.seriesRole')
+      .lean();
+    const series = selectBarPackoutSeries(candidates, event)
+      .filter((candidate) => canOperateEvent(candidate, req.auth));
+    return res.json({ events: series.map((candidate, index) => ({
+      id: String(candidate._id),
+      name: candidate.name,
+      eventDate: candidate.eventDate,
+      role: index === series.length - 1 ? 'final' : (index === 0 ? 'outbound' : 'carryover'),
+    })) });
+  } catch (error) {
+    return sendApiError(res, error, { context: 'Bar packout series lookup failed', fallbackMessage: 'Could not find the event series' });
+  }
+});
+
 router.post('/events/:id/share-link', requireBarOperator, async (req, res) => {
   try {
     const event = await loadEvent(req, res);
@@ -1441,12 +1467,34 @@ router.post('/events/:id/packout', async (req, res) => {
     const packoutType = ['general', 'bar_only', 'alcohol_only'].includes(String(req.body?.packoutType))
       ? String(req.body.packoutType)
       : 'unknown';
+    let packoutSeries = [];
+    let packoutSeriesPlan = null;
+    if (req.body?.seriesMode === 'shared') {
+      if (!manager) return res.status(403).json({ message: 'A bar admin must create a shared series PO' });
+      const sourceDate = new Date(`${event.eventDate}T12:00:00Z`);
+      const from = new Date(sourceDate.getTime() - (14 * 86400000)).toISOString().slice(0, 10);
+      const to = new Date(sourceDate.getTime() + (14 * 86400000)).toISOString().slice(0, 10);
+      const candidates = await BarEvent.find({ eventDate: { $gte: from, $lte: to } })
+        .select('_id name eventDate client')
+        .lean();
+      packoutSeries = selectBarPackoutSeries(candidates, event);
+      try {
+        packoutSeriesPlan = buildSharedBarPackoutPlan(packoutSeries, event._id);
+      } catch (planError) {
+        return res.status(409).json({ message: planError.message });
+      }
+    }
     event.packout = {
       fileName: cleanString(req.body?.fileName, 240),
       contentType: cleanString(req.body?.contentType, 120),
       packoutType,
       importedAt: new Date(),
       importedBy: String(req.auth?.username || req.auth?.email || ''),
+      seriesRole: packoutSeries.length > 1 ? 'final' : '',
+      seriesSourceBarEventId: packoutSeries.length > 1 ? String(event._id) : '',
+      seriesEventIds: packoutSeriesPlan?.eventIds || [],
+      seriesStartDate: packoutSeriesPlan?.startDate || '',
+      seriesEndDate: packoutSeriesPlan?.endDate || '',
     };
     if (event.status === 'draft') event.status = 'ready';
     event.revision += 1;
@@ -1454,6 +1502,7 @@ router.post('/events/:id/packout', async (req, res) => {
       fileName: event.packout.fileName,
       itemCount: event.items.length,
       packoutType,
+      seriesEventIds: packoutSeriesPlan?.eventIds || [],
     });
     await event.save();
     if (documentImportBatchId && isObjectId(event.linkedEventId)) {

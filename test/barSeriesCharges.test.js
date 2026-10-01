@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { allocateSeriesCharge, findManualSeriesChargeConflict, selectBarEventSeries } from '../utils/barSeriesCharges.js';
+import { allocateSeriesCharge, buildSharedBarPackoutPlan, findManualSeriesChargeConflict, selectBarEventSeries, selectBarPackoutSeries } from '../utils/barSeriesCharges.js';
 
 test('Day 1 charge is distributed across nearby matching series days by guest count', () => {
   const events = [
@@ -23,6 +23,22 @@ test('series charge falls back to equal cents when any day lacks guests', () => 
 test('non-Day-1 events never initiate automatic redistribution', () => {
   const event = { name: 'Gucci Appointments - Day 2', eventDate: '2026-09-25' };
   assert.deepEqual(selectBarEventSeries([event], event), []);
+});
+
+test('a shared packout series can be recognized from Day 2 without unrelated same-client events', () => {
+  const events = [
+    { _id: 'one', name: 'Prada Saks 5th Ave. Beverage Service - Day 1', eventDate: '2026-10-01', client: 'Prada' },
+    { _id: 'two', name: 'Prada Saks 5th Ave. Beverage Service - Day 2', eventDate: '2026-10-02', client: 'Prada' },
+    { _id: 'other', name: 'Prada Dinner - Day 1', eventDate: '2026-10-02', client: 'Prada' },
+  ];
+  assert.deepEqual(selectBarPackoutSeries(events, events[1]).map((event) => event._id), ['one', 'two']);
+  assert.deepEqual(buildSharedBarPackoutPlan(events.slice(0, 2), 'two'), {
+    targetEventId: 'two',
+    eventIds: ['one', 'two'],
+    startDate: '2026-10-01',
+    endDate: '2026-10-02',
+  });
+  assert.throws(() => buildSharedBarPackoutPlan(events.slice(0, 2), 'one'), /Day 2/i);
 });
 
 test('an existing manual charge blocks automatic series allocation', () => {

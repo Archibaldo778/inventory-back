@@ -15,6 +15,7 @@ export const normalizeOcrCatalogName = (value) => {
     .toLowerCase()
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\b\d+(?:[.,]\d+)?\s*(?:bottles?|cases?)\b/g, ' ')
     .replace(/\b\d+(?:[.,]\d+)?\s*(?:ml|cl|l|liters?|litres?|ounces?|oz)\b/g, ' ')
     .replace(/\b(?:bottle|bottles|case|cases|ml|cl|liters?|litres?|ounces?|oz)\b/g, ' ')
     .replace(/[^a-z0-9]+/g, ' ')

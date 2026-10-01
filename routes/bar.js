@@ -635,7 +635,9 @@ export const normalizePackoutItems = async (items, { allowFinancials = false, gu
         : null;
       const caseConversion = preparedBeverageType ? null : convertPackoutCasesToBottles({
         quantity: item?.sentQty ?? item?.quantity,
-        quantityText: item?.sentQtyText ?? item?.quantityText,
+        quantityText: [item?.sentQtyText, item?.quantityText, item?.name]
+          .filter((value) => String(value || '').trim())
+          .join(' · '),
         caseSize: catalogItem?.caseSize,
       });
       const sentQty = cleanNumber(automaticCocktailServings ?? caseConversion?.quantity ?? item?.sentQty ?? item?.quantity, {

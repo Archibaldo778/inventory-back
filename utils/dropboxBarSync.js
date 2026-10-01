@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { selectLatestDropboxFileRevisions } from './dropboxDocuments.js';
+import { selectBarPackoutSeries } from './barSeriesCharges.js';
 
 export const selectDropboxBarSourceDocuments = (documents = []) => selectLatestDropboxFileRevisions(
   (Array.isArray(documents) ? documents : [])
@@ -13,6 +14,36 @@ export const selectDropboxBarSourceDocuments = (documents = []) => selectLatestD
       };
     }),
 );
+
+export const resolveDropboxSharedSeriesDocuments = (events = [], currentEventId = '') => {
+  const rows = (Array.isArray(events) ? events : []).map((event) => ({
+    ...event,
+    _id: String(event?._id || ''),
+    name: String(event?.name || event?.title || ''),
+    eventDate: String(event?.eventDate || event?.date || ''),
+  }));
+  const current = rows.find((event) => event._id === String(currentEventId || ''));
+  if (!current) return null;
+  const series = selectBarPackoutSeries(rows, current);
+  if (series.length < 2 || series.at(-1)?._id !== current._id) return null;
+  const withDocuments = series.map((event) => ({
+    event,
+    documents: selectDropboxBarSourceDocuments(event.documents),
+  }));
+  const poOwners = withDocuments.filter(({ documents }) => documents.some((document) => (
+    document?.type === 'po' && Array.isArray(document?.barItems) && document.barItems.length > 0
+  )));
+  if (poOwners.length !== 1 || poOwners[0].event._id === current._id) return null;
+  const currentDocuments = withDocuments.find(({ event }) => event._id === current._id)?.documents || [];
+  const sharedPoDocuments = poOwners[0].documents.filter((document) => document?.type === 'po');
+  return {
+    documents: [...currentDocuments.filter((document) => document?.type !== 'po'), ...sharedPoDocuments],
+    sourceEventId: poOwners[0].event._id,
+    eventIds: series.map((event) => event._id),
+    startDate: series[0].eventDate,
+    endDate: current.eventDate,
+  };
+};
 
 const sourceDocumentSignature = (document = {}) => ({
   sourceId: String(document?.sourceId || ''),

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   buildDropboxBarSourceChecksum,
   hasAppliedDropboxBarSourceChecksum,
+  resolveDropboxSharedSeriesDocuments,
   selectDropboxBarSourceDocuments,
 } from '../utils/dropboxBarSync.js';
 
@@ -14,6 +15,29 @@ test('Dropbox bar checksum is stable across document ordering and changes with p
     buildDropboxBarSourceChecksum([left, right]),
     buildDropboxBarSourceChecksum([{ ...left, barItems: [{ name: 'Gin', quantity: 3 }] }, right])
   );
+});
+
+test('a single Day 1 PO is assigned to the final day of a two-day Dropbox series', () => {
+  const sharedPo = {
+    sourceProvider: 'dropbox', sourceId: 'shared-po', type: 'po',
+    fileName: 'Prada Saks Day 1 and Day 2 PO.docx',
+    barItems: [{ name: 'LA Caravelle Champagne 1 Case', sentQty: 1 }],
+  };
+  const dayTwoKm = {
+    sourceProvider: 'dropbox', sourceId: 'day-two-km', type: 'kitchen_menu',
+    fileName: 'Prada Saks Day 2 KM.docx', barItems: [{ name: 'Spritz' }],
+  };
+  const events = [
+    { _id: 'day-one', title: 'Prada Saks 5th Ave. Beverage Service - Day 1', date: '2026-10-01', client: 'Prada', documents: [sharedPo] },
+    { _id: 'day-two', title: 'Prada Saks 5th Ave. Beverage Service - Day 2', date: '2026-10-02', client: 'Prada', documents: [dayTwoKm] },
+  ];
+
+  const result = resolveDropboxSharedSeriesDocuments(events, 'day-two');
+
+  assert.deepEqual(result.eventIds, ['day-one', 'day-two']);
+  assert.equal(result.sourceEventId, 'day-one');
+  assert.deepEqual(result.documents.map((document) => document.sourceId).sort(), ['day-two-km', 'shared-po']);
+  assert.equal(resolveDropboxSharedSeriesDocuments(events, 'day-one'), null);
 });
 
 test('Dropbox bar sync uses one published copy of a mirrored PO', () => {

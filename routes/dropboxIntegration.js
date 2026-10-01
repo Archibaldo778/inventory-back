@@ -16,8 +16,10 @@ import {
 import {
   buildDropboxBarSourceChecksum,
   hasAppliedDropboxBarSourceChecksum,
+  resolveDropboxSharedSeriesDocuments,
   selectDropboxBarSourceDocuments,
 } from '../utils/dropboxBarSync.js';
+import { barItemIdentityKey } from '../utils/barManualItems.js';
 import { normalizePackoutItems } from './bar.js';
 import { syncDropboxCocktailRecipes } from '../utils/dropboxCocktailRecipes.js';
 import { recordBarSourceChangeAfterReturns } from '../utils/barSourceChangeProtection.js';
@@ -292,8 +294,20 @@ const dashboardEventGuestCount = (event) => {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 };
 
+const loadDropboxBarSeriesContext = async (event) => {
+  const sourceDate = new Date(`${String(event?.date || '')}T12:00:00Z`);
+  if (!Number.isFinite(sourceDate.getTime())) return null;
+  const from = new Date(sourceDate.getTime() - (14 * 86400000)).toISOString().slice(0, 10);
+  const to = new Date(sourceDate.getTime() + (14 * 86400000)).toISOString().slice(0, 10);
+  const candidates = await Event.find({ date: { $gte: from, $lte: to } })
+    .select('_id title date client documents')
+    .lean();
+  return resolveDropboxSharedSeriesDocuments(candidates, event?._id);
+};
+
 const syncDropboxBarItems = async (event, { force = false } = {}) => {
-  const sourceDocuments = selectDropboxBarSourceDocuments(event?.documents);
+  const seriesContext = await loadDropboxBarSeriesContext(event);
+  const sourceDocuments = seriesContext?.documents || selectDropboxBarSourceDocuments(event?.documents);
   const rawItems = sourceDocuments.flatMap((document) => (
     Array.isArray(document?.barItems) ? document.barItems : []
   ));
@@ -344,6 +358,11 @@ const syncDropboxBarItems = async (event, { force = false } = {}) => {
     packoutType: sourceDocuments.some((document) => document.type === 'po') ? 'general' : 'bar_only',
     importedAt: new Date(),
     importedBy: 'Dropbox automatic sync',
+    seriesRole: seriesContext ? 'final' : '',
+    seriesSourceBarEventId: seriesContext ? String(barEvent._id) : '',
+    seriesEventIds: seriesContext?.eventIds || [],
+    seriesStartDate: seriesContext?.startDate || '',
+    seriesEndDate: seriesContext?.endDate || '',
   };
   if (barEvent.status === 'draft') barEvent.status = 'ready';
   barEvent.revision = Number(barEvent.revision || 0) + 1;
@@ -354,6 +373,26 @@ const syncDropboxBarItems = async (event, { force = false } = {}) => {
     details: { documents: sourceDocuments.length, items: merged.importedItems.length, recipes: recipeSync, checksum: sourceChecksum },
   }].slice(-200);
   await barEvent.save();
+  if (seriesContext) {
+    const sharedKeys = new Set(merged.importedItems.map(barItemIdentityKey).filter(Boolean));
+    const earlierEvents = await BarEvent.find({
+      linkedEventId: { $in: seriesContext.eventIds.filter((id) => id !== String(event._id)) },
+      status: { $nin: ['submitted', 'reviewed', 'closed'] },
+    });
+    for (const earlierEvent of earlierEvents) {
+      if ((earlierEvent.items || []).some((item) => item.returnConfirmed === true)) continue;
+      earlierEvent.items = (earlierEvent.items || []).filter((item) => (
+        !sharedKeys.has(barItemIdentityKey(item))
+      ));
+      earlierEvent.packout.seriesRole = 'outbound';
+      earlierEvent.packout.seriesSourceBarEventId = String(barEvent._id);
+      earlierEvent.packout.seriesEventIds = seriesContext.eventIds;
+      earlierEvent.packout.seriesStartDate = seriesContext.startDate;
+      earlierEvent.packout.seriesEndDate = seriesContext.endDate;
+      earlierEvent.revision = Number(earlierEvent.revision || 0) + 1;
+      await earlierEvent.save();
+    }
+  }
   return true;
 };
 
@@ -1105,7 +1144,8 @@ router.post('/events/:eventId/rebuild-bar', ...requireDropboxAdmin, async (req, 
     const event = await Event.findById(req.params.eventId)
       .select('externalId title date client managerId meta documents');
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    const sourceDocuments = selectDropboxBarSourceDocuments(event.documents);
+    const seriesContext = await loadDropboxBarSeriesContext(event);
+    const sourceDocuments = seriesContext?.documents || selectDropboxBarSourceDocuments(event.documents);
     if (!sourceDocuments.length) return res.status(409).json({ error: 'This event has no current Dropbox documents' });
     const sourceItems = sourceDocuments.reduce(
       (total, document) => total + (Array.isArray(document?.barItems) ? document.barItems.length : 0),

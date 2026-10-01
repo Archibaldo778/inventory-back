@@ -21,6 +21,13 @@ test('bar workers can view and operate only events assigned from Nowsta', () => 
   assert.equal(canOperateEvent(assignedEvent, otherBartender), false);
 });
 
+test('report-only captains can view assigned events but cannot operate Bar Returns', () => {
+  const captain = { userId: 'captain-one', role: 'captain' };
+  assert.equal(canViewEvent(assignedEvent, captain), true);
+  assert.equal(canOperateEvent(assignedEvent, captain), false);
+  assert.equal(canViewEvent(assignedEvent, { userId: 'captain-two', role: 'captain' }), false);
+});
+
 test('bar managers retain access while workspace viewers cannot modify bar events', () => {
   assert.equal(canViewEvent(assignedEvent, { role: 'bar admin' }), true);
   assert.equal(canOperateEvent(assignedEvent, { role: 'bar admin' }), true);

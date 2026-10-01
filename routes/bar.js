@@ -62,6 +62,7 @@ import { convertPackoutCasesToBottles } from '../utils/barCaseQuantities.js';
 const router = Router();
 const BAR_MANAGER_ROLES = new Set(['bar admin']);
 const BAR_WORKER_ROLES = new Set(['bar captain', 'bartender']);
+const ASSIGNED_EVENT_ROLES = new Set(['captain', 'bar captain', 'bartender']);
 const BAR_VIEWER_ROLES = new Set(['user', 'manager', 'sales rep']);
 const MAX_PACKOUT_ITEMS = 500;
 const MAX_CHARGE_IMPORT_ROWS = 2_000;
@@ -114,6 +115,8 @@ const isBarManager = (auth) => (
 
 const isBarWorker = (auth) => BAR_WORKER_ROLES.has(normalizeRole(auth?.role));
 const isBarCaptain = (auth) => normalizeRole(auth?.role) === 'bar captain';
+const isCaptain = (auth) => ['captain', 'bar captain'].includes(normalizeRole(auth?.role));
+const isAssignedEventUser = (auth) => ASSIGNED_EVENT_ROLES.has(normalizeRole(auth?.role));
 
 const eventAssignedToAuth = (event, auth) => {
   const userId = String(auth?.userId || '');
@@ -125,7 +128,7 @@ const eventAssignedToAuth = (event, auth) => {
 export const canViewEvent = (event, auth) => (
   isBarManager(auth)
   || BAR_VIEWER_ROLES.has(normalizeRole(auth?.role))
-  || (isBarWorker(auth) && eventAssignedToAuth(event, auth))
+  || (isAssignedEventUser(auth) && eventAssignedToAuth(event, auth))
 );
 
 export const canOperateEvent = (event, auth) => (
@@ -382,7 +385,7 @@ const syncDashboardEventsToBar = async ({ eventId = null } = {}) => {
     existingReports.map((report) => [String(report.linkedEventId), report])
   );
   const captainUsers = await User.find({
-    role: { $in: ['bar captain', 'bartender'] },
+    role: { $in: ['captain', 'bar captain', 'bartender'] },
     isActive: { $ne: false },
   })
     .select('_id username email nowstaName')
@@ -840,7 +843,7 @@ router.delete('/tasks/:taskId', requireBarManager, async (req, res) => {
 
 router.get('/events', async (req, res) => {
   try {
-    if (!isBarManager(req.auth) && !isBarWorker(req.auth) && !BAR_VIEWER_ROLES.has(normalizeRole(req.auth?.role))) {
+    if (!isBarManager(req.auth) && !isAssignedEventUser(req.auth) && !BAR_VIEWER_ROLES.has(normalizeRole(req.auth?.role))) {
       return res.status(403).json({ message: 'Bar access required' });
     }
     const activeDashboardEventIds = await syncDashboardEventsToBar();
@@ -853,7 +856,7 @@ router.get('/events', async (req, res) => {
     if (req.query.status && BAR_EVENT_STATUSES.includes(String(req.query.status))) {
       query.status = String(req.query.status);
     }
-    if (isBarWorker(req.auth)) {
+    if (isAssignedEventUser(req.auth)) {
       query.assignedUserIds = req.auth.userId;
     }
     const events = await BarEvent.find(query).sort({ eventDate: -1, createdAt: -1 });
@@ -1234,14 +1237,14 @@ router.post('/events/:id/share-link', requireBarOperator, async (req, res) => {
   }
 });
 
-router.post('/events/:id/captain-report-link', requireBarOperator, async (req, res) => {
+router.post('/events/:id/captain-report-link', async (req, res) => {
   try {
-    if (!isBarCaptain(req.auth) && !isBarManager(req.auth)) {
+    if (!isCaptain(req.auth) && !isBarManager(req.auth)) {
       return res.status(403).json({ message: 'Captain account required' });
     }
     const barEvent = await loadEvent(req, res);
     if (!barEvent) return undefined;
-    if (!canOperateEvent(barEvent, req.auth)) {
+    if (!isBarManager(req.auth) && !eventAssignedToAuth(barEvent, req.auth)) {
       return res.status(403).json({ message: 'You can only open a report for an event assigned to your account' });
     }
     if (!isObjectId(barEvent.linkedEventId)) {

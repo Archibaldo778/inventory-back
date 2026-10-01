@@ -354,11 +354,13 @@ router.post('/invite', async (req, res) => {
     const username = String(body.username ?? body.name ?? '').trim();
     const email = normalizeEmail(body.email);
     const nowstaName = String(body.nowstaName || username).trim().slice(0, 240);
+    const requestedRole = normalizeRole(body.role);
+    const inviteRole = requestedRole === 'captain' ? 'captain' : 'bar captain';
     if (!username || !email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return res.status(400).json({ message: 'A name and valid email are required' });
     }
     let user = await User.findOne({ email }).select('+inviteTokenHash +tokenVersion');
-    if (user && normalizeRole(user.role) !== 'bar captain') {
+    if (user && !['captain', 'bar captain'].includes(normalizeRole(user.role))) {
       return res.status(409).json({ message: 'This email already belongs to a different account role' });
     }
     if (isExistingActiveInviteAccount(user)) {
@@ -366,12 +368,12 @@ router.post('/invite', async (req, res) => {
     }
     if (!user) {
       const temporaryPassword = await bcrypt.hash(`invite-${crypto.randomUUID()}-${crypto.randomUUID()}`, 10);
-      user = await User.create({ username, email, nowstaName, role: 'bar captain', password: temporaryPassword, isActive: false });
+      user = await User.create({ username, email, nowstaName, role: inviteRole, password: temporaryPassword, isActive: false });
     }
     const invite = createUserInviteToken();
     user.username = username;
     user.nowstaName = nowstaName;
-    user.role = 'bar captain';
+    user.role = inviteRole;
     user.isActive = false;
     user.inviteTokenHash = invite.tokenHash;
     user.inviteExpiresAt = invite.expiresAt;

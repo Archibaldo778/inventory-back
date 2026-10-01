@@ -232,6 +232,7 @@ test('old non-bar rows do not affect event totals', () => {
 });
 
 test('bar roles are valid user roles', () => {
+  assert.doesNotThrow(() => new User({ username: 'Captain', email: 'captain@example.com', password: 'secret123', role: 'captain' }).validateSync());
   const rolePath = User.schema.path('role');
   assert.ok(rolePath.enumValues.includes('bar admin'));
   assert.ok(rolePath.enumValues.includes('bar captain'));

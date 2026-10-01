@@ -22,6 +22,7 @@ const userSchema = new mongoose.Schema(
         'super admin',
         'super Admin',
         'bar admin',
+        'captain',
         'bar captain',
         'bartender',
         'packer',

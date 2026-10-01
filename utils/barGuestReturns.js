@@ -38,17 +38,21 @@ export const applyGuestReceivedRows = (items, rows, { at = new Date(), by = '' }
   for (const item of required) {
     const row = byId.get(String(item?._id || item?.id || ''));
     const deliveredQty = Number(row?.deliveredQty);
+    const sentQty = row?.sentQty === undefined
+      ? (item?.sentQtyPending === true ? deliveredQty : Number(item?.sentQty || 0))
+      : Number(row.sentQty);
+    if (!Number.isFinite(sentQty) || sentQty < 0) {
+      return { valid: false, message: `Enter a valid sent quantity for ${item?.name || 'item'}`, count: 0 };
+    }
     if (!row || !Number.isFinite(deliveredQty) || deliveredQty < 0) {
       return { valid: false, message: `Enter a valid received quantity for ${item?.name || 'item'}`, count: 0 };
     }
-    updates.push({ item, deliveredQty });
+    updates.push({ item, sentQty, deliveredQty });
   }
-  updates.forEach(({ item, deliveredQty }) => {
-    if (item.sentQtyPending === true) {
-      item.sentQty = deliveredQty;
-      item.sentQtyText = String(deliveredQty);
-      item.sentQtyPending = false;
-    }
+  updates.forEach(({ item, sentQty, deliveredQty }) => {
+    item.sentQty = sentQty;
+    item.sentQtyText = String(sentQty);
+    item.sentQtyPending = false;
     item.deliveredQty = deliveredQty;
     item.updatedBy = String(by || '');
     item.updatedAt = at;
@@ -77,22 +81,28 @@ export const prepareGuestReturnRows = (items, rows) => {
       ? (Number.isFinite(savedDeliveredQty) && savedDeliveredQty >= 0 ? savedDeliveredQty : null)
       : Number(deliveredValue);
     const returnedQty = Number(row?.returnedQty);
+    const sentValue = row?.sentQty;
+    const sentQty = sentValue === undefined
+      ? (item?.sentQtyPending === true
+        ? Math.max(Number(item.sentQty || 0), deliveredQty ?? 0, returnedQty)
+        : Number(item.sentQty || 0))
+      : Number(sentValue);
+    if (!Number.isFinite(sentQty) || sentQty < 0) {
+      return { valid: false, message: `Enter a valid sent quantity for ${item?.name || 'item'}`, updates: [], variances: [], unverifiedReceived: [] };
+    }
     if (deliveredQty !== null && (!Number.isFinite(deliveredQty) || deliveredQty < 0)) {
       return { valid: false, message: `Enter a valid received quantity for ${item?.name || 'item'} or leave it blank`, updates: [], variances: [], unverifiedReceived: [] };
     }
     if (!Number.isFinite(returnedQty) || returnedQty < 0) {
       return { valid: false, message: `Enter a valid returned quantity for ${item?.name || 'item'}`, updates: [], variances: [], unverifiedReceived: [] };
     }
-    const pendingSentQty = item.sentQtyPending === true
-      ? Math.max(Number(item.sentQty || 0), deliveredQty ?? 0, returnedQty)
-      : Number(item.sentQty || 0);
     const difference = deliveredQty === null ? 0 : Math.round((returnedQty - deliveredQty) * 10000) / 10000;
     if (deliveredQty === null) {
       unverifiedReceived.push({ itemId, name: String(item?.name || 'Item'), returnedQty });
     } else if (difference > 0.0001) {
       variances.push({ itemId, name: String(item?.name || 'Item'), deliveredQty, returnedQty, difference });
     }
-    updates.push({ item, deliveredQty, returnedQty, pendingSentQty });
+    updates.push({ item, sentQty, deliveredQty, returnedQty });
   }
   return { valid: true, message: '', updates, variances, unverifiedReceived };
 };
@@ -100,8 +110,10 @@ export const prepareGuestReturnRows = (items, rows) => {
 export const applyGuestReturnRows = (items, rows, { at = new Date(), by = '' } = {}) => {
   const prepared = prepareGuestReturnRows(items, rows);
   if (!prepared.valid) return prepared;
-  prepared.updates.forEach(({ item, deliveredQty, returnedQty, pendingSentQty }) => {
-    if (item.sentQtyPending === true) item.sentQty = pendingSentQty;
+  prepared.updates.forEach(({ item, sentQty, deliveredQty, returnedQty }) => {
+    item.sentQty = sentQty;
+    item.sentQtyText = String(sentQty);
+    item.sentQtyPending = false;
     if (deliveredQty !== null) item.deliveredQty = deliveredQty;
     item.returnedFullQty = 0;
     item.returnedOpenQty = returnedQty;

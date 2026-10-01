@@ -34,6 +34,28 @@ test('received save is atomic when a row is missing or duplicated', () => {
   assert.equal(items[1].deliveredQty, null);
 });
 
+test('captain can correct the sent quantity before submitting returns', () => {
+  const item = {
+    _id: 'champagne', name: 'Champagne', scope: 'alcohol', included: true,
+    sentQty: 12, sentQtyText: '12', sentQtyPending: false, deliveredQty: null,
+  };
+  const received = applyGuestReceivedRows([item], [
+    { itemId: 'champagne', sentQty: 10, deliveredQty: 9 },
+  ], { by: 'Captain Christian' });
+  assert.equal(received.valid, true);
+  assert.equal(item.sentQty, 10);
+  assert.equal(item.sentQtyText, '10');
+  assert.equal(item.deliveredQty, 9);
+
+  const submitted = applyGuestReturnRows([item], [
+    { itemId: 'champagne', sentQty: 11, deliveredQty: 9, returnedQty: 3 },
+  ], { by: 'Captain Christian' });
+  assert.equal(submitted.valid, true);
+  assert.equal(item.sentQty, 11);
+  assert.equal(item.sentQtyPending, false);
+  assert.equal(item.returnedOpenQty, 3);
+});
+
 test('captain return submission preserves and flags a count above received instead of rejecting it', () => {
   const items = [{
     _id: 'beer',

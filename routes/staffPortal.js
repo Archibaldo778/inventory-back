@@ -18,11 +18,12 @@ router.get('/events', requireEventStaff, async (req, res) => {
     const today = dateFormat.format(new Date());
     const from = String(req.query.from || today);
     const to = String(req.query.to || dateFormat.format(new Date(Date.now() + 90 * 86400000)));
+    const allDates = req.query.view === 'all';
     if (![from, to].every((date) => /^\d{4}-\d{2}-\d{2}$/.test(date) && Number.isFinite(Date.parse(date)) && new Date(date).toISOString().slice(0, 10) === date)
       || from > to || Date.parse(to) - Date.parse(from) > 366 * 86400000) {
       return res.status(400).json({ message: 'Choose a date range of up to one year' });
     }
-    const entries = await NowstaScheduleEntry.find({ ...staffScheduleQuery(req.auth), date: { $gte: from, $lte: to } })
+    const entries = await NowstaScheduleEntry.find({ ...staffScheduleQuery(req.auth), ...(!allDates ? { date: { $gte: from, $lte: to } } : {}) })
       .select(eventFields).sort({ date: 1, startsAt: 1 }).lean();
     return res.json({ items: entries.map((entry) => serializeStaffEvent(entry, req.auth)).filter(Boolean), from, to });
   } catch (error) { return sendApiError(res, error, { fallbackMessage: 'Could not load your events' }); }

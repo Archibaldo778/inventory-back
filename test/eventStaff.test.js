@@ -74,6 +74,20 @@ test('event list and direct links reject unassigned, removed and archived events
   await handler(router, '/events')({ auth: user, query: { from: '2026-10-01', to: '2026-10-31' } }, res);
   assert.deepEqual(res.body.items.map((event) => event.id), ['123']);
   assert.ok(query['shifts.workers'].$elemMatch);
+  assert.deepEqual(query.date, { $gte: '2026-10-01', $lte: '2026-10-31' });
+  t.mock.method(NowstaScheduleEntry, 'find', (filter) => {
+    query = filter;
+    return { select: () => ({ sort: () => ({ lean: async () => [
+      { ...entry, nowstaEventId: 'past', date: '2025-01-01' }, entry,
+      { ...entry, nowstaEventId: 'other', shifts: [] }, { ...entry, archived: true },
+    ] }) }) };
+  });
+  const allDates = response();
+  await handler(router, '/events')({ auth: user, query: { view: 'all' } }, allDates);
+  assert.equal(query.date, undefined);
+  assert.ok(query['shifts.workers'].$elemMatch);
+  assert.equal(query.archived.$ne, true);
+  assert.deepEqual(allDates.body.items.map((event) => event.id), ['past', '123']);
   for (selected of [null, { ...entry, shifts: [] }, { ...entry, archived: true }]) {
     const denied = response();
     await handler(router, '/events/:id')({ auth: user, params: { id: '123' } }, denied);

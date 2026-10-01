@@ -51,6 +51,22 @@ const metadataValue = (text, patterns) => {
 
 const normalizeDate = (value) => {
   const source = clean(value);
+  // Shared POs can put several complete dates in one Event Date cell.
+  // Anchor the document to the first service day, rather than losing its date.
+  const namedDate = /\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),?\s+(20\d{2})\b/gi;
+  const dates = [...source.matchAll(namedDate)];
+  if (dates.length > 1) {
+    const remainder = source.replace(namedDate, '')
+      .replace(/\b(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|and|to|through)\b/gi, '')
+      .replace(/[\s,&–—-]+/g, '');
+    if (remainder) return '';
+    const parsedDates = dates.map((match) => {
+      const parsed = new Date(`${match[1]} ${match[2]}, ${match[3]} 12:00:00 UTC`);
+      if (!Number.isFinite(parsed.getTime()) || parsed.getUTCDate() !== Number(match[2])) return '';
+      return parsed.toISOString().slice(0, 10);
+    });
+    return parsedDates.every(Boolean) ? parsedDates.sort()[0] : '';
+  }
   const iso = source.match(/\b(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})\b/);
   if (iso) return `${iso[1]}-${iso[2].padStart(2, '0')}-${iso[3].padStart(2, '0')}`;
   const us = source.match(/\b(\d{1,2})[-/.](\d{1,2})[-/.](20\d{2}|\d{2})\b/);

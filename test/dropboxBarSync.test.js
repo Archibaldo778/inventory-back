@@ -38,6 +38,9 @@ test('a single Day 1 PO is assigned to the final day of a two-day Dropbox series
   assert.equal(result.sourceEventId, 'day-one');
   assert.deepEqual(result.documents.map((document) => document.sourceId).sort(), ['day-two-km', 'shared-po']);
   assert.equal(resolveDropboxSharedSeriesDocuments(events, 'day-one'), null);
+  const carriedStock = [{ name: 'La Caravelle', sentQty: 11, deliveredQty: 11, carryover: { sourceEventId: 'day-one' } }];
+  assert.equal(resolveDropboxSharedSeriesDocuments(events, 'day-two', carriedStock), null);
+  assert.equal(carriedStock[0].deliveredQty, 11);
 });
 
 test('a shared Dropbox PO follows the stable Caterease event number when day titles differ', () => {

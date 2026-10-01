@@ -15,7 +15,10 @@ export const selectDropboxBarSourceDocuments = (documents = []) => selectLatestD
     }),
 );
 
-export const resolveDropboxSharedSeriesDocuments = (events = [], currentEventId = '') => {
+export const resolveDropboxSharedSeriesDocuments = (events = [], currentEventId = '', currentItems = []) => {
+  // Daily carryover already represents the previous day's remaining stock.
+  // A late shared PO must not add the original shipment to it a second time.
+  if (currentItems.some((item) => item?.carryover?.sourceEventId)) return null;
   const rows = (Array.isArray(events) ? events : []).map((event) => ({
     ...event,
     _id: String(event?._id || ''),

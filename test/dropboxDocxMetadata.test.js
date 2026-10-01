@@ -1,11 +1,45 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import JSZip from 'jszip';
+import { findDropboxEventMatch } from '../utils/dropboxDocuments.js';
 import {
   parseDropboxKitchenBarItems,
   parseDropboxDocxMetadataText,
   readDropboxDocxMetadata,
 } from '../utils/dropboxDocxMetadata.js';
+
+test('shared Prada PO with two dates retains Panna and Pellegrino and matches the first service day', async () => {
+  const zip = new JSZip();
+  const paragraph = (text) => `<w:p><w:r><w:t>${text}</w:t></w:r></w:p>`;
+  const cell = (text) => `<w:tc>${paragraph(text)}</w:tc>`;
+  const row = (cells) => `<w:tr>${cells.map(cell).join('')}</w:tr>`;
+  zip.file('word/document.xml', `<w:document xmlns:w="urn:test"><w:body>
+    <w:tbl>${row(['Event: Prada Saks 5th Ave. Beverage Service - Day 1 and Day 2', 'Event Date: Thursday, October 1, 2026 Friday, October 2, 2026'])}
+    ${row(['Event Number: E22975', 'Date PO Modified: 9/29/2026 (10:22 am)'])}</w:tbl>
+    <w:tbl>${row(['Name', 'Qty', 'Notes/Comments', 'Delivered', 'Returned'])}
+    ${row(['WATER'])}${row(['Panna', '12'])}${row(['Pellegrino', '16'])}</w:tbl>
+    </w:body></w:document>`);
+  const result = await readDropboxDocxMetadata(await zip.generateAsync({ type: 'nodebuffer' }));
+  assert.equal(result.eventDate, '2026-10-01');
+  assert.equal(result.documentType, 'po');
+  assert.deepEqual(result.barItems.map((item) => [item.name, item.quantity, item.returnRequired]), [['Panna', 12, true], ['Pellegrino', 16, true]]);
+  const matched = findDropboxEventMatch({ ...result, inferredDate: result.eventDate }, [
+    { _id: 'day1', externalId: 'E22975 - S63087', date: '2026-10-01' },
+    { _id: 'day2', externalId: 'E22976 - S63089', date: '2026-10-02' },
+  ]);
+  assert.equal(matched.status, 'matched');
+  assert.equal(matched.event._id, 'day1');
+});
+
+test('multi-date menu metadata handles month/year boundaries and refuses invalid or uncertain dates', () => {
+  const date = (value) => parseDropboxDocxMetadataText(`Event Date: ${value}`).eventDate;
+  assert.equal(date('Thursday, December 31, 2026 and Friday, January 1, 2027'), '2026-12-31');
+  assert.equal(date('October 2, 2026 – October 1, 2026'), '2026-10-01');
+  assert.equal(date('February 30, 2026 March 1, 2026'), '');
+  assert.equal(date('October 1, 2026 or October 2, 2026'), '');
+  assert.equal(date('Thursday, October 1, 2026'), '2026-10-01');
+  assert.equal(date('10/01/2026'), '2026-10-01');
+});
 
 test('Kitchen Menu treats mixed-case cocktail recipes as one cocktail, not alcohol inventory', () => {
   const result = parseDropboxKitchenBarItems([

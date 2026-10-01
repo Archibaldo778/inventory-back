@@ -57,7 +57,7 @@ import {
   transportationFileName,
 } from '../utils/dropboxTransportation.js';
 
-const DROPBOX_CONTENT_PARSER_VERSION = 5;
+const DROPBOX_CONTENT_PARSER_VERSION = 6;
 
 const router = Router();
 const syncRateLimit = createMemoryRateLimiter({ windowMs: 10 * 60 * 1000, max: 8, message: 'Too many Dropbox sync requests' });
@@ -296,7 +296,7 @@ const dashboardEventGuestCount = (event) => {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 };
 
-const loadDropboxBarSeriesContext = async (event) => {
+const loadDropboxBarSeriesContext = async (event, currentItems = []) => {
   const sourceDate = new Date(`${String(event?.date || '')}T12:00:00Z`);
   if (!Number.isFinite(sourceDate.getTime())) return null;
   const from = new Date(sourceDate.getTime() - (14 * 86400000)).toISOString().slice(0, 10);
@@ -304,7 +304,7 @@ const loadDropboxBarSeriesContext = async (event) => {
   const candidates = await Event.find({ date: { $gte: from, $lte: to } })
     .select('_id externalId title date client documents')
     .lean();
-  return resolveDropboxSharedSeriesDocuments(candidates, event?._id);
+  return resolveDropboxSharedSeriesDocuments(candidates, event?._id, currentItems);
 };
 
 const loadChargeLinkedBarSeriesContext = async (barEvent) => {
@@ -317,7 +317,8 @@ const loadChargeLinkedBarSeriesContext = async (barEvent) => {
 };
 
 const syncDropboxBarItems = async (event, { force = false } = {}) => {
-  const seriesContext = await loadDropboxBarSeriesContext(event);
+  let barEvent = await BarEvent.findOne({ linkedEventId: event._id });
+  const seriesContext = await loadDropboxBarSeriesContext(event, barEvent?.items || []);
   const sourceDocuments = seriesContext?.documents || selectDropboxBarSourceDocuments(event?.documents);
   let rawItems = sourceDocuments.flatMap((document) => (
     Array.isArray(document?.barItems) ? document.barItems : []
@@ -327,7 +328,6 @@ const syncDropboxBarItems = async (event, { force = false } = {}) => {
     .map((document) => String(document?.type || ''))
     .filter(Boolean))];
   const guestCount = dashboardEventGuestCount(event);
-  let barEvent = await BarEvent.findOne({ linkedEventId: event._id });
   let chargeSeriesContext = null;
   if (barEvent && rawItems.length === 0 && barEvent.clientChargeDetails?.seriesSourceBarEventId) {
     chargeSeriesContext = await loadChargeLinkedBarSeriesContext(barEvent);

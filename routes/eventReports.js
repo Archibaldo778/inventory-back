@@ -12,7 +12,10 @@ import { EVENT_REPORT_CONTEXT_SELECT, resolveReportSalesRep, resolveEventSalesRe
 import { loadReportTeamDirectory, resolveTeamRouting } from '../utils/reportTeams.js';
 import User from '../models/Users.js';
 import ReportTeam from '../models/ReportTeam.js';
-import { analyzeEventReports } from '../utils/eventReportAi.js';
+import { analyzeEventReports, eventReportAnalysisIsStale } from '../utils/eventReportAi.js';
+import EventReportFile from '../models/EventReportFile.js';
+import eventReportFilesRouter from './eventReportFiles.js';
+import { publicReportFile } from '../utils/eventReportFiles.js';
 import {
   decryptDropboxSecret,
   getDropboxCurrentAccount,
@@ -26,6 +29,7 @@ import {
 } from '../utils/historicalReports.js';
 
 const router = Router();
+router.use(eventReportFilesRouter);
 const clean = (value, max = 500) => String(value ?? '').trim().slice(0, max);
 const DEFAULT_HISTORICAL_REPORTS_PATH = '/Operations christopher@ocnyc.com/Reports';
 let historicalReportScanPromise = null;
@@ -186,20 +190,20 @@ router.get('/', async (req, res) => {
     if (eventId && !mongoose.Types.ObjectId.isValid(eventId)) return res.status(400).json({ message: 'Invalid event' });
     if (eventId) filter.eventId = eventId;
     if (req.query?.status) filter.status = clean(req.query.status, 40);
-    const [reports, event] = await Promise.all([
+    const [reports, event, files] = await Promise.all([
       EventReport.find(filter).sort({ eventDate: -1, reporterName: 1 }).limit(1000).lean(),
       eventId ? Event.findById(eventId).select('meta.eventReportTest meta.eventReportAnalysis').lean() : null,
+      eventId ? EventReportFile.find({ eventId }).sort({ createdAt: 1 }).lean() : [],
     ]);
     const analysis = event?.meta?.eventReportAnalysis || null;
-    const newestSubmission = reports.reduce((latest, report) => Math.max(latest, new Date(report.submittedAt || 0).getTime() || 0), 0);
-    const analysisTime = new Date(analysis?.generatedAt || 0).getTime() || 0;
     return res.json({
       items: reports,
+      files: files.map(publicReportFile),
       ai: eventId ? {
-        enabledForEvent: event?.meta?.eventReportTest === true,
+        enabledForEvent: Boolean(event),
         configured: Boolean(clean(process.env.OPENAI_API_KEY, 2000)),
         analysis,
-        stale: Boolean(analysis && newestSubmission > analysisTime),
+        stale: eventReportAnalysisIsStale(analysis, reports, files),
       } : undefined,
     });
   } catch (error) {
@@ -289,17 +293,20 @@ router.post('/:eventId/analysis', async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(eventId)) return res.status(400).json({ message: 'Invalid event' });
     const event = await Event.findById(eventId).select('title date client meta.eventReportTest').lean();
     if (!event) return res.status(404).json({ message: 'Event was not found' });
-    if (event?.meta?.eventReportTest !== true) return res.status(403).json({ message: 'AI analysis is currently limited to test events' });
-    const reports = await EventReport.find({ eventId, status: 'submitted' }).sort({ submittedAt: 1 }).limit(50).lean();
-    if (!reports.length) return res.status(409).json({ message: 'Submit at least one report before generating an AI analysis' });
-    const result = await analyzeEventReports({ event, reports });
+    const [reports, files] = await Promise.all([
+      EventReport.find({ eventId, status: 'submitted' }).sort({ submittedAt: 1 }).limit(51).lean(),
+      EventReportFile.find({ eventId }).select('+data').sort({ createdAt: 1 }).limit(21),
+    ]);
+    if (!reports.length && !files.length) return res.status(409).json({ message: 'Submit a report or upload a PDF before generating an AI analysis' });
+    const result = await analyzeEventReports({ event, reports, files });
     const saved = {
       ...result.analysis,
       model: result.model,
       generatedAt: new Date(),
       generatedBy: clean(req.auth?.email || req.auth?.username || req.auth?.userId, 200),
-      reportCount: reports.length,
+      reportCount: reports.length + files.length,
       reportIds: reports.map((report) => String(report._id)),
+      fileIds: files.map((file) => String(file._id)),
     };
     await Event.updateOne({ _id: eventId }, { $set: { 'meta.eventReportAnalysis': saved } });
     return res.json({ analysis: saved, stale: false });

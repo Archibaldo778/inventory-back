@@ -80,9 +80,21 @@ export const normalizeEventReportAnalysis = (value = {}) => ({
   recommendations: stringList(value?.recommendations),
 });
 
-export const analyzeEventReports = async ({ event, reports, fetchImpl = globalThis.fetch, apiKey = process.env.OPENAI_API_KEY } = {}) => {
+export const eventReportAnalysisIsStale = (analysis, reports = [], files = []) => {
+  if (!analysis) return false;
+  const ids = (rows) => rows.map((row) => String(row._id || row)).sort().join(',');
+  return ids(analysis.reportIds || []) !== ids(reports.filter((report) => report.status === 'submitted'))
+    || ids(analysis.fileIds || []) !== ids(files)
+    || reports.some((report) => report.status === 'submitted' && new Date(report.submittedAt) > new Date(analysis.generatedAt));
+};
+
+export const analyzeEventReports = async ({ event, reports = [], files = [], fetchImpl = globalThis.fetch, apiKey = process.env.OPENAI_API_KEY } = {}) => {
   const key = clean(apiKey, 2000);
   if (!key) throw Object.assign(new Error('OpenAI API key is not configured'), { statusCode: 503 });
+  if (reports.length > 50 || files.length > 20 || files.reduce((sum, file) => sum + file.data.length, 0) > 20 * 1024 * 1024
+    || files.reduce((sum, file) => sum + (file.pageCount || 0), 0) > 200) {
+    throw Object.assign(new Error('Analyze up to 50 submitted reports and 20 PDF files (20 MB / 200 pages total). Remove extra files and try again.'), { statusCode: 413 });
+  }
   const model = clean(process.env.OPENAI_EVENT_REPORT_MODEL, 100) || 'gpt-5.6-luna';
   const input = eventReportAnalysisInput({ event, reports });
   const response = await fetchWithTimeout('https://api.openai.com/v1/responses', {
@@ -96,8 +108,13 @@ export const analyzeEventReports = async ({ event, reports, fetchImpl = globalTh
         'Write concise, natural, professional English for an event operations manager.',
         'Do not invent facts. Distinguish a reported concern from a confirmed fact.',
         'Use reporter names or positions as evidence when useful. Avoid empty filler.',
+        'Attached PDFs are event reports, including scanned pages. Read them alongside the form responses. Cite PDF filenames and page numbers in evidence. If pages are unreadable, state that limitation rather than inventing their contents.',
       ].join(' '),
-      input: JSON.stringify(input),
+      input: files.length ? [{ role: 'user', content: [
+        { type: 'input_text', text: JSON.stringify(input) },
+        ...files.map((file) => ({ type: 'input_file', filename: file.fileName, file_data: `data:application/pdf;base64,${Buffer.from(file.data).toString('base64')}` })),
+      ] }] : JSON.stringify(input),
+      store: false,
       text: { format: { type: 'json_schema', name: 'event_report_analysis', strict: true, schema: ANALYSIS_SCHEMA } },
       max_output_tokens: 1800,
     }),

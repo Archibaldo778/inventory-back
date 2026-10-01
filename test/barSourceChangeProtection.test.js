@@ -36,3 +36,16 @@ test('one confirmed return locks items even before report submission and duplica
   assert.equal(barEvent.audit.length, 1);
   assert.equal(barEvent.revision, 3);
 });
+
+test('the post-return source warning is stored on the bar event and not repeated', async () => {
+  const { default: BarEvent } = await import('../models/BarEvent.js');
+  const event = new BarEvent({ name: 'Locked event', status: 'submitted', items: [{ name: 'Wine', returnConfirmed: true }] });
+  const first = recordBarSourceChangeAfterReturns(event, { source: 'Dropbox automatic sync', checksum: 'abc' });
+  assert.deepEqual(first, { locked: true, changed: true });
+  assert.equal(event.toObject().sourceChangedAfterReturns.checksum, 'abc');
+  const reloaded = new BarEvent(event.toObject());
+  assert.deepEqual(
+    recordBarSourceChangeAfterReturns(reloaded, { source: 'Dropbox automatic sync', checksum: 'abc' }),
+    { locked: true, changed: false },
+  );
+});

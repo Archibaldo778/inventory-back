@@ -7,6 +7,7 @@ import BarTask from '../models/BarTask.js';
 import BeverageItem from '../models/BeverageItem.js';
 import CocktailRecipe from '../models/CocktailRecipe.js';
 import Event from '../models/Event.js';
+import EventReport from '../models/EventReport.js';
 import Staff from '../models/Staff.js';
 import User from '../models/Users.js';
 import DocumentImportRun from '../models/DocumentImportRun.js';
@@ -26,6 +27,7 @@ import {
   prepareBarChargeImport,
 } from '../utils/barChargeImport.js';
 import { sendApiError } from '../utils/apiErrors.js';
+import { issueEventGuestAccess } from '../utils/eventGuestAccess.js';
 import {
   INVALID_PACKOUT_UPLOAD_RESPONSE,
   isAllowedPackoutDocumentUpload,
@@ -1229,6 +1231,53 @@ router.post('/events/:id/share-link', requireBarOperator, async (req, res) => {
       context: 'Bar event share link failed',
       fallbackMessage: 'Could not create the bartender link',
     });
+  }
+});
+
+router.post('/events/:id/captain-report-link', requireBarOperator, async (req, res) => {
+  try {
+    const barEvent = await loadEvent(req, res);
+    if (!barEvent) return undefined;
+    if (!canOperateEvent(barEvent, req.auth)) {
+      return res.status(403).json({ message: 'You can only open a report for an event assigned to your account' });
+    }
+    if (!isObjectId(barEvent.linkedEventId)) {
+      return res.status(409).json({ message: 'This bar report is not linked to a Dashboard event' });
+    }
+    const event = await Event.findById(barEvent.linkedEventId).select('_id title date managerId meta catereaseOperations').lean();
+    if (!event) return res.status(404).json({ message: 'Dashboard event was not found' });
+    const subjectId = `account:${String(req.auth.userId)}`;
+    const reporterName = cleanString(req.auth.username || req.auth.email, 200);
+    const reporterEmail = cleanString(req.auth.email, 320).toLowerCase();
+    const report = await EventReport.findOneAndUpdate(
+      { eventId: event._id, slackUserId: subjectId },
+      { $setOnInsert: {
+        eventId: event._id,
+        eventTitle: cleanString(event.title || barEvent.name, 300),
+        eventDate: cleanString(event.date || barEvent.eventDate, 20),
+        reportType: 'captain',
+        slackUserId: subjectId,
+        reporterName,
+        reporterEmail,
+        position: 'Captain',
+        salesRep: cleanString(barEvent.salesRep || event.managerId, 200),
+        status: 'pending',
+      } },
+      { upsert: true, new: true, setDefaultsOnInsert: true },
+    );
+    const accessToken = issueEventGuestAccess({
+      eventIds: [String(event._id)], capability: 'event:report', subjectId,
+      expiresAt: new Date(Date.now() + (120 * 24 * 60 * 60 * 1000)),
+      context: 'captain-portal',
+    });
+    addAudit(barEvent, req.auth, 'captain_report_opened', { reportId: String(report._id) });
+    await barEvent.save();
+    return res.json({
+      report: { id: String(report._id), status: report.status, submittedAt: report.submittedAt || null },
+      path: `/event-report/${event._id}?access=${encodeURIComponent(accessToken)}`,
+    });
+  } catch (error) {
+    return sendApiError(res, error, { context: 'Captain portal report link failed', fallbackMessage: 'Could not open the captain report' });
   }
 });
 

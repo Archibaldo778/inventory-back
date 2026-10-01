@@ -476,7 +476,7 @@ import operationsRoutes from './routes/operations.js';
 import transportationRoutes from './routes/transportation.js';
 import slackIntegrationRoutes from './routes/slackIntegration.js';
 import { runSlackEventChannelSync, slackEventChannelsEnabled } from './utils/slackEventChannels.js';
-import { runCaptainReportEmailReminders } from './utils/captainReportReminders.js';
+import { CAPTAIN_REPORT_EMAIL_REMINDERS_ENABLED } from './utils/captainReportReminders.js';
 import { getCatereaseConfig } from './utils/catereaseApi.js';
 
 app.use('/api/auth', authRoutes);
@@ -538,6 +538,7 @@ app.get('/', (req, res) => {
   res.status(health.statusCode).json({
     ok: health.connected,
     database: health.database,
+    captainReportEmailRemindersEnabled: CAPTAIN_REPORT_EMAIL_REMINDERS_ENABLED,
   });
 });
 
@@ -741,12 +742,7 @@ export const startServer = async () => {
     console.log(`Slack event channel sync enabled every ${intervalMinutes} minutes (${slackEventChannelsEnabled() ? 'all due events' : 'linked test channels only'})`);
   }
 
-  const captainReportEmailTimer = setInterval(() => {
-    runCaptainReportEmailReminders().then((summary) => {
-      if (summary.sent || summary.failed) console.log('Captain report email reminders processed', summary);
-    }).catch((error) => console.error('Captain report email reminders failed:', error?.message || error));
-  }, 60_000);
-  captainReportEmailTimer.unref?.();
+  console.log('Captain report email reminders are paused');
 
   let shuttingDown = false;
   const shutdown = (signal) => {
@@ -763,7 +759,6 @@ export const startServer = async () => {
     if (catereaseOperationalSyncTimer) clearInterval(catereaseOperationalSyncTimer);
     if (slackStartupTimer) clearTimeout(slackStartupTimer);
     if (slackSyncTimer) clearInterval(slackSyncTimer);
-    clearInterval(captainReportEmailTimer);
 
     const forceExit = setTimeout(() => {
       console.error('Forced shutdown after timeout');

@@ -47,7 +47,7 @@ test('event duties use the confirmed booking position, not the account role or a
 test('captains booked as bartenders do not create reports or receive any of the three reminder stages', async (t) => {
   t.mock.method(EventReport, 'findOne', () => assert.fail('must not create or reopen a report'));
   for (const hours of [24, 36, 48]) {
-    assert.equal(await deliverCaptainReportReminder({ event, user, schedule: schedule('Bartender'), hours, fetchImpl: () => assert.fail('must not send email') }), 'skipped');
+    assert.equal(await deliverCaptainReportReminder({ event, user, schedule: schedule('Bartender'), hours, fetchImpl: () => assert.fail('must not send email'), enabled: true }), 'skipped');
   }
   await assert.rejects(openCaptainReport({ event, user, schedule: schedule('Bartender') }), { statusCode: 403 });
 });

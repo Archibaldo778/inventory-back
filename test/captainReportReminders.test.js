@@ -81,7 +81,7 @@ const setup = (t) => {
     state.requests.push({ headers: options.headers, body: JSON.parse(options.body) });
     return { ok: true, json: async () => ({ id: `email-${state.requests.length}` }) };
   };
-  state.run = (hours) => { t.mock.timers.setTime(at(hours).getTime()); return runCaptainReportEmailReminders({ now: at(hours), fetchImpl: state.fetch }); };
+  state.run = (hours) => { t.mock.timers.setTime(at(hours).getTime()); return runCaptainReportEmailReminders({ now: at(hours), fetchImpl: state.fetch, enabled: true }); };
   return state;
 };
 
@@ -162,6 +162,7 @@ test('overlapping workers claim a delivery only once; uncertain deliveries canno
   const state = setup(t);
   const report = await openCaptainReport({ event, user, schedule });
   const args = { event, schedule, user, report, hours: 48, now: at(48), fetchImpl: state.fetch };
+  args.enabled = true;
   const results = await Promise.all([deliverCaptainReportReminder(args), deliverCaptainReportReminder(args)]);
   assert.deepEqual(results.sort(), ['sent', 'skipped']);
   assert.equal(state.requests.length, 1);
@@ -199,7 +200,7 @@ test('email reminders start with October 1 events, excluding older overnight eve
   state.schedules = [schedule];
   assert.equal((await state.run(36)).sent, 0);
   assert.equal(state.report, null);
-  const args = { event, schedule, user, report: { _id: reportId }, hours: 48, now: at(48), fetchImpl: state.fetch };
+  const args = { event, schedule, user, report: { _id: reportId }, hours: 48, now: at(48), fetchImpl: state.fetch, enabled: true };
   state.deliveries.set(`captain-report:${event._id}:${user._id}:48`, { status: 'failed', firstAttemptAt: at(48) });
   assert.equal(await deliverCaptainReportReminder({ ...args, event: oldEvent }), 'skipped');
   assert.equal(await deliverCaptainReportReminder({ ...args, schedule: oldSchedule }), 'skipped');
@@ -220,7 +221,7 @@ test('exempt event names never create reports or send email, including queued re
     state.events = [event];
     state.schedules = [{ ...schedule, title }];
     assert.equal((await state.run(36)).sent, 0);
-    assert.equal(await deliverCaptainReportReminder({ event: { ...event, title }, schedule, user, report: { _id: reportId }, hours: 48, now: at(48), fetchImpl: state.fetch }), 'skipped');
+    assert.equal(await deliverCaptainReportReminder({ event: { ...event, title }, schedule, user, report: { _id: reportId }, hours: 48, now: at(48), fetchImpl: state.fetch, enabled: true }), 'skipped');
   }
   assert.equal(state.report, null);
   assert.equal(state.deliveries.size, 0);
@@ -238,4 +239,19 @@ test('captain emails work without Slack; all Slack report reminders remain disab
   t.mock.method(Event, 'find', () => assert.fail('Slack reminders must not load test events'));
   t.mock.method(globalThis, 'fetch', () => assert.fail('Slack reminders must not send messages'));
   assert.deepEqual(await runSlackEventReportReminders(), { configured: false, disabled: true, sent: 0, failed: 0 });
+});
+
+test('incident hold blocks scheduled runs and queued retries before any database access or email delivery', async (t) => {
+  env(t, 'RESEND_API_KEY', 'configured-key');
+  env(t, 'CAPTAIN_REPORT_EMAIL_REMINDERS_ENABLED', 'true');
+  for (const [model, method] of [[NowstaScheduleEntry, 'find'], [Event, 'find'], [User, 'find'], [EventReport, 'findOne'], [EventReportReminder, 'findById'], [EventReportReminder, 'findOneAndUpdate']]) {
+    t.mock.method(model, method, () => assert.fail('paused reminders must not read or claim work'));
+  }
+  t.mock.method(globalThis, 'fetch', () => assert.fail('paused reminders must not send email'));
+  for (const hours of [24, 36, 48, 14 * 24]) {
+    const result = await runCaptainReportEmailReminders({ now: at(hours) });
+    assert.equal(result.disabled, true);
+    assert.equal(result.sent, 0);
+    assert.equal(await deliverCaptainReportReminder({ event, schedule, user, report: { _id: reportId }, hours, now: at(hours) }), 'skipped');
+  }
 });

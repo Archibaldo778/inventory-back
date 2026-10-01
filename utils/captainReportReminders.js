@@ -11,6 +11,9 @@ import { fetchWithTimeout } from './fetchWithTimeout.js';
 import { requiresEventReport } from './eventReportRequirement.js';
 
 const HOUR = 60 * 60 * 1000;
+// Incident hold: automatic delivery must remain off until explicitly re-enabled
+// after the historical-mail incident has been reviewed.
+export const CAPTAIN_REPORT_EMAIL_REMINDERS_ENABLED = false;
 // Fixed rollout date in New York. Never move this forward with the current day.
 export const CAPTAIN_REPORT_REMINDERS_START_DATE = '2026-10-01';
 const reminderEventEligible = (date) => /^\d{4}-\d{2}-\d{2}$/.test(String(date || ''))
@@ -49,7 +52,8 @@ export const captainReminderEmail = ({ event, user, report, endsAt, hours }) => 
   };
 };
 
-export const deliverCaptainReportReminder = async ({ event, schedule, user, report, hours, now, fetchImpl }) => {
+export const deliverCaptainReportReminder = async ({ event, schedule, user, report, hours, now, fetchImpl, enabled = CAPTAIN_REPORT_EMAIL_REMINDERS_ENABLED }) => {
+  if (!enabled) return 'skipped';
   if (!assignedReportCaptains(schedule, [user]).length) return 'skipped';
   if (!requiresEventReport(event, schedule)) return 'skipped';
   if (!reminderEventEligible(event.date) || !reminderEventEligible(schedule.date)) return 'skipped';
@@ -100,8 +104,9 @@ export const deliverCaptainReportReminder = async ({ event, schedule, user, repo
 };
 
 let running = false;
-export const runCaptainReportEmailReminders = async ({ now = new Date(), fetchImpl = globalThis.fetch } = {}) => {
+export const runCaptainReportEmailReminders = async ({ now = new Date(), fetchImpl = globalThis.fetch, enabled = CAPTAIN_REPORT_EMAIL_REMINDERS_ENABLED } = {}) => {
   const summary = { configured: Boolean(clean(process.env.RESEND_API_KEY)), sent: 0, failed: 0, skipped: 0 };
+  if (!enabled) return { ...summary, disabled: true };
   if (!summary.configured || running) return summary;
   running = true;
   try {
@@ -129,7 +134,7 @@ export const runCaptainReportEmailReminders = async ({ now = new Date(), fetchIm
         try {
           const report = await openCaptainReport({ event, user, schedule });
           if (report.status === 'submitted') { summary.skipped += 1; continue; }
-          summary[await deliverCaptainReportReminder({ event, schedule, user, report, hours, now, fetchImpl })] += 1;
+          summary[await deliverCaptainReportReminder({ event, schedule, user, report, hours, now, fetchImpl, enabled })] += 1;
         } catch (error) {
           summary.failed += 1;
           console.error('Captain report reminder failed:', clean(error.message).slice(0, 300));

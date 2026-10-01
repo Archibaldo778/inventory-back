@@ -2,6 +2,7 @@ export const EVENT_REPORT_CONTEXT_SELECT = 'managerId catereaseOperations meta';
 
 export const resolveEventSalesRep = (event, fallback = '') => {
   const candidates = [
+    event?.meta?.reportSalesRep,
     event?.managerName, event?.salesRepName, event?.sales_rep_name, event?.manager_name,
     event?.salesRepFullName, event?.sales_rep_full_name, event?.managerFullName, event?.manager_full_name,
     event?.salesRep, event?.sales_rep, event?.sales, event?.manager,

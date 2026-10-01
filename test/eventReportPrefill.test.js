@@ -7,6 +7,8 @@ import Event from '../models/Event.js';
 import BarEvent from '../models/BarEvent.js';
 import EventReport from '../models/EventReport.js';
 import EventReportSettings from '../models/EventReportSettings.js';
+import ReportTeam from '../models/ReportTeam.js';
+import User from '../models/Users.js';
 import { issueEventGuestAccess } from '../utils/eventGuestAccess.js';
 
 const eventId = '507f1f77bcf86cd799439011';
@@ -61,6 +63,8 @@ test('opening an existing empty report prefills the account rep without writing 
 
 test('submitting a previously empty report saves its rep and sends to that repâ€™s team', async (t) => {
   env(t, 'RESEND_API_KEY', 'test-key');
+  t.mock.method(ReportTeam, 'find', () => ({ sort: () => ({ lean: async () => [] }) }));
+  t.mock.method(User, 'find', () => ({ select: () => ({ lean: async () => [] }) }));
   const answers = Object.fromEntries([
     'staffEnough', 'staffingResponsive', 'uniformsReturned', 'staffAppearance', 'foodProvidedByOcc',
     'foodMetStandards', 'leadChefCooperative', 'barProductProvidedByOcc', 'barServiceMetStandards',
@@ -93,6 +97,8 @@ test('submitting a previously empty report saves its rep and sends to that repâ€
 
 test('explicit email retry fills a missing submitted rep before resolving team recipients', async (t) => {
   env(t, 'RESEND_API_KEY', 'test-key');
+  t.mock.method(ReportTeam, 'find', () => ({ sort: () => ({ lean: async () => [] }) }));
+  t.mock.method(User, 'find', () => ({ select: () => ({ lean: async () => [] }) }));
   mockEvent(t);
   t.mock.method(EventReportSettings, 'findOne', () => ({ lean: async () => null }));
   const report = { _id: reportId, eventId, status: 'submitted', salesRep: '', save: async () => {}, toObject() { return { ...this }; } };

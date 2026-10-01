@@ -1,4 +1,5 @@
 import { listSlackUsers } from './slackApi.js';
+import { loadReportTeamDirectory, resolveTeamRouting } from './reportTeams.js';
 
 const clean = (value, max = 5000) => String(value ?? '').trim().slice(0, max);
 const email = (value) => {
@@ -176,10 +177,20 @@ export const renderEventReportText = (report = {}) => {
   return `${emailReportTitle(report).toUpperCase()}\n${clean(report.eventTitle) || '—'} · ${formatEventDate(report.eventDate) || '—'}\n${clean(report.reporterName) || '—'} · ${clean(report.position) || '—'}\n\n${sections}`;
 };
 
-export const sendEventReportEmail = async ({ report, event, configuredRecipients = [], fetchImpl = fetch, loadSlackUsers = listSlackUsers }) => {
+export const sendEventReportEmail = async ({ report, event, configuredRecipients = [], fetchImpl = fetch, loadSlackUsers = listSlackUsers, loadTeams = loadReportTeamDirectory }) => {
   const isTest = event?.meta?.eventReportTest === true;
+  let teamRecipients = null;
+  if (!isTest && report?.reportType !== 'kitchen') {
+    try {
+      const routing = resolveTeamRouting({ event, salesRep: report?.salesRep, ...await loadTeams() });
+      if (routing.status === 'blocked') throw new Error(routing.issues.join('; '));
+      if (routing.status === 'ready') teamRecipients = [...CAPTAIN_REPORT_RECIPIENTS, ...routing.recipients];
+    } catch (error) {
+      return { status: 'failed', recipients: [], cc: [], error: clean(error?.message || 'Could not resolve the report team', 1000) };
+    }
+  }
   let slackUsers = [];
-  if (!isTest && report?.reportType !== 'kitchen' && salesTeamNames(report?.salesRep).length) {
+  if (!teamRecipients && !isTest && report?.reportType !== 'kitchen' && salesTeamNames(report?.salesRep).length) {
     try {
       slackUsers = await loadSlackUsers();
       captainReportRecipients(report?.salesRep, configuredRecipients, slackUsers);
@@ -189,7 +200,7 @@ export const sendEventReportEmail = async ({ report, event, configuredRecipients
   }
   const to = [...new Set((isTest
     ? ['ivan@ocnyc.com', 'iurie@ocnyc.com']
-    : (report?.reportType === 'kitchen' ? configuredRecipients : captainReportRecipients(report?.salesRep, configuredRecipients, slackUsers))
+    : (report?.reportType === 'kitchen' ? configuredRecipients : (teamRecipients || captainReportRecipients(report?.salesRep, configuredRecipients, slackUsers)))
   ).map(email).filter(Boolean))];
   if (!to.length) return { status: 'not_sent', recipients: [], cc: [], error: '' };
   const reporterEmail = email(report?.reporterEmail);

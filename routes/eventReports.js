@@ -8,7 +8,10 @@ import HistoricalEventReport from '../models/HistoricalEventReport.js';
 import { listSlackUsers } from '../utils/slackApi.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import { sendEventReportEmail } from '../utils/eventReportEmail.js';
-import { EVENT_REPORT_CONTEXT_SELECT, resolveReportSalesRep } from '../utils/eventReportSalesRep.js';
+import { EVENT_REPORT_CONTEXT_SELECT, resolveReportSalesRep, resolveEventSalesRep } from '../utils/eventReportSalesRep.js';
+import { loadReportTeamDirectory, resolveTeamRouting } from '../utils/reportTeams.js';
+import User from '../models/Users.js';
+import ReportTeam from '../models/ReportTeam.js';
 import { analyzeEventReports } from '../utils/eventReportAi.js';
 import {
   decryptDropboxSecret,
@@ -201,6 +204,56 @@ router.get('/', async (req, res) => {
     });
   } catch (error) {
     return sendApiError(res, error, { context: 'Event reports list failed', fallbackMessage: 'Could not load event reports' });
+  }
+});
+
+router.get('/routing', async (req, res) => {
+  try {
+    const day = (offset) => new Date(Date.now() + offset * 86400000).toISOString().slice(0, 10);
+    const from = String(req.query?.from || day(-30));
+    const to = String(req.query?.to || day(90));
+    if (![from, to].every((value) => /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(value)))
+      || from > to || Date.parse(to) - Date.parse(from) > 366 * 86400000) {
+      return res.status(400).json({ message: 'Choose a date range of up to one year' });
+    }
+    const [directory, rows] = await Promise.all([
+      loadReportTeamDirectory(),
+      Event.find({ date: { $gte: from, $lte: to }, status: { $not: /^(?:deleted|cancelled|canceled|lost)$/i }, 'meta.nowsta.excluded': { $ne: true } })
+        .select(`_id title date ${EVENT_REPORT_CONTEXT_SELECT}`).sort({ date: 1, title: 1 }).limit(1001).lean(),
+    ]);
+    const events = rows.slice(0, 1000).map((event) => ({
+      id: String(event._id), title: event.title, date: event.date,
+      salesRep: resolveEventSalesRep(event), assignedSalesUserId: String(event.meta?.reportSalesUserId || ''),
+      routing: event.meta?.eventReportTest === true
+        ? { status: 'test', issues: ['Test event: uses test recipients'], recipients: [] }
+        : resolveTeamRouting({ event, ...directory }),
+    }));
+    return res.json({ events, from, to, truncated: rows.length > 1000 });
+  } catch (error) {
+    return sendApiError(res, error, { fallbackMessage: 'Could not check report recipients' });
+  }
+});
+
+router.patch('/events/:eventId/sales', async (req, res) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(String(req.params.eventId || ''))) return res.status(400).json({ message: 'Invalid event' });
+    const salesUserId = String(req.body?.salesUserId || '');
+    let update;
+    if (salesUserId) {
+      if (!mongoose.Types.ObjectId.isValid(salesUserId)) return res.status(400).json({ message: 'Invalid Sales account' });
+      const [sales, team] = await Promise.all([
+        User.findById(salesUserId).select('_id username isActive').lean(), ReportTeam.findOne({ salesUserId }).lean(),
+      ]);
+      if (!sales || sales.isActive === false || !team) return res.status(400).json({ message: 'Choose an active Sales account with a team' });
+      update = { $set: { 'meta.reportSalesUserId': salesUserId, 'meta.reportSalesRep': sales.username } };
+    } else {
+      update = { $unset: { 'meta.reportSalesUserId': '', 'meta.reportSalesRep': '' } };
+    }
+    const event = await Event.findByIdAndUpdate(req.params.eventId, update, { new: true }).select('_id').lean();
+    if (!event) return res.status(404).json({ message: 'Event was not found' });
+    return res.json({ ok: true });
+  } catch (error) {
+    return sendApiError(res, error, { fallbackMessage: 'Could not assign event Sales' });
   }
 });
 

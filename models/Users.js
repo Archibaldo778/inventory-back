@@ -12,6 +12,9 @@ const userSchema = new mongoose.Schema(
     username: { type: String, required: true, unique: true, trim: true },
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
     nowstaName: { type: String, default: '', trim: true },
+    jobTitle: { type: String, enum: ['', 'sales', 'team manager', 'assistant'], default: '' },
+    teamId: { type: mongoose.Schema.Types.ObjectId, ref: 'ReportTeam', default: null },
+    receivesTeamReports: { type: Boolean, default: false },
     role: {
       type: String,
       enum: [

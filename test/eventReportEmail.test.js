@@ -19,6 +19,7 @@ test('production captain reports route to the event sales team and copy the capt
   let request;
   try {
     await sendEventReportEmail({
+      loadTeams: async () => ({ teams: [], users: [] }),
       event: { meta: {} },
       report: { reportType: 'captain', eventTitle: 'Maison Madison', reporterName: 'Captain', reporterEmail: 'captain@ocnyc.com', salesRep: 'Olivier Cheng', answers: {} },
       configuredRecipients: ['old-list@ocnyc.com'],
@@ -81,6 +82,7 @@ test('George and Guillaume delivery preserves the central mailbox and captain CC
   for (const salesRep of ['George Smith', 'Guillaume Darriet']) {
     let request;
     const result = await sendEventReportEmail({
+      loadTeams: async () => ({ teams: [], users: [] }),
       report: { reportType: 'captain', salesRep, reporterEmail: 'captain@example.com' },
       event: {},
       loadSlackUsers: async () => salesDirectory,
@@ -97,6 +99,7 @@ test('missing team or unavailable directory reports delivery failure without sen
   for (const loadSlackUsers of [async () => [], async () => { throw new Error('Slack unavailable'); }]) {
     let sent = false;
     const result = await sendEventReportEmail({
+      loadTeams: async () => ({ teams: [], users: [] }),
       report: { reportType: 'captain', salesRep: 'George Smith' }, event: {}, loadSlackUsers,
       fetchImpl: async () => { sent = true; throw new Error('Must not send'); },
     });
@@ -113,6 +116,7 @@ test('test events never resolve or email the sales team', async (t) => {
   t.after(() => { if (previousKey === undefined) delete process.env.RESEND_API_KEY; else process.env.RESEND_API_KEY = previousKey; });
   let request;
   const result = await sendEventReportEmail({
+      loadTeams: async () => ({ teams: [], users: [] }),
     report: { reportType: 'captain', salesRep: 'George Smith' }, event: { meta: { eventReportTest: true } },
     loadSlackUsers: async () => { assert.fail('Test events must not load sales team recipients'); },
     fetchImpl: async (_url, options) => { request = JSON.parse(options.body); return { ok: true, json: async () => ({ id: 'test-email' }) }; },
@@ -136,6 +140,7 @@ test('test report email uses fixed OCC recipients and copies the Slack email', a
   let request;
   try {
     const result = await sendEventReportEmail({
+      loadTeams: async () => ({ teams: [], users: [] }),
       event: { meta: { eventReportTest: true } },
       report: { eventTitle: 'Report testing', reporterName: 'Ivan', reporterEmail: 'Personal@Example.com', answers: {} },
       fetchImpl: async (_url, options) => { request = JSON.parse(options.body); return { ok: true, json: async () => ({ id: 'email_123' }) }; },

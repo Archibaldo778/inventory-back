@@ -13,7 +13,7 @@ const ownId = '507f1f77bcf86cd799439011';
 const otherId = '507f191e810c19729de860ea';
 
 test('users access guard limits directory reads and allows self password changes', () => {
-  for (const [method, path] of [['GET', '/invite-templates'], ['POST', '/invite']]) {
+  for (const [method, path] of [['GET', '/invite-templates'], ['POST', '/invite'], ['GET', '/teams'], ['POST', '/teams'], ['PUT', '/teams/team-id']]) {
     assert.equal(resolveUsersGuard({ method, path, auth: { userId: ownId, role: 'captain' } }), requireAdmin);
   }
   assert.equal(resolveUsersGuard({

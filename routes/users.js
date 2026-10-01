@@ -4,6 +4,8 @@ import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
 import User from '../models/Users.js';
 import { sendApiError } from '../utils/apiErrors.js';
+import { userTeamProfile } from '../utils/userTeamProfile.js';
+import reportTeamRoutes from './reportTeams.js';
 import {
   createUserInviteToken,
   INVITE_ROLES,
@@ -16,6 +18,7 @@ import {
 } from '../utils/userInvitations.js';
 
 const router = express.Router();
+router.use('/teams', reportTeamRoutes);
 
 const normalizeRole = (role) => {
   const raw = String(role || '').trim().toLowerCase();
@@ -109,6 +112,9 @@ const serializeUser = (source) => {
     email: user?.email || '',
     nowstaName: user?.nowstaName || '',
     role: normalizeRole(user?.role || 'user'),
+    jobTitle: user?.jobTitle || '',
+    teamId: user?.teamId ? String(user.teamId) : '',
+    receivesTeamReports: user?.receivesTeamReports === true,
     seeProposals,
     canSeeProposals: seeProposals,
     see_proposals: seeProposals,
@@ -129,6 +135,9 @@ const serializeUser = (source) => {
 
 const applyUserPayload = async (user, body, { allowPassword = false } = {}) => {
   const payload = body && typeof body === 'object' ? body : {};
+  Object.assign(user, await userTeamProfile(payload, {
+    teamId: user.teamId, receivesTeamReports: user.receivesTeamReports,
+  }));
 
   if (typeof payload.username !== 'undefined' || typeof payload.name !== 'undefined') {
     const nextUsername = String(payload.username ?? payload.name ?? '').trim();
@@ -330,11 +339,13 @@ router.post('/', async (req, res) => {
     const nextSeeBarFinancials =
       typeof resolveSeeBarFinancials(body) === 'boolean' ? resolveSeeBarFinancials(body) : false;
 
+    const teamProfile = await userTeamProfile(body);
     const user = await User.create({
       username,
       email,
       nowstaName: String(body.nowstaName || '').trim().slice(0, 240),
       role,
+      ...teamProfile,
       seeProposals: nextSeeProposals,
       seeBarFinancials: nextSeeBarFinancials,
       permissions: buildPermissionsPayload(body?.permissions, nextSeeProposals, nextSeeBarFinancials),

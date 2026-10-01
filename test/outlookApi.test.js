@@ -27,8 +27,10 @@ test('Outlook OAuth state is signed, expires, and preserves the return page', as
       (({ userId, returnTo }) => ({ userId, returnTo }))(verifyOutlookState(state)),
       { userId: 'user-123', returnTo: 'https://occdecks.com/events/event-1' }
     );
-    const replacement = state.endsWith('x') ? 'y' : 'x';
-    assert.throws(() => verifyOutlookState(`${state.slice(0, -1)}${replacement}`), /Invalid Outlook OAuth state/);
+    const [payload, signature] = state.split('.');
+    const corruptedSignature = Buffer.from(signature, 'base64url');
+    corruptedSignature[0] ^= 1;
+    assert.throws(() => verifyOutlookState(`${payload}.${corruptedSignature.toString('base64url')}`), /Invalid Outlook OAuth state/);
   });
 });
 

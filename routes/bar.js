@@ -1236,6 +1236,9 @@ router.post('/events/:id/share-link', requireBarOperator, async (req, res) => {
 
 router.post('/events/:id/captain-report-link', requireBarOperator, async (req, res) => {
   try {
+    if (!isBarCaptain(req.auth) && !isBarManager(req.auth)) {
+      return res.status(403).json({ message: 'Captain account required' });
+    }
     const barEvent = await loadEvent(req, res);
     if (!barEvent) return undefined;
     if (!canOperateEvent(barEvent, req.auth)) {

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { allocateSeriesCharge, buildSharedBarPackoutPlan, findManualSeriesChargeConflict, selectBarEventSeries, selectBarPackoutSeries } from '../utils/barSeriesCharges.js';
+import { allocateSeriesCharge, buildSharedBarPackoutPlan, findManualSeriesChargeConflict, resolveChargeLinkedSharedPackout, selectBarEventSeries, selectBarPackoutSeries } from '../utils/barSeriesCharges.js';
 
 test('Day 1 charge is distributed across nearby matching series days by guest count', () => {
   const events = [
@@ -48,4 +48,25 @@ test('an existing manual charge blocks automatic series allocation', () => {
   ];
   assert.equal(findManualSeriesChargeConflict(events, 'one')._id, 'two');
   assert.equal(findManualSeriesChargeConflict([{ _id: 'two', clientCharge: 0 }], 'one'), null);
+});
+
+test('the final charged series day can adopt an existing unlocked PO from its source day', () => {
+  const events = [
+    {
+      _id: 'day-one', name: 'Prada Day 1', eventDate: '2026-10-01', status: 'ready',
+      clientChargeDetails: { seriesSourceBarEventId: 'day-one' },
+      packout: { fileName: 'Prada shared PO.docx' },
+      items: [{ name: 'LA Caravelle Champagne 1 Case', sentQtyPending: true, returnConfirmed: false }],
+    },
+    {
+      _id: 'day-two', name: 'Prada Day 2', eventDate: '2026-10-02', status: 'draft',
+      clientChargeDetails: { seriesSourceBarEventId: 'day-one' }, items: [],
+    },
+  ];
+
+  const result = resolveChargeLinkedSharedPackout(events, 'day-two');
+
+  assert.equal(result.sourceEventId, 'day-one');
+  assert.deepEqual(result.eventIds, ['day-one', 'day-two']);
+  assert.equal(result.items[0].name, 'LA Caravelle Champagne 1 Case');
 });

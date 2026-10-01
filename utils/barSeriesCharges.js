@@ -102,3 +102,26 @@ export const findManualSeriesChargeConflict = (events = [], sourceEventId = '') 
     && String(event?.clientChargeDetails?.source || 'manual') === 'manual'
   )) || null
 );
+
+export const resolveChargeLinkedSharedPackout = (events = [], currentEventId = '') => {
+  const rows = (Array.isArray(events) ? events : []).filter(Boolean);
+  const current = rows.find((event) => String(event?._id || '') === String(currentEventId || ''));
+  const sourceId = clean(current?.clientChargeDetails?.seriesSourceBarEventId);
+  if (!current || !sourceId || (current.items || []).length > 0) return null;
+  const series = rows.filter((event) => (
+    clean(event?.clientChargeDetails?.seriesSourceBarEventId) === sourceId
+  )).sort((left, right) => clean(left?.eventDate).localeCompare(clean(right?.eventDate)));
+  if (series.length < 2 || String(series.at(-1)?._id || '') !== String(current._id || '')) return null;
+  const source = series.find((event) => String(event?._id || '') === sourceId);
+  if (!source || !(source.items || []).length) return null;
+  if (['submitted', 'reviewed', 'closed'].includes(clean(source.status))) return null;
+  if ((source.items || []).some((item) => item?.returnConfirmed === true)) return null;
+  return {
+    sourceEventId: sourceId,
+    eventIds: series.map((event) => String(event._id)),
+    startDate: clean(series[0]?.eventDate),
+    endDate: clean(current.eventDate),
+    items: source.items.map((item) => typeof item?.toObject === 'function' ? item.toObject() : { ...item }),
+    fileName: clean(source?.packout?.fileName) || `Shared series PO from ${clean(source.name)}`,
+  };
+};

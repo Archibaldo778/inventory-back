@@ -20,6 +20,7 @@ import {
   selectDropboxBarSourceDocuments,
 } from '../utils/dropboxBarSync.js';
 import { barItemIdentityKey } from '../utils/barManualItems.js';
+import { resolveChargeLinkedSharedPackout } from '../utils/barSeriesCharges.js';
 import { normalizePackoutItems } from './bar.js';
 import { syncDropboxCocktailRecipes } from '../utils/dropboxCocktailRecipes.js';
 import { recordBarSourceChangeAfterReturns } from '../utils/barSourceChangeProtection.js';
@@ -305,19 +306,37 @@ const loadDropboxBarSeriesContext = async (event) => {
   return resolveDropboxSharedSeriesDocuments(candidates, event?._id);
 };
 
+const loadChargeLinkedBarSeriesContext = async (barEvent) => {
+  const sourceId = String(barEvent?.clientChargeDetails?.seriesSourceBarEventId || '');
+  if (!barEvent || !sourceId) return null;
+  const chargeSeriesEvents = await BarEvent.find({
+    'clientChargeDetails.seriesSourceBarEventId': sourceId,
+  });
+  return resolveChargeLinkedSharedPackout(chargeSeriesEvents, barEvent._id);
+};
+
 const syncDropboxBarItems = async (event, { force = false } = {}) => {
   const seriesContext = await loadDropboxBarSeriesContext(event);
   const sourceDocuments = seriesContext?.documents || selectDropboxBarSourceDocuments(event?.documents);
-  const rawItems = sourceDocuments.flatMap((document) => (
+  let rawItems = sourceDocuments.flatMap((document) => (
     Array.isArray(document?.barItems) ? document.barItems : []
   ));
 
-  const documentTypes = [...new Set(sourceDocuments
+  let documentTypes = [...new Set(sourceDocuments
     .map((document) => String(document?.type || ''))
     .filter(Boolean))];
   const guestCount = dashboardEventGuestCount(event);
-  const normalizedItems = await normalizePackoutItems(rawItems, { allowFinancials: false, guestCount });
   let barEvent = await BarEvent.findOne({ linkedEventId: event._id });
+  let chargeSeriesContext = null;
+  if (barEvent && rawItems.length === 0 && barEvent.clientChargeDetails?.seriesSourceBarEventId) {
+    chargeSeriesContext = await loadChargeLinkedBarSeriesContext(barEvent);
+    if (chargeSeriesContext) {
+      rawItems = chargeSeriesContext.items;
+      documentTypes = ['po'];
+    }
+  }
+  const activeSeriesContext = seriesContext || chargeSeriesContext;
+  const normalizedItems = await normalizePackoutItems(rawItems, { allowFinancials: false, guestCount });
   const sourceChecksum = buildDropboxBarSourceChecksum(sourceDocuments);
   if (!force && barEvent && hasAppliedDropboxBarSourceChecksum(barEvent, sourceChecksum)) return false;
   if (!rawItems.length && !barEvent) return false;
@@ -353,16 +372,16 @@ const syncDropboxBarItems = async (event, { force = false } = {}) => {
   });
   barEvent.items = merged.items;
   barEvent.packout = {
-    fileName: sourceDocuments.map((document) => document.fileName).filter(Boolean).join(', ').slice(0, 500),
+    fileName: (chargeSeriesContext?.fileName || sourceDocuments.map((document) => document.fileName).filter(Boolean).join(', ')).slice(0, 500),
     contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     packoutType: sourceDocuments.some((document) => document.type === 'po') ? 'general' : 'bar_only',
     importedAt: new Date(),
     importedBy: 'Dropbox automatic sync',
-    seriesRole: seriesContext ? 'final' : '',
-    seriesSourceBarEventId: seriesContext ? String(barEvent._id) : '',
-    seriesEventIds: seriesContext?.eventIds || [],
-    seriesStartDate: seriesContext?.startDate || '',
-    seriesEndDate: seriesContext?.endDate || '',
+    seriesRole: activeSeriesContext ? 'final' : '',
+    seriesSourceBarEventId: activeSeriesContext ? String(barEvent._id) : '',
+    seriesEventIds: activeSeriesContext?.eventIds || [],
+    seriesStartDate: activeSeriesContext?.startDate || '',
+    seriesEndDate: activeSeriesContext?.endDate || '',
   };
   if (barEvent.status === 'draft') barEvent.status = 'ready';
   barEvent.revision = Number(barEvent.revision || 0) + 1;
@@ -373,10 +392,13 @@ const syncDropboxBarItems = async (event, { force = false } = {}) => {
     details: { documents: sourceDocuments.length, items: merged.importedItems.length, recipes: recipeSync, checksum: sourceChecksum },
   }].slice(-200);
   await barEvent.save();
-  if (seriesContext) {
+  if (activeSeriesContext) {
     const sharedKeys = new Set(merged.importedItems.map(barItemIdentityKey).filter(Boolean));
     const earlierEvents = await BarEvent.find({
-      linkedEventId: { $in: seriesContext.eventIds.filter((id) => id !== String(event._id)) },
+      $or: [
+        { linkedEventId: { $in: activeSeriesContext.eventIds.filter((id) => id !== String(event._id)) } },
+        { _id: { $in: activeSeriesContext.eventIds.filter((id) => id !== String(barEvent._id)) } },
+      ],
       status: { $nin: ['submitted', 'reviewed', 'closed'] },
     });
     for (const earlierEvent of earlierEvents) {
@@ -386,9 +408,9 @@ const syncDropboxBarItems = async (event, { force = false } = {}) => {
       ));
       earlierEvent.packout.seriesRole = 'outbound';
       earlierEvent.packout.seriesSourceBarEventId = String(barEvent._id);
-      earlierEvent.packout.seriesEventIds = seriesContext.eventIds;
-      earlierEvent.packout.seriesStartDate = seriesContext.startDate;
-      earlierEvent.packout.seriesEndDate = seriesContext.endDate;
+      earlierEvent.packout.seriesEventIds = activeSeriesContext.eventIds;
+      earlierEvent.packout.seriesStartDate = activeSeriesContext.startDate;
+      earlierEvent.packout.seriesEndDate = activeSeriesContext.endDate;
       earlierEvent.revision = Number(earlierEvent.revision || 0) + 1;
       await earlierEvent.save();
     }
@@ -1146,7 +1168,11 @@ router.post('/events/:eventId/rebuild-bar', ...requireDropboxAdmin, async (req, 
     if (!event) return res.status(404).json({ error: 'Event not found' });
     const seriesContext = await loadDropboxBarSeriesContext(event);
     const sourceDocuments = seriesContext?.documents || selectDropboxBarSourceDocuments(event.documents);
-    if (!sourceDocuments.length) return res.status(409).json({ error: 'This event has no current Dropbox documents' });
+    if (!sourceDocuments.length) {
+      const targetBarEvent = await BarEvent.findOne({ linkedEventId: event._id });
+      const chargeSeriesContext = await loadChargeLinkedBarSeriesContext(targetBarEvent);
+      if (!chargeSeriesContext) return res.status(409).json({ error: 'This event has no current Dropbox documents or eligible shared series PO' });
+    }
     const sourceItems = sourceDocuments.reduce(
       (total, document) => total + (Array.isArray(document?.barItems) ? document.barItems.length : 0),
       0

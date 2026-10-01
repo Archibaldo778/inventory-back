@@ -19,6 +19,7 @@ import {
   resolveDropboxSharedSeriesDocuments,
   selectDropboxBarSourceDocuments,
 } from '../utils/dropboxBarSync.js';
+import { hasZeroCaseConversion } from '../utils/barCaseQuantities.js';
 import { barItemIdentityKey } from '../utils/barManualItems.js';
 import { resolveChargeLinkedSharedPackout } from '../utils/barSeriesCharges.js';
 import { normalizePackoutItems } from './bar.js';
@@ -338,7 +339,12 @@ const syncDropboxBarItems = async (event, { force = false } = {}) => {
   const activeSeriesContext = seriesContext || chargeSeriesContext;
   const normalizedItems = await normalizePackoutItems(rawItems, { allowFinancials: false, guestCount });
   const sourceChecksum = buildDropboxBarSourceChecksum(sourceDocuments);
-  if (!force && barEvent && hasAppliedDropboxBarSourceChecksum(barEvent, sourceChecksum)) return false;
+  if (
+    !force
+    && barEvent
+    && hasAppliedDropboxBarSourceChecksum(barEvent, sourceChecksum)
+    && !hasZeroCaseConversion(barEvent)
+  ) return false;
   if (!rawItems.length && !barEvent) return false;
   const recipeSync = await syncDropboxCocktailRecipes({ documents: sourceDocuments, RecipeModel: CocktailRecipe });
   if (!barEvent) {

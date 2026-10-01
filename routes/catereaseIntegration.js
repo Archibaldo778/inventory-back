@@ -36,6 +36,7 @@ import {
   hasAppliedCatereaseOperationalChecksum,
   shouldUpdateCatereaseOperationalGuestCount,
 } from '../utils/catereaseOperationalBarItems.js';
+import { hasZeroCaseConversion } from '../utils/barCaseQuantities.js';
 import { canViewEvent, normalizePackoutItems } from './bar.js';
 import {
   downloadCatereaseEventFile,
@@ -294,6 +295,7 @@ const syncCatereaseOperationalBarItems = async (event, snapshot) => {
   const guestCount = hasSnapshotGuestCount ? snapshotGuestCount : dashboardGuestCount;
   const guestCountSource = hasSnapshotGuestCount ? 'packout' : 'dashboard';
   if (hasAppliedCatereaseOperationalChecksum(barEvent, snapshot?.checksum)
+    && !hasZeroCaseConversion(barEvent)
     && !shouldUpdateCatereaseOperationalGuestCount(barEvent, guestCount, guestCountSource)
     && (!catereaseClient || String(barEvent?.client || '') === catereaseClient)) {
     return { synced: false, items: 0, reason: 'unchanged' };

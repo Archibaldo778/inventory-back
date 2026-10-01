@@ -44,8 +44,7 @@ export const normalizeInviteCc = (value) => {
 
 export const renderUserInviteEmail = ({ name, inviteUrl, role = 'captain', active = false }) => {
   const barCaptain = role === 'bar captain';
-  const position = barCaptain ? 'Bar Captain' : 'Captain';
-  const introduction = `Your OCC position is ${position}. You have access to Captain’s Reports${barCaptain ? ' and Bar Returns' : ''} for your assigned events.`;
+  const introduction = 'We are introducing a new system for tracking alcohol inventory and completing event reports at OCC.';
   const registration = active
     ? 'Your account is already active. Sign in with your existing password:'
     : 'Create your password using this private registration link:';
@@ -60,7 +59,7 @@ export const renderUserInviteEmail = ({ name, inviteUrl, role = 'captain', activ
     ] : []),
     'If an assigned event is missing or you need help registering, contact me directly.',
   ];
-  const subject = `Your OCC ${position} account — ${barCaptain ? 'reports and bar returns' : 'event reports'}`;
+  const subject = 'OCC — new alcohol inventory and event reporting system';
   return {
     subject,
     html: `<div style="font-family:Arial,sans-serif;color:#222;line-height:1.5;max-width:620px"><p>Hi ${escapeHtml(name || 'Captain')},</p><p>${escapeHtml(introduction)}</p><p>${escapeHtml(registration)}</p><p><a href="${escapeHtml(inviteUrl)}">${active ? 'Sign in' : 'Create my account'}</a></p>${expiry ? `<p>${expiry}</p>` : ''}<ol>${steps.map((step) => `<li>${escapeHtml(step)}</li>`).join('')}</ol><p>Thank you,<br><strong>Ivan</strong><br>Oliver Cheng Catering &amp; Events</p></div>`,

@@ -30,10 +30,9 @@ const ALWAYS_INCLUDED_SLACK_GROUPS = [{ label: 'Leadership Team', names: ['Leade
 const ALWAYS_EVENT_CHANNEL_ADMINS = ['Ivan Vyskrebentsev', 'Iurie Scurtul', 'Chris Olson'];
 const EVENT_LEADERSHIP_POSITION = /(?:captain|floor\s+lead|lead\s+chef|ma[iî]tre(?:\s*['’]?\s*d)?|driver)/i;
 export const slackEventChannelsEnabled = () => /^(?:1|true|yes|on)$/i.test(clean(process.env.SLACK_EVENT_CHANNELS_ENABLED));
-export const slackEventReportsEnabled = () => /^(?:1|true|yes|on)$/i.test(clean(process.env.SLACK_EVENT_REPORTS_ENABLED));
-export const slackEventReportsEnabledForEvent = (event = {}) => (
-  slackEventReportsEnabled() || event?.meta?.eventReportTest === true
-);
+// Report requests and reminders no longer use Slack, including test events.
+export const slackEventReportsEnabled = () => false;
+export const slackEventReportsEnabledForEvent = () => false;
 export const eventReportReminderDelayMs = () => DAY_MS;
 const normalize = (value) => clean(value)
   .normalize('NFKD')
@@ -610,51 +609,4 @@ export const runSlackEventChannelSync = async ({ now = new Date(), eventId = '',
   }
 };
 
-export const runSlackEventReportReminders = async ({ now = new Date() } = {}) => {
-  if (!clean(process.env.SLACK_BOT_TOKEN)) return { configured: false, sent: 0, failed: 0 };
-  const globalReportsEnabled = slackEventReportsEnabled();
-  const pendingFilter = {
-    reportType: 'kitchen', status: 'pending', requestSentAt: { $ne: null }, nextReminderAt: { $ne: null, $lte: now },
-  };
-  if (!globalReportsEnabled) {
-    const testEventIds = await Event.find({ 'meta.eventReportTest': true }).distinct('_id');
-    if (!testEventIds.length) return { configured: true, sent: 0, failed: 0 };
-    pendingFilter.eventId = { $in: testEventIds };
-    const testReminderAt = new Date(now.getTime() + DAY_MS);
-    await EventReport.updateMany({
-      eventId: { $in: testEventIds }, reportType: 'kitchen', status: 'pending', requestSentAt: { $ne: null },
-      $or: [{ nextReminderAt: null }, { nextReminderAt: { $gt: testReminderAt } }],
-    }, { $set: { nextReminderAt: testReminderAt } });
-  }
-  const pending = await EventReport.find(pendingFilter).sort({ nextReminderAt: 1 }).limit(200);
-  const eventIds = [...new Set(pending.map((report) => String(report.eventId)))];
-  const events = await Event.find({ _id: { $in: eventIds } }).select('_id title date meta.eventReportTest').lean();
-  const eventsById = new Map(events.map((event) => [String(event._id), event]));
-  const summary = { configured: true, sent: 0, failed: 0 };
-  for (const report of pending) {
-    const event = eventsById.get(String(report.eventId));
-    if (!event) continue;
-    const url = eventReportUrl(event, report.slackUserId, report.eventEndsAt || event.date);
-    const reportLabel = report.reportType === 'kitchen' ? 'Kitchen Report' : "Captain's Report";
-    const slackRecipientId = clean(report.slackRecipientId || report.slackUserId).replace(/:kitchen$/, '');
-    try {
-      await postSlackMessage({
-        channel: slackRecipientId,
-        text: `Reminder: ${reportLabel} for ${report.eventTitle}: ${url}`,
-        blocks: [
-          { type: 'section', text: { type: 'mrkdwn', text: `*${reportLabel} Reminder*\nThe report for ${report.eventTitle} is still waiting for your response.` } },
-          { type: 'actions', elements: [{ type: 'button', text: { type: 'plain_text', text: `Complete ${reportLabel}` }, url, action_id: report.reportType === 'kitchen' ? 'open_kitchen_report_reminder' : 'open_event_report_reminder' }] },
-        ],
-      });
-      report.lastReminderAt = now;
-      report.nextReminderAt = new Date(now.getTime() + eventReportReminderDelayMs(event));
-      report.reminderCount = Number(report.reminderCount || 0) + 1;
-      await report.save();
-      summary.sent += 1;
-    } catch (error) {
-      summary.failed += 1;
-      console.warn(`Slack event report reminder failed for ${slackRecipientId}: ${error?.slackCode || error?.message || 'unknown error'}`);
-    }
-  }
-  return summary;
-};
+export const runSlackEventReportReminders = async () => ({ configured: false, disabled: true, sent: 0, failed: 0 });

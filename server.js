@@ -475,7 +475,7 @@ import nowstaScheduleRoutes from './routes/nowstaSchedule.js';
 import operationsRoutes from './routes/operations.js';
 import transportationRoutes from './routes/transportation.js';
 import slackIntegrationRoutes from './routes/slackIntegration.js';
-import { runSlackEventChannelSync, runSlackEventReportReminders, slackEventChannelsEnabled } from './utils/slackEventChannels.js';
+import { runSlackEventChannelSync, slackEventChannelsEnabled } from './utils/slackEventChannels.js';
 import { runCaptainReportEmailReminders } from './utils/captainReportReminders.js';
 import { getCatereaseConfig } from './utils/catereaseApi.js';
 
@@ -724,8 +724,6 @@ export const startServer = async () => {
 
   let slackSyncTimer = null;
   let slackStartupTimer = null;
-  let slackReportReminderTimer = null;
-  let slackReportReminderStartupTimer = null;
   if (String(process.env.SLACK_BOT_TOKEN || '').trim()) {
     const configuredMinutes = Number(process.env.SLACK_SYNC_INTERVAL_MINUTES);
     const intervalMinutes = Number.isFinite(configuredMinutes)
@@ -736,19 +734,10 @@ export const startServer = async () => {
     }).catch((error) => {
       console.error('Slack event channel sync failed:', error?.message || error);
     });
-    const syncSlackReportReminders = () => runSlackEventReportReminders().then((reminders) => {
-      if (reminders.sent || reminders.failed) console.log('✅ Slack event report reminders processed', reminders);
-    }).catch((error) => {
-      console.error('Slack event report reminder sync failed:', error?.message || error);
-    });
     slackStartupTimer = setTimeout(syncSlack, 60_000);
     slackStartupTimer.unref?.();
     slackSyncTimer = setInterval(syncSlack, intervalMinutes * 60_000);
     slackSyncTimer.unref?.();
-    slackReportReminderStartupTimer = setTimeout(syncSlackReportReminders, 60_000);
-    slackReportReminderStartupTimer.unref?.();
-    slackReportReminderTimer = setInterval(syncSlackReportReminders, 60_000);
-    slackReportReminderTimer.unref?.();
     console.log(`Slack event channel sync enabled every ${intervalMinutes} minutes (${slackEventChannelsEnabled() ? 'all due events' : 'linked test channels only'})`);
   }
 
@@ -774,8 +763,6 @@ export const startServer = async () => {
     if (catereaseOperationalSyncTimer) clearInterval(catereaseOperationalSyncTimer);
     if (slackStartupTimer) clearTimeout(slackStartupTimer);
     if (slackSyncTimer) clearInterval(slackSyncTimer);
-    if (slackReportReminderStartupTimer) clearTimeout(slackReportReminderStartupTimer);
-    if (slackReportReminderTimer) clearInterval(slackReportReminderTimer);
     clearInterval(captainReportEmailTimer);
 
     const forceExit = setTimeout(() => {

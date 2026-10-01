@@ -27,12 +27,15 @@ test('every event channel includes the permanent channel administrators', () => 
   assert.deepEqual(eventChannelAdminPeople({ meta: { eventReportTest: true } }), []);
 });
 
-test('event report DMs can be enabled only for an explicitly marked test event', () => {
+test('Slack report requests stay disabled for normal and test events despite the legacy enable flag', () => {
   const previous = process.env.SLACK_EVENT_REPORTS_ENABLED;
   delete process.env.SLACK_EVENT_REPORTS_ENABLED;
   try {
     assert.equal(slackEventReportsEnabledForEvent({}), false);
-    assert.equal(slackEventReportsEnabledForEvent({ meta: { eventReportTest: true } }), true);
+    assert.equal(slackEventReportsEnabledForEvent({ meta: { eventReportTest: true } }), false);
+    process.env.SLACK_EVENT_REPORTS_ENABLED = 'true';
+    assert.equal(slackEventReportsEnabledForEvent({}), false);
+    assert.equal(slackEventReportsEnabledForEvent({ meta: { eventReportTest: true } }), false);
   } finally {
     if (previous === undefined) delete process.env.SLACK_EVENT_REPORTS_ENABLED;
     else process.env.SLACK_EVENT_REPORTS_ENABLED = previous;

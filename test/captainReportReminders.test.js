@@ -34,7 +34,8 @@ const setup = (t) => {
   const state = { report: null, deliveries: new Map(), requests: [], submitted: false, users: [user], events: [event], schedules: [schedule] };
   t.mock.method(NowstaScheduleEntry, 'find', (query) => {
     assert.equal(query.archived.$ne, true);
-    return { select: () => ({ lean: async () => state.schedules.filter((row) => !row.archived && row.endsAt >= query.endsAt.$gte && row.endsAt <= query.endsAt.$lte) }) };
+    assert.equal(query.date.$gte, '2026-10-01');
+    return { select: () => ({ lean: async () => state.schedules.filter((row) => row.date >= query.date.$gte && !row.archived && row.endsAt >= query.endsAt.$gte && row.endsAt <= query.endsAt.$lte) }) };
   });
   t.mock.method(User, 'find', (query) => {
     assert.deepEqual(query.role.$in, ['captain', 'bar captain']);
@@ -44,7 +45,8 @@ const setup = (t) => {
   t.mock.method(Event, 'find', (query) => {
     assert.equal(query['meta.nowsta.excluded'].$ne, true);
     assert.equal(query['meta.eventReportTest'].$ne, true);
-    return { select: () => ({ lean: async () => state.events.filter((row) => !query.status.$not.test(row.status || '') && !row.meta?.nowsta?.excluded && !row.meta?.eventReportTest) }) };
+    assert.equal(query.date.$gte, '2026-10-01');
+    return { select: () => ({ lean: async () => state.events.filter((row) => row.date >= query.date.$gte && !query.status.$not.test(row.status || '') && !row.meta?.nowsta?.excluded && !row.meta?.eventReportTest) }) };
   });
   t.mock.method(EventReport, 'findOne', (query) => {
     assert.equal(query.reportType, 'captain');
@@ -185,16 +187,39 @@ test('catch-up sends only the latest stage and skips cancelled, excluded, test, 
   assert.equal(state.requests.length, 1);
 });
 
-test('captain reminders work without Slack and no longer enter the Slack daily reminder query', async (t) => {
+test('email reminders start with October 1 events, excluding older overnight events and their queued deliveries', async (t) => {
+  const state = setup(t);
+  const oldSchedule = { ...schedule, date: '2026-09-30' };
+  const oldEvent = { ...event, date: '2026-09-30' };
+  state.schedules = [oldSchedule];
+  state.events = [oldEvent];
+  assert.equal((await state.run(24)).sent, 0);
+  assert.equal(state.report, null);
+  assert.equal(state.deliveries.size, 0);
+  state.schedules = [schedule];
+  assert.equal((await state.run(36)).sent, 0);
+  assert.equal(state.report, null);
+  const args = { event, schedule, user, report: { _id: reportId }, hours: 48, now: at(48), fetchImpl: state.fetch };
+  state.deliveries.set(`captain-report:${event._id}:${user._id}:48`, { status: 'failed', firstAttemptAt: at(48) });
+  assert.equal(await deliverCaptainReportReminder({ ...args, event: oldEvent }), 'skipped');
+  assert.equal(await deliverCaptainReportReminder({ ...args, schedule: oldSchedule }), 'skipped');
+  assert.equal(state.requests.length, 0);
+  state.deliveries.clear();
+  state.events = [event];
+  // October 1 stays eligible when the current day has advanced to October 4.
+  assert.equal((await state.run(49)).sent, 1);
+  assert.equal(state.requests.length, 1);
+});
+
+test('captain emails work without Slack; all Slack report reminders remain disabled even with legacy flags', async (t) => {
   const state = setup(t);
   env(t, 'SLACK_BOT_TOKEN', undefined);
   assert.equal((await state.run(24)).sent, 1);
   env(t, 'SLACK_BOT_TOKEN', 'test-slack-token');
   env(t, 'SLACK_EVENT_REPORTS_ENABLED', 'true');
-  t.mock.method(EventReport, 'find', (query) => {
-    assert.equal(query.reportType, 'kitchen');
-    return { sort: () => ({ limit: async () => [] }) };
-  });
-  t.mock.method(Event, 'find', () => ({ select: () => ({ lean: async () => [] }) }));
-  assert.equal((await runSlackEventReportReminders()).sent, 0);
+  t.mock.method(EventReport, 'find', () => assert.fail('Slack reminders must not read pending reports'));
+  t.mock.method(EventReport, 'updateMany', () => assert.fail('Slack reminders must not reschedule reports'));
+  t.mock.method(Event, 'find', () => assert.fail('Slack reminders must not load test events'));
+  t.mock.method(globalThis, 'fetch', () => assert.fail('Slack reminders must not send messages'));
+  assert.deepEqual(await runSlackEventReportReminders(), { configured: false, disabled: true, sent: 0, failed: 0 });
 });

@@ -10,6 +10,10 @@ import { eventReportUrl } from './slackEventChannels.js';
 import { fetchWithTimeout } from './fetchWithTimeout.js';
 
 const HOUR = 60 * 60 * 1000;
+// Fixed rollout date in New York. Never move this forward with the current day.
+export const CAPTAIN_REPORT_REMINDERS_START_DATE = '2026-10-01';
+const reminderEventEligible = (date) => /^\d{4}-\d{2}-\d{2}$/.test(String(date || ''))
+  && date >= CAPTAIN_REPORT_REMINDERS_START_DATE;
 const clean = (value) => String(value || '').trim();
 const escapeHtml = (value) => clean(value).replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
 export const captainReportReminderStage = (endsAt, now = new Date()) => {
@@ -45,6 +49,7 @@ export const captainReminderEmail = ({ event, user, report, endsAt, hours }) => 
 };
 
 export const deliverCaptainReportReminder = async ({ event, schedule, user, report, hours, now, fetchImpl }) => {
+  if (!reminderEventEligible(event.date) || !reminderEventEligible(schedule.date)) return 'skipped';
   const id = `captain-report:${event._id}:${user._id}:${hours}`;
   const existing = await EventReportReminder.findById(id).select('status firstAttemptAt lockedUntil').lean();
   if (existing && (['sent', 'cancelled'].includes(existing.status)
@@ -100,11 +105,12 @@ export const runCaptainReportEmailReminders = async ({ now = new Date(), fetchIm
     // Match the portal's 14-day history. After downtime, send only the latest
     // due stage, not a burst of all missed reminders.
     const schedules = await NowstaScheduleEntry.find({
+      date: { $gte: CAPTAIN_REPORT_REMINDERS_START_DATE },
       archived: { $ne: true }, endsAt: { $gte: new Date(now.getTime() - 14 * 24 * HOUR), $lte: new Date(now.getTime() - 24 * HOUR) },
     }).select('nowstaEventId date endsAt archived shifts').lean();
     if (!schedules.length) return summary;
     const [events, users] = await Promise.all([
-      Event.find({ ...buildActiveDashboardBarEventQuery(), 'meta.eventReportTest': { $ne: true }, 'meta.nowsta.apiEventId': { $in: schedules.map((row) => row.nowstaEventId) } })
+      Event.find({ ...buildActiveDashboardBarEventQuery(), date: { $gte: CAPTAIN_REPORT_REMINDERS_START_DATE }, 'meta.eventReportTest': { $ne: true }, 'meta.nowsta.apiEventId': { $in: schedules.map((row) => row.nowstaEventId) } })
         .select('_id title date managerId meta catereaseOperations.salesRep').lean(),
       User.find({ role: { $in: ['captain', 'bar captain'] }, isActive: { $ne: false } }).select('_id username nowstaName email role isActive').lean(),
     ]);
@@ -112,6 +118,7 @@ export const runCaptainReportEmailReminders = async ({ now = new Date(), fetchIm
       const matches = events.filter((event) => String(event.meta?.nowsta?.apiEventId) === schedule.nowstaEventId);
       if (matches.length !== 1) continue;
       const event = matches[0];
+      if (!reminderEventEligible(event.date) || !reminderEventEligible(schedule.date)) continue;
       const hours = captainReportReminderStage(schedule.endsAt, now);
       if (!hours || schedule.archived) continue;
       for (const user of assignedReportCaptains(schedule, users)) {

@@ -32,6 +32,7 @@ import {
 } from '../utils/barChargeImport.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import { issueEventGuestAccess } from '../utils/eventGuestAccess.js';
+import { resolveEventSalesRep } from '../utils/eventReportSalesRep.js';
 import {
   INVALID_PACKOUT_UPLOAD_RESPONSE,
   isAllowedPackoutDocumentUpload,
@@ -1282,7 +1283,7 @@ router.post('/events/:id/captain-report-link', async (req, res) => {
         reporterName,
         reporterEmail,
         position: 'Captain',
-        salesRep: cleanString(barEvent.salesRep || event.managerId, 200),
+        salesRep: resolveEventSalesRep(event, barEvent.salesRep),
         status: 'pending',
       } },
       { upsert: true, new: true, setDefaultsOnInsert: true },

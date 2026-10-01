@@ -8,6 +8,7 @@ import HistoricalEventReport from '../models/HistoricalEventReport.js';
 import { listSlackUsers } from '../utils/slackApi.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import { sendEventReportEmail } from '../utils/eventReportEmail.js';
+import { EVENT_REPORT_CONTEXT_SELECT, resolveReportSalesRep } from '../utils/eventReportSalesRep.js';
 import { analyzeEventReports } from '../utils/eventReportAi.js';
 import {
   decryptDropboxSecret,
@@ -294,12 +295,13 @@ router.post('/:reportId/email', async (req, res) => {
     if (report.status !== 'submitted') return res.status(409).json({ message: 'The report has not been submitted yet' });
     if (report.emailDelivery?.status === 'sent' && req.body?.force !== true) return res.status(409).json({ message: 'This report email has already been sent' });
     const [event, settings] = await Promise.all([
-      Event.findById(report.eventId).select('meta.eventReportTest').lean(),
+      Event.findById(report.eventId).select(EVENT_REPORT_CONTEXT_SELECT).lean(),
       EventReportSettings.findOne({ key: 'default' }).lean(),
     ]);
     const configuredRecipients = settings?.emailEnabled === true
       ? (settings.recipients || []).map((recipient) => recipient.email)
       : [];
+    report.salesRep = resolveReportSalesRep(report, event);
     report.emailDelivery = { status: 'pending', recipients: [], cc: [], error: '' };
     await report.save();
     report.emailDelivery = await sendEventReportEmail({ report: report.toObject(), event, configuredRecipients });

@@ -7,6 +7,7 @@ import { createMemoryRateLimiter } from '../middleware/rateLimit.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import { verifyEventGuestAccess } from '../utils/eventGuestAccess.js';
 import { sendEventReportEmail } from '../utils/eventReportEmail.js';
+import { EVENT_REPORT_CONTEXT_SELECT, resolveReportSalesRep } from '../utils/eventReportSalesRep.js';
 
 const router = Router();
 const limiter = createMemoryRateLimiter({ windowMs: 10 * 60 * 1000, max: 60, message: 'Too many event report requests' });
@@ -74,7 +75,8 @@ router.get('/:eventId', limiter, async (req, res) => {
     if (!access) return undefined;
     const report = await EventReport.findOne({ eventId: req.params.eventId, slackUserId: clean(access.subjectId, 100) });
     if (!report) return res.status(404).json({ message: 'Event report was not found' });
-    return res.json({ report: publicReport(report) });
+    const event = await Event.findById(report.eventId).select(EVENT_REPORT_CONTEXT_SELECT).lean();
+    return res.json({ report: { ...publicReport(report), salesRep: resolveReportSalesRep(report, event) } });
   } catch (error) {
     return sendApiError(res, error, { context: 'Public event report load failed', fallbackMessage: 'Could not load this event report' });
   }
@@ -94,16 +96,17 @@ router.post('/:eventId', limiter, async (req, res) => {
     if (!kitchenReport) answers.followUpRequired = req.body?.answers?.followUpRequired === true;
     const missingRequired = requiredFields.filter((key) => !answers[key]);
     if (missingRequired.length) return res.status(400).json({ message: `Complete all required questions (${missingRequired.length} remaining)` });
+    const [event, settings] = await Promise.all([
+      Event.findById(report.eventId).select(EVENT_REPORT_CONTEXT_SELECT).lean(),
+      EventReportSettings.findOne({ key: 'default' }).lean(),
+    ]);
+    report.salesRep = resolveReportSalesRep(report, event);
     report.answers = answers;
     report.status = 'submitted';
     report.submittedAt = new Date();
     report.nextReminderAt = null;
     report.emailDelivery = { status: 'pending', recipients: [], cc: [], error: '' };
     await report.save();
-    const [event, settings] = await Promise.all([
-      Event.findById(report.eventId).select('meta.eventReportTest').lean(),
-      EventReportSettings.findOne({ key: 'default' }).lean(),
-    ]);
     const configuredRecipients = settings?.emailEnabled === true
       ? (settings.recipients || []).map((recipient) => recipient.email)
       : [];

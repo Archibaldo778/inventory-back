@@ -2,7 +2,7 @@ import Event from '../models/Event.js';
 import EventReport from '../models/EventReport.js';
 import User from '../models/Users.js';
 import NowstaScheduleEntry from '../models/NowstaScheduleEntry.js';
-import { canUseKitchenReport } from './eventStaffAccess.js';
+import { kitchenReportPosition } from './eventStaffAccess.js';
 import { serializeStaffEvent, staffScheduleQuery } from './staffPortal.js';
 import { resolveEventSalesRep } from './eventReportSalesRep.js';
 import { createApiError } from './apiErrors.js';
@@ -14,10 +14,12 @@ export const kitchenReportEventQuery = (nowstaEventId) => ({
 });
 
 export const openStaffKitchenReport = async (user, nowstaEventId) => {
-  if (!canUseKitchenReport(user)) throw createApiError(403, 'Executive Chef account required');
+  if (String(user?.role || '').trim().toLowerCase() !== 'event staff') throw createApiError(403, 'Event Staff account required');
   const entry = await NowstaScheduleEntry.findOne({ ...staffScheduleQuery(user), nowstaEventId })
     .select('nowstaEventId title date shifts archived').lean();
-  if (!serializeStaffEvent(entry, user)) throw createApiError(404, 'Event is not assigned to you');
+  const assignedEvent = serializeStaffEvent(entry, user);
+  if (!assignedEvent) throw createApiError(404, 'Event is not assigned to you');
+  if (!assignedEvent.canUseKitchenReport) throw createApiError(403, 'Lead Chef assignment or Executive Chef profile required');
   const event = await Event.findOne(kitchenReportEventQuery(nowstaEventId))
     .select('_id title date managerId meta catereaseOperations').lean();
   if (!event) throw createApiError(409, 'This Nowsta event is not linked to an active Inventory event. Ask an administrator to check the event sync.');
@@ -34,7 +36,7 @@ export const openStaffKitchenReport = async (user, nowstaEventId) => {
       eventTitle: event.title || entry.title, eventDate: event.date || entry.date,
       reportType: 'kitchen', slackUserId: subjectId,
       reporterName: user.nowstaName || user.username, reporterEmail: email,
-      position: 'Executive Chef', salesRep: resolveEventSalesRep(event), status: 'pending',
+      position: kitchenReportPosition(user, assignedEvent.shifts), salesRep: resolveEventSalesRep(event), status: 'pending',
     } },
     { upsert: true, new: true, setDefaultsOnInsert: true },
   );
@@ -47,7 +49,7 @@ export const validateStaffKitchenReportAccess = async (access, report) => {
   const userId = access.context.slice('staff-kitchen:'.length);
   if (!/^[a-f\d]{24}$/i.test(userId) || report.reportType !== 'kitchen') throw createApiError(403, 'Kitchen report access is no longer available');
   const user = await User.findById(userId).select('_id username email nowstaName role jobTitle isActive').lean();
-  if (!user || user.isActive === false || !canUseKitchenReport(user)) throw createApiError(403, 'Kitchen report access is no longer available');
+  if (!user || user.isActive === false || String(user.role || '').trim().toLowerCase() !== 'event staff') throw createApiError(403, 'Kitchen report access is no longer available');
   const linkedEvent = await Event.findById(report.eventId).select('meta.nowsta.apiEventId').lean();
   const nowstaEventId = String(linkedEvent?.meta?.nowsta?.apiEventId || '');
   if (!nowstaEventId) throw createApiError(403, 'Event assignment is no longer available');
@@ -55,5 +57,7 @@ export const validateStaffKitchenReportAccess = async (access, report) => {
     Event.findOne({ _id: report.eventId, ...kitchenReportEventQuery(nowstaEventId) }).select('_id').lean(),
     NowstaScheduleEntry.findOne({ ...staffScheduleQuery(user), nowstaEventId }).select('nowstaEventId shifts archived').lean(),
   ]);
-  if (!event || !serializeStaffEvent(entry, user)) throw createApiError(403, 'Event is no longer assigned to you');
+  const assignedEvent = serializeStaffEvent(entry, user);
+  if (!event || !assignedEvent) throw createApiError(403, 'Event is no longer assigned to you');
+  if (!assignedEvent.canUseKitchenReport) throw createApiError(403, 'Kitchen report access is no longer available');
 };

@@ -32,6 +32,6 @@ export const serializeStaffEvent = (entry, user) => {
   return {
     id: String(entry.nowstaEventId), title: entry.title, client: entry.client, date: entry.date,
     venue: entry.venue, address: entry.address, guestCount: entry.guestCount,
-    timeZone: entry.timeZone, shifts, canUseKitchenReport: canUseKitchenReport(user),
+    timeZone: entry.timeZone, shifts, canUseKitchenReport: canUseKitchenReport(user, shifts),
   };
 };

@@ -30,14 +30,14 @@ const secret = (t) => {
   t.after(() => { if (old === undefined) delete process.env.JWT_SECRET; else process.env.JWT_SECRET = old; });
 };
 
-test('only Executive Chef Event Staff can open Kitchen Reports; other staff permissions stay read-only', () => {
+test('Event Staff report requests reach the assignment check without granting other write permissions', () => {
   const req = { method: 'POST', originalUrl: '/api/staff-portal/events/123/kitchen-report-link' };
   assert.equal(canUseKitchenReport(chef), true);
   assert.equal(eventStaffRequestAllowed(chef, req), true);
-  assert.equal(eventStaffRequestAllowed({ ...chef, jobTitle: '' }, req), false);
+  assert.equal(eventStaffRequestAllowed({ ...chef, jobTitle: '' }, req), true);
   assert.equal(eventStaffRequestAllowed(chef, { ...req, originalUrl: '/api/products' }), false);
   assert.equal(serializeStaffEvent(entry, chef).canUseKitchenReport, true);
-  assert.equal(serializeStaffEvent(entry, { ...chef, jobTitle: '' }).canUseKitchenReport, false);
+  assert.equal(serializeStaffEvent(entry, { ...chef, jobTitle: '' }).canUseKitchenReport, true);
 });
 
 test('opening Kitchen Report creates a chef-specific report and does not reuse the captain identity', async (t) => {
@@ -75,7 +75,7 @@ test('reopening pending or submitted Kitchen Reports preserves existing answers,
 
 test('Kitchen Report cannot be opened for an unassigned, archived or unlinked event', async (t) => {
   mockSources(t, null);
-  await assert.rejects(openStaffKitchenReport({ ...chef, jobTitle: '' }, '123'), /Executive Chef/);
+  await assert.rejects(openStaffKitchenReport({ ...chef, role: 'captain' }, '123'), /Event Staff/);
   await assert.rejects(openStaffKitchenReport(chef, '123'), /not assigned/);
   t.mock.method(NowstaScheduleEntry, 'findOne', () => ({ select: () => ({ lean: async () => ({ ...entry, archived: true }) }) }));
   await assert.rejects(openStaffKitchenReport(chef, '123'), /not assigned/);
@@ -85,11 +85,14 @@ test('Kitchen Report cannot be opened for an unassigned, archived or unlinked ev
 });
 
 test('portal link loads and submits the existing Kitchen Report form with its kitchen-specific required answers', async (t) => {
-  secret(t); mockSources(t);
+  secret(t);
+  const leadChef = { ...chef, jobTitle: '' };
+  mockSources(t, { ...entry, shifts: [{ ...entry.shifts[0], position: 'Lead Chef' }] });
+  t.mock.method(User, 'findById', () => ({ select: () => ({ lean: async () => leadChef }) }));
   const report = { _id: 'report-1', eventId, eventTitle: 'Dinner', reportType: 'kitchen', slackUserId: `account:${userId}:kitchen`, reporterName: chef.username, status: 'pending', answers: {}, save: async () => {}, toObject() { return { ...this }; } };
   t.mock.method(EventReport, 'findOne', () => ({ sort: async () => report }));
   const opened = response();
-  await handler(router, '/events/:id/kitchen-report-link', 'post')({ auth: chef, params: { id: '123' } }, opened);
+  await handler(router, '/events/:id/kitchen-report-link', 'post')({ auth: leadChef, params: { id: '123' } }, opened);
   assert.equal(opened.code, 200);
   const accessToken = new URL(opened.body.path, 'https://example.com').searchParams.get('access');
   const access = verifyEventGuestAccess(accessToken, eventId, 'event:report');
@@ -123,12 +126,48 @@ test('portal link loads and submits the existing Kitchen Report form with its ki
   }
 });
 
-test('kitchen portal access is revoked when the chef account is disabled or loses its job title', async (t) => {
+test('kitchen portal access is revoked when the chef account is disabled or loses its Event Staff role', async (t) => {
   mockSources(t);
   const access = { context: `staff-kitchen:${userId}` };
-  for (const user of [{ ...chef, isActive: false }, { ...chef, jobTitle: '' }]) {
+  for (const user of [{ ...chef, isActive: false }, { ...chef, role: 'captain' }]) {
     t.mock.method(User, 'findById', () => ({ select: () => ({ lean: async () => user }) }));
     await assert.rejects(validateStaffKitchenReportAccess(access, { eventId, reportType: 'kitchen' }), /no longer available/);
   }
   await validateStaffKitchenReportAccess({ context: 'captain-portal' }, { reportType: 'captain' });
+});
+
+test('Lead Chef assignment shows Kitchen Report without a profile job title, but another worker’s chef shift does not', () => {
+  const user = { ...chef, jobTitle: '' };
+  const leadShift = { position: 'Lead Chef', workers: [{ email: chef.email, status: 'confirmed' }] };
+  assert.equal(serializeStaffEvent({ ...entry, shifts: [leadShift] }, user).canUseKitchenReport, true);
+  assert.equal(serializeStaffEvent({ ...entry, shifts: [
+    { position: 'Server', workers: [{ email: chef.email, status: 'confirmed' }] },
+    { ...leadShift, workers: [{ email: 'other@example.com', status: 'confirmed' }] },
+  ] }, user).canUseKitchenReport, false);
+  assert.equal(serializeStaffEvent({ ...entry, shifts: [
+    { position: 'Server', workers: [{ email: chef.email, status: 'confirmed' }] },
+    { ...leadShift, workers: [{ email: chef.email, status: 'declined' }] },
+  ] }, user).canUseKitchenReport, false);
+});
+
+test('new report uses the actual Lead Chef position and rejects a staff member without a chef assignment', async (t) => {
+  const user = { ...chef, jobTitle: '' };
+  let schedule = { ...entry, shifts: [{ ...entry.shifts[0], position: 'Lead Chef' }] };
+  mockSources(t);
+  t.mock.method(NowstaScheduleEntry, 'findOne', () => ({ select: () => ({ lean: async () => schedule }) }));
+  t.mock.method(EventReport, 'findOne', () => ({ sort: async () => null }));
+  let writes = 0;
+  t.mock.method(EventReport, 'findOneAndUpdate', async (_filter, update) => { writes += 1; return update.$setOnInsert; });
+  const { report } = await openStaffKitchenReport(user, '123');
+  assert.equal(report.position, 'Lead Chef');
+  assert.equal(report.reportType, 'kitchen');
+  schedule = { ...entry, shifts: [{ ...entry.shifts[0], position: 'Server' }] };
+  await assert.rejects(openStaffKitchenReport(user, '123'), /Lead Chef assignment/);
+  assert.equal(writes, 1);
+});
+
+test('saved report link is revoked if Lead Chef becomes a non-chef assignment without an Executive Chef profile', async (t) => {
+  mockSources(t, { ...entry, shifts: [{ ...entry.shifts[0], position: 'Server' }] });
+  t.mock.method(User, 'findById', () => ({ select: () => ({ lean: async () => ({ ...chef, jobTitle: '' }) }) }));
+  await assert.rejects(validateStaffKitchenReportAccess({ context: `staff-kitchen:${userId}` }, { eventId, reportType: 'kitchen' }), /no longer available/);
 });

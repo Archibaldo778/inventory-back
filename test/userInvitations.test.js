@@ -55,14 +55,23 @@ test('report-only captain instructions never ask for bar returns', () => {
   assert.match(email.html, /&lt;Captain&gt;/);
 });
 
-test('both invitation templates introduce the new system without assigning a job title', () => {
-  const introduction = 'We are introducing a new system for tracking alcohol inventory and completing event reports at OCC.';
+test('invitation subject and body describe only the systems each recipient uses without assigning a job title', () => {
   for (const role of ['captain', 'bar captain']) {
     for (const active of [false, true]) {
       const email = renderUserInviteEmail({ name: 'Alex', role, active, inviteUrl: 'https://example.com/start' });
-      assert.equal(email.subject, 'OCC — new alcohol inventory and event reporting system');
+      const barAccess = role === 'bar captain';
+      const introduction = barAccess
+        ? 'We are introducing a new system for tracking alcohol inventory and completing event reports at OCC.'
+        : 'We are introducing a new system for completing event reports at OCC.';
+      assert.equal(email.subject, barAccess
+        ? 'OCC — new alcohol inventory and event reporting system'
+        : 'OCC — new event reporting system');
       assert.ok(email.text.includes(introduction));
       assert.ok(email.html.includes(introduction));
+      for (const content of [email.subject, email.text, email.html]) {
+        if (barAccess) assert.match(content, /alcohol inventory/);
+        else assert.doesNotMatch(content, /alcohol|inventory|beverage|bar returns|returned quantities/i);
+      }
       assert.doesNotMatch(`${email.subject}\n${email.text}\n${email.html}`, /your OCC position|bar captain|captain account/i);
     }
   }

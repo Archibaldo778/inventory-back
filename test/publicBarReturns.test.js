@@ -25,6 +25,15 @@ test('captain treats an imported zero-return PO as attached', () => {
   assert.deepEqual(event.items, []);
 });
 
+test('a positive PO quantity is shown to the captain even if an old pending flag remains', () => {
+  const item = serializeGuestBarItem({
+    _id: 'champagne', name: 'La Caravelle', scope: 'alcohol', included: true,
+    sentQty: 12, sentQtyText: '1 Case', sentQtyPending: true,
+  });
+  assert.equal(item.sentQty, 12);
+  assert.equal(item.sentQtyPending, false);
+});
+
 test('captain payload keeps included PO items visible even when they do not require returns', () => {
   const cocktail = serializeGuestBarItem({
     _id: 'cocktail-row',

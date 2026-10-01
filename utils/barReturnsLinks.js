@@ -1,6 +1,4 @@
-import { issueEventGuestAccess } from './eventGuestAccess.js';
-
-const DAY_MS = 24 * 60 * 60 * 1000;
+import crypto from 'node:crypto';
 
 export const barReturnsAppOrigin = () => String(
   process.env.PUBLIC_APP_ORIGIN
@@ -11,20 +9,23 @@ export const barReturnsAppOrigin = () => String(
     || 'https://occdecks.com'
 ).trim().replace(/\/+$/, '');
 
-export const createBarEventShareLink = ({ dashboardEventId, issuerId = '', now = new Date() } = {}) => {
+export const hashBarEventShareToken = (token) => crypto
+  .createHash('sha256')
+  .update(String(token || ''))
+  .digest('hex');
+
+export const verifyBarEventShareToken = (token, expectedHash) => {
+  const actual = Buffer.from(hashBarEventShareToken(token), 'hex');
+  const expected = Buffer.from(String(expectedHash || ''), 'hex');
+  return actual.length === expected.length && actual.length > 0 && crypto.timingSafeEqual(actual, expected);
+};
+
+export const createBarEventShareLink = ({ dashboardEventId } = {}) => {
   const eventId = String(dashboardEventId || '').trim();
   if (!eventId) throw new Error('This bar report is not linked to a Dashboard event');
-  const issuedAt = new Date(now);
-  const expiresAt = new Date(issuedAt.getTime() + (3 * DAY_MS));
-  const token = issueEventGuestAccess({
-    eventIds: [eventId],
-    capability: 'bar:returns',
-    expiresAt,
-    subjectId: issuerId,
-    context: 'captain-share',
-  });
+  const token = crypto.randomBytes(32).toString('base64url');
   return {
     url: `${barReturnsAppOrigin()}/bar/returns?event=${encodeURIComponent(eventId)}&access=${encodeURIComponent(token)}`,
-    expiresAt: expiresAt.toISOString(),
+    tokenHash: hashBarEventShareToken(token),
   };
 };

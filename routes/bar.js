@@ -1224,11 +1224,21 @@ router.post('/events/:id/share-link', requireBarOperator, async (req, res) => {
     }
     const share = createBarEventShareLink({
       dashboardEventId: String(event.linkedEventId),
-      issuerId: String(req.auth?.userId || ''),
     });
-    addAudit(event, req.auth, 'bartender_share_link_created', { expiresAt: share.expiresAt });
+    const eventWithShareAccess = await BarEvent.findById(event._id).select('+shareAccess.tokenHash +shareAccess.tokenHashes');
+    const previousHashes = Array.isArray(eventWithShareAccess?.shareAccess?.tokenHashes)
+      ? eventWithShareAccess.shareAccess.tokenHashes.map(String).filter(Boolean)
+      : [];
+    if (eventWithShareAccess?.shareAccess?.tokenHash) previousHashes.push(String(eventWithShareAccess.shareAccess.tokenHash));
+    event.shareAccess = {
+      tokenHash: share.tokenHash,
+      tokenHashes: [...new Set([...previousHashes, share.tokenHash])].slice(-20),
+      createdAt: new Date(),
+      createdBy: String(req.auth?.userId || ''),
+    };
+    addAudit(event, req.auth, 'bartender_share_link_created');
     await event.save();
-    return res.json(share);
+    return res.json({ url: share.url });
   } catch (error) {
     return sendApiError(res, error, {
       context: 'Bar event share link failed',

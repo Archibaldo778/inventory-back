@@ -25,6 +25,7 @@ import {
   verifyGuestBarSession,
 } from '../utils/guestBarAccess.js';
 import { verifyEventGuestAccess } from '../utils/eventGuestAccess.js';
+import { verifyBarEventShareToken } from '../utils/barReturnsLinks.js';
 import { sendBarReturnEmail } from '../utils/barReturnEmail.js';
 
 const router = Router();
@@ -288,7 +289,7 @@ export const serializeGuestBarItem = (item) => ({
   included: item?.included !== false,
   sentQty: Number(item?.sentQty || 0),
   sentQtyText: clean(item?.sentQtyText, 80),
-  sentQtyPending: item?.sentQtyPending === true,
+  sentQtyPending: item?.sentQtyPending === true && !(Number(item?.sentQty) > 0),
   deliveredQty: item?.deliveredQty === null || item?.deliveredQty === undefined
     ? null
     : Number(item.deliveredQty),
@@ -397,11 +398,27 @@ router.post('/verify-pin', requirePin, (req, res) => {
 router.post('/event-access', async (req, res) => {
   try {
     const dashboardEventId = clean(req.body?.eventId, 80);
-    verifyEventGuestAccess(clean(req.body?.accessToken, 4096), dashboardEventId, 'bar:returns');
+    const accessToken = clean(req.body?.accessToken, 4096);
     const dashboardEvent = await Event.findOne({ _id: dashboardEventId, status: { $not: /^deleted$/i } })
       .select('title date client meta externalId');
     if (!dashboardEvent) return res.status(404).json({ message: 'Event not found' });
     const event = await syncDashboardEvent(dashboardEvent);
+    const eventWithSecret = await BarEvent.findById(event._id).select('+shareAccess.tokenHash +shareAccess.tokenHashes status');
+    const shareHashes = [
+      eventWithSecret?.shareAccess?.tokenHash,
+      ...(Array.isArray(eventWithSecret?.shareAccess?.tokenHashes) ? eventWithSecret.shareAccess.tokenHashes : []),
+    ].filter(Boolean);
+    let authorized = shareHashes.some((hash) => verifyBarEventShareToken(accessToken, hash));
+    if (!authorized) {
+      try {
+        verifyEventGuestAccess(accessToken, dashboardEventId, 'bar:returns');
+        authorized = true;
+      } catch { /* legacy link was not valid */ }
+    }
+    if (!authorized) return res.status(401).json({ message: 'This captain link is invalid' });
+    if (['submitted', 'reviewed', 'closed'].includes(String(eventWithSecret?.status || ''))) {
+      return res.status(409).json({ message: 'Returns for this event have already been submitted' });
+    }
     const session = issueGuestBarSession({ eventId: String(event._id) });
     logGuestSecurityEvent(req, 'captain_link_verified', { eventId: String(event._id) });
     return res.json({ ok: true, sessionToken: session.token, expiresIn: session.expiresIn, event: publicEvent(event) });

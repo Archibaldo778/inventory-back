@@ -123,6 +123,12 @@ const barEventSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
     }],
+    shareAccess: {
+      tokenHash: { type: String, default: '', select: false },
+      tokenHashes: { type: [String], default: [], select: false },
+      createdAt: { type: Date, default: null },
+      createdBy: { type: String, default: '', trim: true },
+    },
     packageSnapshot: {
       name: { type: String, default: '', trim: true },
       baseRate: { type: Number, default: 0, min: 0 },

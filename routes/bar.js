@@ -303,7 +303,9 @@ const requireBarOperator = (req, res, next) => {
   return next();
 };
 
-router.post('/returns-session', requireBarOperator, (req, res) => {
+// An unscoped Bar Returns session can open every event, so only bar managers
+// get one. Captains and bartenders use their assigned events or a share link.
+router.post('/returns-session', requireBarManager, (req, res) => {
   try {
     const session = issueGuestBarSession();
     return res.json({ ok: true, sessionToken: session.token, expiresIn: session.expiresIn });

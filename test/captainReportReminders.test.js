@@ -6,7 +6,7 @@ import EventReportReminder from '../models/EventReportReminder.js';
 import NowstaScheduleEntry from '../models/NowstaScheduleEntry.js';
 import User from '../models/Users.js';
 import {
-  assignedReportCaptains, captainReminderEmail, captainReportReminderStage,
+  assignedReportCaptains, captainReminderEmail, captainReportReminderStage, captainReminderEventEligible,
   deliverCaptainReportReminder, runCaptainReportEmailReminders,
 } from '../utils/captainReportReminders.js';
 import { openCaptainReport } from '../utils/captainReports.js';
@@ -241,7 +241,7 @@ test('captain emails work without Slack; all Slack report reminders remain disab
   assert.deepEqual(await runSlackEventReportReminders(), { configured: false, disabled: true, sent: 0, failed: 0 });
 });
 
-test('incident hold blocks scheduled runs and queued retries before any database access or email delivery', async (t) => {
+test('explicit pause blocks scheduled runs and queued retries before any database access or email delivery', async (t) => {
   env(t, 'RESEND_API_KEY', 'configured-key');
   env(t, 'CAPTAIN_REPORT_EMAIL_REMINDERS_ENABLED', 'true');
   for (const [model, method] of [[NowstaScheduleEntry, 'find'], [Event, 'find'], [User, 'find'], [EventReport, 'findOne'], [EventReportReminder, 'findById'], [EventReportReminder, 'findOneAndUpdate']]) {
@@ -249,9 +249,51 @@ test('incident hold blocks scheduled runs and queued retries before any database
   }
   t.mock.method(globalThis, 'fetch', () => assert.fail('paused reminders must not send email'));
   for (const hours of [24, 36, 48, 14 * 24]) {
-    const result = await runCaptainReportEmailReminders({ now: at(hours) });
+    const result = await runCaptainReportEmailReminders({ now: at(hours), enabled: false });
     assert.equal(result.disabled, true);
     assert.equal(result.sent, 0);
-    assert.equal(await deliverCaptainReportReminder({ event, schedule, user, report: { _id: reportId }, hours, now: at(hours) }), 'skipped');
+    assert.equal(await deliverCaptainReportReminder({ event, schedule, user, report: { _id: reportId }, hours, now: at(hours), enabled: false }), 'skipped');
   }
+});
+
+test('default resumed scheduler ignores historical rows even if a database query returns Royal Gala from September', async (t) => {
+  const state = setup(t);
+  const historicalEvent = { ...event, title: 'Royal Gala for the Wren Project', date: '2026-09-29' };
+  const historicalSchedule = { ...schedule, title: historicalEvent.title, date: historicalEvent.date, endsAt: new Date('2026-09-30T02:00:00Z') };
+  t.mock.method(NowstaScheduleEntry, 'find', () => ({ select: () => ({ lean: async () => [historicalSchedule] }) }));
+  t.mock.method(Event, 'find', () => ({ select: () => ({ lean: async () => [historicalEvent] }) }));
+  t.mock.method(EventReport, 'findOne', () => assert.fail('old events must not open reports'));
+  const result = await runCaptainReportEmailReminders({ now: new Date('2026-10-01T22:00:00Z'), fetchImpl: state.fetch });
+  assert.notEqual(result.disabled, true);
+  assert.equal(result.sent, 0);
+  assert.equal(state.requests.length, 0);
+  assert.equal(state.deliveries.size, 0);
+});
+
+test('rollout guard validates both event dates, actual end time and an existing report date', () => {
+  const valid = { event, schedule };
+  assert.equal(captainReminderEventEligible(valid), true);
+  for (const date of ['2026-09-29', '2026-09-30', '2026-13-01', '2026-10-99', '', undefined]) {
+    assert.equal(captainReminderEventEligible({ ...valid, event: { ...event, date } }), false);
+    assert.equal(captainReminderEventEligible({ ...valid, schedule: { ...schedule, date } }), false);
+  }
+  for (const end of ['2026-10-01T03:59:59Z', '2026-09-30T22:00:00Z', 'invalid', null]) {
+    assert.equal(captainReminderEventEligible({ ...valid, schedule: { ...schedule, endsAt: end } }), false);
+  }
+  assert.equal(captainReminderEventEligible({ ...valid, schedule: { ...schedule, endsAt: '2026-10-01T04:00:00Z' } }), true);
+  assert.equal(captainReminderEventEligible({ ...valid, report: { eventDate: '2026-09-29' } }), false);
+});
+
+test('delivery guard prevents historical retries and premature reminders; default scheduler still sends for October 1', async (t) => {
+  const state = setup(t);
+  const args = { event, schedule, user, report: { _id: reportId, eventDate: '2026-09-29' }, hours: 24, now: at(24), fetchImpl: state.fetch };
+  assert.equal(await deliverCaptainReportReminder(args), 'skipped');
+  assert.equal(await deliverCaptainReportReminder({ ...args, report: { _id: reportId }, now: at(23.99) }), 'skipped');
+  assert.equal(await deliverCaptainReportReminder({ ...args, report: { _id: reportId }, hours: 48 }), 'skipped');
+  assert.equal(state.deliveries.size, 0);
+  assert.equal(state.requests.length, 0);
+  const result = await runCaptainReportEmailReminders({ now: at(24), fetchImpl: state.fetch });
+  assert.equal(result.sent, 1);
+  assert.equal(state.requests.length, 1);
+  assert.match(state.requests[0].body.text, /Event date: 2026-10-01/);
 });

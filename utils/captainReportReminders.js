@@ -11,13 +11,20 @@ import { fetchWithTimeout } from './fetchWithTimeout.js';
 import { requiresEventReport } from './eventReportRequirement.js';
 
 const HOUR = 60 * 60 * 1000;
-// Incident hold: automatic delivery must remain off until explicitly re-enabled
-// after the historical-mail incident has been reviewed.
-export const CAPTAIN_REPORT_EMAIL_REMINDERS_ENABLED = false;
+export const CAPTAIN_REPORT_EMAIL_REMINDERS_ENABLED = true;
 // Fixed rollout date in New York. Never move this forward with the current day.
 export const CAPTAIN_REPORT_REMINDERS_START_DATE = '2026-10-01';
-const reminderEventEligible = (date) => /^\d{4}-\d{2}-\d{2}$/.test(String(date || ''))
-  && date >= CAPTAIN_REPORT_REMINDERS_START_DATE;
+export const CAPTAIN_REPORT_REMINDERS_START_AT = new Date('2026-10-01T00:00:00-04:00');
+const reminderEventEligible = (date) => {
+  if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date) || date < CAPTAIN_REPORT_REMINDERS_START_DATE) return false;
+  const parsed = new Date(`${date}T00:00:00Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === date;
+};
+export const captainReminderEventEligible = ({ event, schedule, report } = {}) => (
+  reminderEventEligible(event?.date) && reminderEventEligible(schedule?.date)
+  && new Date(schedule?.endsAt).getTime() >= CAPTAIN_REPORT_REMINDERS_START_AT.getTime()
+  && (!report?.eventDate || reminderEventEligible(report.eventDate))
+);
 const clean = (value) => String(value || '').trim();
 const escapeHtml = (value) => clean(value).replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
 export const captainReportReminderStage = (endsAt, now = new Date()) => {
@@ -56,7 +63,8 @@ export const deliverCaptainReportReminder = async ({ event, schedule, user, repo
   if (!enabled) return 'skipped';
   if (!assignedReportCaptains(schedule, [user]).length) return 'skipped';
   if (!requiresEventReport(event, schedule)) return 'skipped';
-  if (!reminderEventEligible(event.date) || !reminderEventEligible(schedule.date)) return 'skipped';
+  if (!captainReminderEventEligible({ event, schedule, report })) return 'skipped';
+  if (![24, 36, 48].includes(hours) || captainReportReminderStage(schedule.endsAt, now) !== hours) return 'skipped';
   const id = `captain-report:${event._id}:${user._id}:${hours}`;
   const existing = await EventReportReminder.findById(id).select('status firstAttemptAt lockedUntil').lean();
   if (existing && (['sent', 'cancelled'].includes(existing.status)
@@ -114,7 +122,7 @@ export const runCaptainReportEmailReminders = async ({ now = new Date(), fetchIm
     // due stage, not a burst of all missed reminders.
     const schedules = await NowstaScheduleEntry.find({
       date: { $gte: CAPTAIN_REPORT_REMINDERS_START_DATE },
-      archived: { $ne: true }, endsAt: { $gte: new Date(now.getTime() - 14 * 24 * HOUR), $lte: new Date(now.getTime() - 24 * HOUR) },
+      archived: { $ne: true }, endsAt: { $gte: new Date(Math.max(CAPTAIN_REPORT_REMINDERS_START_AT.getTime(), now.getTime() - 14 * 24 * HOUR)), $lte: new Date(now.getTime() - 24 * HOUR) },
     }).select('nowstaEventId title date endsAt archived shifts').lean();
     if (!schedules.length) return summary;
     const [events, users] = await Promise.all([
@@ -127,7 +135,7 @@ export const runCaptainReportEmailReminders = async ({ now = new Date(), fetchIm
       if (matches.length !== 1) continue;
       const event = matches[0];
       if (!requiresEventReport(event, schedule)) continue;
-      if (!reminderEventEligible(event.date) || !reminderEventEligible(schedule.date)) continue;
+      if (!captainReminderEventEligible({ event, schedule })) continue;
       const hours = captainReportReminderStage(schedule.endsAt, now);
       if (!hours || schedule.archived) continue;
       for (const user of assignedReportCaptains(schedule, users)) {

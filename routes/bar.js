@@ -55,6 +55,7 @@ import { dashboardEventGuestCount } from '../utils/barGuestCount.js';
 import { issueGuestBarSession } from '../utils/guestBarAccess.js';
 import { createBarEventShareLink } from '../utils/barReturnsLinks.js';
 import { buildSharedBarPackoutPlan, selectBarPackoutSeries } from '../utils/barSeriesCharges.js';
+import { convertPackoutCasesToBottles } from '../utils/barCaseQuantities.js';
 
 const router = Router();
 const BAR_MANAGER_ROLES = new Set(['bar admin']);
@@ -632,7 +633,12 @@ export const normalizePackoutItems = async (items, { allowFinancials = false, gu
       const automaticCocktailServings = cocktailServingsAuto
         ? cocktailServingsForGuests(guestCount)
         : null;
-      const sentQty = cleanNumber(automaticCocktailServings ?? item?.sentQty ?? item?.quantity, {
+      const caseConversion = preparedBeverageType ? null : convertPackoutCasesToBottles({
+        quantity: item?.sentQty ?? item?.quantity,
+        quantityText: item?.sentQtyText ?? item?.quantityText,
+        caseSize: catalogItem?.caseSize,
+      });
+      const sentQty = cleanNumber(automaticCocktailServings ?? caseConversion?.quantity ?? item?.sentQty ?? item?.quantity, {
         fallback: preparedBeverageType ? cleanNumber(guestCount, { fallback: 0 }) : 0,
       });
       return {
@@ -642,8 +648,8 @@ export const normalizePackoutItems = async (items, { allowFinancials = false, gu
         scope,
         included: cleanBoolean(item?.included ?? item?.includedByDefault, scope !== 'non_bar'),
         sentQty,
-        sentQtyText: cleanString(item?.sentQtyText ?? item?.quantityText ?? sentQty, 80),
-        sentQtyPending: cleanBoolean(item?.sentQtyPending, false),
+        sentQtyText: cleanString(caseConversion?.quantityText ?? item?.sentQtyText ?? item?.quantityText ?? sentQty, 80),
+        sentQtyPending: caseConversion ? caseConversion.pending : cleanBoolean(item?.sentQtyPending, false),
         deliveredQty: cleanNumber(item?.deliveredQty ?? item?.delivered, { fallback: null }),
         returnedFullQty: cleanNumber(item?.returnedFullQty, { fallback: 0 }),
         returnedOpenQty: cleanNumber(item?.returnedOpenQty, { fallback: 0 }),

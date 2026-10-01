@@ -289,13 +289,13 @@ const eventUrl = (event, seriesEvents = [], endDate = '') => {
   return `${frontendBaseUrl()}/event-access/${encodeURIComponent(String(event._id))}?token=${encodeURIComponent(token)}`;
 };
 
-const captainBarUrl = (event, seriesEvents = [], endDate = '', captainEmail = '') => {
+export const captainBarUrl = (event, seriesEvents = [], endDate = '', captainEmail = '') => {
   const eventIds = (seriesEvents.length ? seriesEvents : [event]).map((item) => String(item?._id || '')).filter(Boolean);
   const token = issueEventGuestAccess({ eventIds, capability: 'bar:returns', subjectId: clean(captainEmail).toLowerCase(), expiresAt: guestExpiry(endDate || event.date) });
   return `${frontendBaseUrl()}/bar/returns?event=${encodeURIComponent(String(event._id))}&access=${encodeURIComponent(token)}`;
 };
 
-const eventReportUrl = (event, slackUserId, eventEndsAt) => {
+export const eventReportUrl = (event, slackUserId, eventEndsAt) => {
   const token = issueEventGuestAccess({
     eventIds: [String(event._id)], capability: 'event:report', subjectId: slackUserId,
     expiresAt: new Date((new Date(eventEndsAt || event.date).getTime() || Date.now()) + (120 * DAY_MS)),

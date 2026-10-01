@@ -1,3 +1,5 @@
+import { listSlackUsers } from './slackApi.js';
+
 const clean = (value, max = 5000) => String(value ?? '').trim().slice(0, max);
 const email = (value) => {
   const normalized = clean(value, 320).toLowerCase();
@@ -83,16 +85,39 @@ export const CAPTAIN_REPORT_RECIPIENTS = [
   'captainreport@ocnyc.com',
 ];
 
-export const captainReportRecipients = (salesRep, configuredRecipients = []) => {
-  const normalized = clean(salesRep, 200).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+const normalizedPersonName = (value) => clean(value, 200).normalize('NFKD')
+  .replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+
+const salesTeamNames = (salesRep) => {
+  const normalized = normalizedPersonName(salesRep);
+  if (/^george(?: |$)/.test(normalized)) return [salesRep, 'Megan'];
+  if (/^guillaume(?: |$)/.test(normalized)) return [salesRep];
+  return [];
+};
+
+const directoryEmail = (name, slackUsers) => {
+  const normalized = normalizedPersonName(name);
+  const emails = [...new Set(slackUsers.filter((user) => {
+    if (user?.deleted || user?.is_bot || user?.id === 'USLACKBOT') return false;
+    const names = [user?.profile?.real_name, user?.real_name].map(normalizedPersonName).filter(Boolean);
+    return names.some((candidate) => candidate === normalized
+      || (!normalized.includes(' ') && candidate.startsWith(`${normalized} `)));
+  }).map((user) => email(user?.profile?.email)).filter(Boolean))];
+  if (emails.length !== 1) throw new Error(`Report email not sent: ${emails.length ? 'multiple email addresses found' : 'no email address found'} for ${clean(name, 200)} in Slack. Check the sales team directory.`);
+  return emails[0];
+};
+
+export const captainReportRecipients = (salesRep, configuredRecipients = [], slackUsers = []) => {
+  const normalized = normalizedPersonName(salesRep);
   const olivierTeam = ['olivier cheng', 'oliver cheng'].some((name) => (
     normalized === name || normalized.startsWith(`${name} `) || name.startsWith(`${normalized} `)
   ));
+  const teamNames = salesTeamNames(salesRep);
   return [...new Set([
     ...CAPTAIN_REPORT_RECIPIENTS,
     ...(olivierTeam
       ? ['olivier@ocnyc.com', 'heidi@ocnyc.com', 'sebastian@ocnyc.com', 'ashley@ocnyc.com']
-      : configuredRecipients),
+      : (teamNames.length ? teamNames.map((name) => directoryEmail(name, slackUsers)) : configuredRecipients)),
   ].map(email).filter(Boolean))];
 };
 
@@ -151,11 +176,20 @@ export const renderEventReportText = (report = {}) => {
   return `${emailReportTitle(report).toUpperCase()}\n${clean(report.eventTitle) || '—'} · ${formatEventDate(report.eventDate) || '—'}\n${clean(report.reporterName) || '—'} · ${clean(report.position) || '—'}\n\n${sections}`;
 };
 
-export const sendEventReportEmail = async ({ report, event, configuredRecipients = [], fetchImpl = fetch }) => {
+export const sendEventReportEmail = async ({ report, event, configuredRecipients = [], fetchImpl = fetch, loadSlackUsers = listSlackUsers }) => {
   const isTest = event?.meta?.eventReportTest === true;
+  let slackUsers = [];
+  if (!isTest && report?.reportType !== 'kitchen' && salesTeamNames(report?.salesRep).length) {
+    try {
+      slackUsers = await loadSlackUsers();
+      captainReportRecipients(report?.salesRep, configuredRecipients, slackUsers);
+    } catch (error) {
+      return { status: 'failed', recipients: [], cc: [], error: clean(error?.message || 'Could not resolve the report sales team', 1000) };
+    }
+  }
   const to = [...new Set((isTest
     ? ['ivan@ocnyc.com', 'iurie@ocnyc.com']
-    : (report?.reportType === 'kitchen' ? configuredRecipients : captainReportRecipients(report?.salesRep, configuredRecipients))
+    : (report?.reportType === 'kitchen' ? configuredRecipients : captainReportRecipients(report?.salesRep, configuredRecipients, slackUsers))
   ).map(email).filter(Boolean))];
   if (!to.length) return { status: 'not_sent', recipients: [], cc: [], error: '' };
   const reporterEmail = email(report?.reporterEmail);

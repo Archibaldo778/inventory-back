@@ -63,6 +63,7 @@ import { dashboardEventGuestCount } from '../utils/barGuestCount.js';
 import { issueGuestBarSession } from '../utils/guestBarAccess.js';
 import { createBarEventShareLink } from '../utils/barReturnsLinks.js';
 import { buildSharedBarPackoutPlan, selectBarPackoutSeries } from '../utils/barSeriesCharges.js';
+import { carryBarReturnsForward } from '../utils/barCarryover.js';
 import { convertPackoutCasesToBottles } from '../utils/barCaseQuantities.js';
 
 const router = Router();
@@ -2117,6 +2118,18 @@ router.patch('/events/:id/returns', async (req, res) => {
   }
 });
 
+router.post('/events/:id/carryover', async (req, res) => {
+  try {
+    const event = await loadEvent(req, res);
+    if (!event) return undefined;
+    if (!canOperateEvent(event, req.auth)) return res.status(403).json({ message: 'Bar operation access required' });
+    const carryoverResult = await carryBarReturnsForward(event, { by: req.auth?.username || req.auth?.email || 'Bar Returns carryover' });
+    return res.json({ carryoverResult });
+  } catch (error) {
+    return sendApiError(res, error, { context: 'Bar carryover retry failed', fallbackMessage: 'Could not retry stock transfer' });
+  }
+});
+
 router.post('/events/:id/submit', async (req, res) => {
   try {
     const event = await loadEvent(req, res);
@@ -2143,9 +2156,10 @@ router.post('/events/:id/submit', async (req, res) => {
     event.revision += 1;
     addAudit(event, req.auth, 'returns_submitted');
     await event.save();
-    return res.json(serializeBarEvent(event, {
+    const carryoverResult = await carryBarReturnsForward(event, { by: event.submittedBy });
+    return res.json({ ...serializeBarEvent(event, {
       includeFinancials: canSeeBarFinancials(req.auth),
-    }));
+    }), carryoverResult });
   } catch (error) {
     return sendApiError(res, error, {
       context: 'Bar return submission failed',

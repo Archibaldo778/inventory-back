@@ -17,6 +17,7 @@ const normalizedName = (value) => {
 };
 
 export const barItemIdentityKey = (item) => {
+  if (item?.carryover?.sourceEventId) return `carryover:${item.carryover.sourceEventId}:${item.carryover.sourceItemId}`;
   const recipeKey = String(item?.cocktailRecipeKey || '').trim().toLowerCase();
   if (recipeKey) return `cocktail:${recipeKey}`;
   const beverageItemId = String(item?.beverageItemId?._id || item?.beverageItemId || '').trim().toLowerCase();
@@ -102,6 +103,8 @@ const applyAuthoritativeImportedQuantity = (manualItems, importedItems) => manua
 });
 
 export const mergeManualItemsWithPackout = (existingItems, importedItems) => {
+  const carried = (existingItems || []).filter((item) => item?.carryover?.sourceEventId);
+  if (carried.length) return [...mergeManualItemsWithPackout(existingItems.filter((item) => !item?.carryover?.sourceEventId), importedItems), ...carried.map((item) => typeof item.toObject === 'function' ? item.toObject() : { ...item })];
   const manualItems = applyAuthoritativeImportedQuantity((Array.isArray(existingItems) ? existingItems : [])
     .filter((item) => item?.entrySource === 'manual')
     .map((item) => typeof item?.toObject === 'function' ? item.toObject() : { ...item }), importedItems);
@@ -118,6 +121,8 @@ export const mergeManualItemsWithPackout = (existingItems, importedItems) => {
 };
 
 export const mergePackoutDocumentItems = (existingItems, importedItems, documentTypes = []) => {
+  const carried = (existingItems || []).filter((item) => item?.carryover?.sourceEventId);
+  if (carried.length) return [...mergePackoutDocumentItems(existingItems.filter((item) => !item?.carryover?.sourceEventId), importedItems, documentTypes), ...carried.map((item) => typeof item.toObject === 'function' ? item.toObject() : { ...item })];
   const types = new Set((Array.isArray(documentTypes) ? documentTypes : [])
     .map((value) => String(value || '').toLowerCase()));
   if (!types.size || (types.has('po') && types.has('kitchen_menu'))) {
@@ -165,6 +170,8 @@ export const preservePackoutOperationalState = (existingItems, nextItems) => {
     const identity = barItemIdentityKey(item);
     const name = barItemNameKey(item);
     const match = existing
+      .filter((candidate) => (candidate.carryover?.sourceEventId || item.carryover?.sourceEventId)
+        ? barItemIdentityKey(candidate) === identity : true)
       .filter((candidate) => (
         (identity && barItemIdentityKey(candidate) === identity)
         || (name && barItemNameKey(candidate) === name)

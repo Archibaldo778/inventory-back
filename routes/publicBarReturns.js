@@ -27,6 +27,7 @@ import {
 import { verifyEventGuestAccess } from '../utils/eventGuestAccess.js';
 import { hashBarEventShareToken, verifyBarEventShareToken } from '../utils/barReturnsLinks.js';
 import { sendBarReturnEmail } from '../utils/barReturnEmail.js';
+import { carryBarReturnsForward } from '../utils/barCarryover.js';
 
 const router = Router();
 const WINDOW_MS = 10 * 60 * 1000;
@@ -296,6 +297,10 @@ export const serializeGuestBarItem = (item) => ({
   returnedQty: Number(item?.returnedFullQty || 0) + Number(item?.returnedOpenQty || 0),
   returnConfirmed: item?.returnConfirmed === true,
   returnRequired: item?.included !== false && requiresBarReturn(item),
+  carryover: item?.carryover?.sourceEventId ? {
+    sourceEventName: clean(item.carryover.sourceEventName, 240),
+    sourceEventDate: clean(item.carryover.sourceEventDate, 20), quantity: Number(item.carryover.quantity || 0),
+  } : null,
 });
 
 export const publicEvent = (event) => ({
@@ -713,8 +718,9 @@ router.patch('/:eventId/received', async (req, res) => {
 
 router.patch('/:eventId/returns', async (req, res) => {
   try {
+    if (req.guestAccess?.eventId && String(req.guestAccess.eventId) !== String(req.params.eventId)) return res.status(403).json({ message: 'This captain link is for a different event' });
     const duplicate = await findAppliedGuestMutation(req.params.eventId, 'guest_returns_submitted', req.body?.clientMutationId);
-    if (duplicate) return res.json({ ok: true, duplicate: true, event: publicEvent(duplicate) });
+    if (duplicate) return res.json({ ok: true, duplicate: true, event: publicEvent(duplicate), carryoverResult: await carryBarReturnsForward(duplicate) });
     const event = await loadEditableEvent(req, res);
     if (!event) return undefined;
     const reporterName = clean(req.body?.reporterName, 160);
@@ -750,6 +756,7 @@ router.patch('/:eventId/returns', async (req, res) => {
     });
     await event.save();
     const captainEmail = String(req.guestAccess?.subjectId || '').trim().toLowerCase();
+    const carryoverResult = await carryBarReturnsForward(event, { by: reporterName });
     try {
       const delivery = await sendBarReturnEmail({ event: event.toObject(), captainEmail });
       event.audit.push({ action: 'guest_returns_email_sent', username: reporterName, at: new Date(), details: delivery });
@@ -760,6 +767,7 @@ router.patch('/:eventId/returns', async (req, res) => {
     return res.json({
       ok: true,
       event: publicEvent(event),
+      carryoverResult,
       varianceCount: variances.length,
       unverifiedReceivedCount: unverifiedReceived.length,
     });

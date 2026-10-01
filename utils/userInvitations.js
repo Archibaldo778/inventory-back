@@ -31,28 +31,59 @@ export const userInviteUrl = (token) => {
   return `${origin}/accept-invite?token=${encodeURIComponent(token)}`;
 };
 
-export const renderUserInviteEmail = ({ name, inviteUrl }) => {
-  const safeName = escapeHtml(name || 'Captain');
-  const safeUrl = escapeHtml(inviteUrl);
+export const INVITE_ROLES = ['captain', 'bar captain'];
+export const isValidInviteEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+export const normalizeInviteCc = (value) => {
+  const addresses = Array.isArray(value) ? value : String(value || '').split(/[;,]/);
+  const emails = [...new Set(addresses.map(normalizeInviteEmail).filter(Boolean))];
+  if (emails.length > 5 || emails.some((email) => !isValidInviteEmail(email))) {
+    throw new Error('Enter up to 5 valid CC email addresses');
+  }
+  return emails;
+};
+
+export const renderUserInviteEmail = ({ name, inviteUrl, role = 'captain', active = false }) => {
+  const barCaptain = role === 'bar captain';
+  const position = barCaptain ? 'Bar Captain' : 'Captain';
+  const introduction = `Your OCC position is ${position}. You have access to Captain’s Reports${barCaptain ? ' and Bar Returns' : ''} for your assigned events.`;
+  const registration = active
+    ? 'Your account is already active. Sign in with your existing password:'
+    : 'Create your password using this private registration link:';
+  const expiry = active ? '' : 'This link is private and expires in 72 hours.';
+  const steps = [
+    'Sign in and open My Events. Select the correct assigned event.',
+    'Open Captain’s Report, complete the event report, include relevant notes, and submit it when finished.',
+    ...(barCaptain ? [
+      'Open Bar Returns for the same event. Check Sent, Received and Returned quantities for every beverage item and correct them where needed.',
+      'Use Save quantities to save your progress. Add any unlisted alcohol and notes for missing or damaged items.',
+      'Submit final Bar Returns before leaving the venue or immediately after returning to the shop. Submit Captain’s Report separately; completing one does not submit the other.',
+    ] : []),
+    'If an assigned event is missing or you need help registering, contact me directly.',
+  ];
+  const subject = `Your OCC ${position} account — ${barCaptain ? 'reports and bar returns' : 'event reports'}`;
   return {
-    subject: 'Set up your OCC beverage returns account',
-    html: `<div style="font-family:Arial,sans-serif;color:#222;line-height:1.5;max-width:620px"><p>Hi ${safeName},</p><p>We are introducing a new beverage inventory and return tracking system for upcoming events.</p><p>Use your personal registration link below to create your password:</p><p><a href="${safeUrl}" style="display:inline-block;background:#1f2937;color:#fff;text-decoration:none;padding:12px 18px;border-radius:6px">Create my account</a></p><p>This link is private and expires in 72 hours.</p><p>After registering, sign in, open <strong>My Events</strong>, select the correct event, enter the returned quantity for every beverage item, add any unlisted alcohol, include notes for missing or damaged items, and submit the return report.</p><p>Please complete the return before leaving the venue or immediately after returning to the shop.</p><p>If you have trouble registering, contact me directly.</p><p>Thank you,<br><strong>Ivan</strong><br>Oliver Cheng Catering &amp; Events</p></div>`,
-    text: `Hi ${clean(name || 'Captain', 200)},\n\nWe are introducing a new beverage inventory and return tracking system for upcoming events.\n\nCreate your password using this private registration link:\n${inviteUrl}\n\nThe link expires in 72 hours.\n\nAfter registering, sign in, open My Events, select the correct event, enter returned quantities, add any unlisted alcohol, include notes for missing or damaged items, and submit the return report. Please complete the return before leaving the venue or immediately after returning to the shop.\n\nIf you have trouble registering, contact me directly.\n\nThank you,\nIvan\nOliver Cheng Catering & Events`,
+    subject,
+    html: `<div style="font-family:Arial,sans-serif;color:#222;line-height:1.5;max-width:620px"><p>Hi ${escapeHtml(name || 'Captain')},</p><p>${escapeHtml(introduction)}</p><p>${escapeHtml(registration)}</p><p><a href="${escapeHtml(inviteUrl)}">${active ? 'Sign in' : 'Create my account'}</a></p>${expiry ? `<p>${expiry}</p>` : ''}<ol>${steps.map((step) => `<li>${escapeHtml(step)}</li>`).join('')}</ol><p>Thank you,<br><strong>Ivan</strong><br>Oliver Cheng Catering &amp; Events</p></div>`,
+    text: [`Hi ${clean(name || 'Captain', 200)},`, introduction, registration, inviteUrl, expiry,
+      steps.map((step, index) => `${index + 1}. ${step}`).join('\n'),
+      'Thank you,\nIvan\nOliver Cheng Catering & Events'].filter(Boolean).join('\n\n'),
   };
 };
 
-export const sendUserInviteEmail = async ({ email, name, inviteUrl, fetchImpl = fetch }) => {
+export const sendUserInviteEmail = async ({ email, name, inviteUrl, role = 'captain', active = false, cc = [], fetchImpl = fetch }) => {
   const apiKey = clean(process.env.RESEND_API_KEY, 1000);
   if (!apiKey) return { status: 'failed', error: 'RESEND_API_KEY is not configured' };
   const recipient = normalizeInviteEmail(email);
-  const message = renderUserInviteEmail({ name, inviteUrl });
+  const copies = normalizeInviteCc(cc).filter((address) => address !== recipient);
+  const message = renderUserInviteEmail({ name, inviteUrl, role, active });
   const response = await fetchImpl('https://api.resend.com/emails', {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       from: clean(process.env.USER_INVITE_FROM, 320) || 'Ivan at OCC <reports@reports.occdecks.com>',
       reply_to: clean(process.env.USER_INVITE_REPLY_TO, 320) || 'ivan@ocnyc.com',
-      to: [recipient], subject: message.subject, html: message.html, text: message.text,
+      to: [recipient], ...(copies.length ? { cc: copies } : {}),
+      subject: message.subject, html: message.html, text: message.text,
     }),
   });
   const payload = await response.json().catch(() => ({}));

@@ -6,7 +6,11 @@ import User from '../models/Users.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import {
   createUserInviteToken,
+  INVITE_ROLES,
+  isValidInviteEmail,
   isExistingActiveInviteAccount,
+  normalizeInviteCc,
+  renderUserInviteEmail,
   sendUserInviteEmail,
   userInviteUrl,
 } from '../utils/userInvitations.js';
@@ -348,40 +352,55 @@ router.post('/', async (req, res) => {
   }
 });
 
+router.get('/invite-templates', (req, res) => {
+  res.json(INVITE_ROLES.map((role) => ({
+    role,
+    ...renderUserInviteEmail({ name: '[Captain name]', inviteUrl: '[Personal registration link]', role }),
+  })));
+});
+
 router.post('/invite', async (req, res) => {
   try {
     const body = req.body || {};
     const username = String(body.username ?? body.name ?? '').trim();
     const email = normalizeEmail(body.email);
     const nowstaName = String(body.nowstaName || username).trim().slice(0, 240);
-    const requestedRole = normalizeRole(body.role);
-    const inviteRole = requestedRole === 'captain' ? 'captain' : 'bar captain';
-    if (!username || !email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    const inviteRole = normalizeRole(body.role || 'captain');
+    if (!INVITE_ROLES.includes(inviteRole)) {
+      return res.status(400).json({ message: 'Choose Captain or Bar Captain' });
+    }
+    let cc;
+    try { cc = normalizeInviteCc(body.cc); } catch (error) {
+      return res.status(400).json({ message: error.message });
+    }
+    if (!username || !email || !isValidInviteEmail(email)) {
       return res.status(400).json({ message: 'A name and valid email are required' });
     }
     let user = await User.findOne({ email }).select('+inviteTokenHash +tokenVersion');
     if (user && !['captain', 'bar captain'].includes(normalizeRole(user.role))) {
       return res.status(409).json({ message: 'This email already belongs to a different account role' });
     }
-    if (isExistingActiveInviteAccount(user)) {
-      return res.status(409).json({ message: 'This captain already has an active account' });
-    }
+    const active = isExistingActiveInviteAccount(user);
     if (!user) {
       const temporaryPassword = await bcrypt.hash(`invite-${crypto.randomUUID()}-${crypto.randomUUID()}`, 10);
       user = await User.create({ username, email, nowstaName, role: inviteRole, password: temporaryPassword, isActive: false });
     }
-    const invite = createUserInviteToken();
+    const invite = active ? null : createUserInviteToken();
     user.username = username;
     user.nowstaName = nowstaName;
     user.role = inviteRole;
-    user.isActive = false;
-    user.inviteTokenHash = invite.tokenHash;
-    user.inviteExpiresAt = invite.expiresAt;
-    user.inviteSentAt = new Date();
-    user.inviteAcceptedAt = null;
+    if (invite) {
+      user.isActive = false;
+      user.inviteTokenHash = invite.tokenHash;
+      user.inviteExpiresAt = invite.expiresAt;
+      user.inviteAcceptedAt = null;
+    }
     await user.save();
-    const delivery = await sendUserInviteEmail({ email, name: username, inviteUrl: userInviteUrl(invite.token) });
+    const inviteUrl = active ? new URL('/login', userInviteUrl('')).href : userInviteUrl(invite.token);
+    const delivery = await sendUserInviteEmail({ email, name: username, inviteUrl, role: inviteRole, active, cc });
     if (delivery.status !== 'sent') return res.status(502).json({ message: `Invitation was created but email failed: ${delivery.error}` });
+    user.inviteSentAt = delivery.sentAt;
+    await user.save();
     return res.status(201).json({ user: serializeUser(user), delivery });
   } catch (e) {
     return sendApiError(res, e, { field: 'message', context: 'Invite user failed', fallbackMessage: 'Could not invite this captain' });

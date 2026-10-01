@@ -5,6 +5,7 @@ import {
   createUserInviteToken,
   hashUserInviteToken,
   isExistingActiveInviteAccount,
+  normalizeInviteCc,
   renderUserInviteEmail,
   sendUserInviteEmail,
   userInviteUrl,
@@ -37,11 +38,35 @@ test('captain invitation link uses the configured OCC frontend', () => {
   }
 });
 
-test('captain invitation explains registration and beverage returns', () => {
-  const email = renderUserInviteEmail({ name: 'Test Captain', inviteUrl: 'https://occdecks.com/accept-invite?token=test' });
+test('bar captain invitation explains registration, reports and beverage returns', () => {
+  const email = renderUserInviteEmail({ name: 'Test Captain', role: 'bar captain', inviteUrl: 'https://occdecks.com/accept-invite?token=test' });
   assert.match(email.text, /create your password/i);
-  assert.match(email.text, /returned quantities/i);
+  assert.match(email.text, /Sent, Received and Returned quantities/);
+  assert.match(email.text, /Captain’s Report/);
+  assert.match(email.text, /Submit Captain’s Report separately/);
   assert.match(email.text, /Ivan/);
+});
+
+test('report-only captain instructions never ask for bar returns', () => {
+  const email = renderUserInviteEmail({ name: '<Captain>', role: 'captain', inviteUrl: 'https://example.com/invite' });
+  assert.match(email.subject, /Captain account/);
+  assert.match(email.text, /Captain’s Report/);
+  assert.doesNotMatch(email.text, /Bar Returns|beverage|returned quantities/i);
+  assert.match(email.html, /&lt;Captain&gt;/);
+});
+
+test('active captains get sign-in instructions without a new password or expiration', () => {
+  const email = renderUserInviteEmail({ name: 'Captain', role: 'bar captain', active: true, inviteUrl: 'https://example.com/login' });
+  assert.match(email.text, /existing password/);
+  assert.doesNotMatch(email.text, /72 hours|Create your password/);
+  assert.match(email.html, />Sign in</);
+});
+
+test('invitation CC addresses are validated, normalized and deduplicated', () => {
+  assert.deepEqual(normalizeInviteCc(' Manager@Example.com; manager@example.com, copy@example.com '), ['manager@example.com', 'copy@example.com']);
+  assert.deepEqual(normalizeInviteCc(), []);
+  assert.throws(() => normalizeInviteCc('invalid'), /valid CC/);
+  assert.throws(() => normalizeInviteCc(Array.from({ length: 6 }, (_, i) => `copy${i}@example.com`)), /up to 5/);
 });
 
 test('captain invitation email is sent from Ivan with a reply address', async () => {
@@ -52,6 +77,8 @@ test('captain invitation email is sent from Ivan with a reply address', async ()
     const result = await sendUserInviteEmail({
       email: 'itsupport@ocnyc.com',
       name: 'Test Captain',
+      role: 'captain',
+      cc: ['copy@example.com', 'itsupport@ocnyc.com'],
       inviteUrl: 'https://occdecks.com/accept-invite?token=test',
       fetchImpl: async (url, options) => {
         request = { url, body: JSON.parse(options.body) };
@@ -62,6 +89,8 @@ test('captain invitation email is sent from Ivan with a reply address', async ()
     assert.equal(request.body.from, 'Ivan at OCC <reports@reports.occdecks.com>');
     assert.equal(request.body.reply_to, 'ivan@ocnyc.com');
     assert.deepEqual(request.body.to, ['itsupport@ocnyc.com']);
+    assert.deepEqual(request.body.cc, ['copy@example.com']);
+    assert.doesNotMatch(request.body.text, /Bar Returns/);
   } finally {
     if (previousKey === undefined) delete process.env.RESEND_API_KEY;
     else process.env.RESEND_API_KEY = previousKey;

@@ -40,6 +40,29 @@ test('a single Day 1 PO is assigned to the final day of a two-day Dropbox series
   assert.equal(resolveDropboxSharedSeriesDocuments(events, 'day-one'), null);
 });
 
+test('a shared Dropbox PO follows the stable Caterease event number when day titles differ', () => {
+  const sharedPo = {
+    sourceProvider: 'dropbox', sourceId: 'prada-po', type: 'po',
+    fileName: 'Prada two day PO.docx', barItems: [{ name: 'Champagne 1 Case' }],
+  };
+  const events = [
+    {
+      _id: 'day-one', externalId: 'E22976 - S63088', title: 'Prada Saks Fifth Avenue Beverage Service',
+      date: '2026-10-01', client: 'Prada Saks', documents: [sharedPo],
+    },
+    {
+      _id: 'day-two', externalId: 'E22976 - S63089', title: 'Prada Saks 5th Ave. Beverage Service - Day 2',
+      date: '2026-10-02', client: 'PRADA USA Corp.', documents: [],
+    },
+  ];
+
+  const result = resolveDropboxSharedSeriesDocuments(events, 'day-two');
+
+  assert.deepEqual(result.eventIds, ['day-one', 'day-two']);
+  assert.equal(result.sourceEventId, 'day-one');
+  assert.equal(result.documents[0].sourceId, 'prada-po');
+});
+
 test('Dropbox bar sync uses one published copy of a mirrored PO', () => {
   const wine = [{ name: 'Sancerre, Romain Reverdy (White)', sentQty: 1 }];
   const documents = [

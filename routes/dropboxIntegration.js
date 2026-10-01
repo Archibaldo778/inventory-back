@@ -300,7 +300,7 @@ const loadDropboxBarSeriesContext = async (event) => {
   const from = new Date(sourceDate.getTime() - (14 * 86400000)).toISOString().slice(0, 10);
   const to = new Date(sourceDate.getTime() + (14 * 86400000)).toISOString().slice(0, 10);
   const candidates = await Event.find({ date: { $gte: from, $lte: to } })
-    .select('_id title date client documents')
+    .select('_id externalId title date client documents')
     .lean();
   return resolveDropboxSharedSeriesDocuments(candidates, event?._id);
 };

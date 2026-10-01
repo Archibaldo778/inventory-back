@@ -21,10 +21,19 @@ export const resolveDropboxSharedSeriesDocuments = (events = [], currentEventId 
     _id: String(event?._id || ''),
     name: String(event?.name || event?.title || ''),
     eventDate: String(event?.eventDate || event?.date || ''),
+    externalId: String(event?.externalId || event?.eventNumber || ''),
   }));
   const current = rows.find((event) => event._id === String(currentEventId || ''));
   if (!current) return null;
-  const series = selectBarPackoutSeries(rows, current);
+  const namedSeries = selectBarPackoutSeries(rows, current);
+  const baseEventNumber = current.externalId.match(/\bE\d+\b/i)?.[0]?.toUpperCase() || '';
+  const numberedSeries = baseEventNumber
+    ? rows.filter((event) => (
+      event.externalId.match(/\bE\d+\b/i)?.[0]?.toUpperCase() === baseEventNumber
+    ))
+      .sort((left, right) => left.eventDate.localeCompare(right.eventDate))
+    : [];
+  const series = namedSeries.length >= 2 ? namedSeries : numberedSeries;
   if (series.length < 2 || series.at(-1)?._id !== current._id) return null;
   const withDocuments = series.map((event) => ({
     event,

@@ -81,11 +81,20 @@ const emailReportTitle = (report) => report?.reportType === 'kitchen' ? 'Kitchen
 
 export const CAPTAIN_REPORT_RECIPIENTS = [
   'captainreport@ocnyc.com',
-  'olivier@ocnyc.com',
-  'heidi@ocnyc.com',
-  'sebastian@ocnyc.com',
-  'ashley@ocnyc.com',
 ];
+
+export const captainReportRecipients = (salesRep, configuredRecipients = []) => {
+  const normalized = clean(salesRep, 200).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const olivierTeam = ['olivier cheng', 'oliver cheng'].some((name) => (
+    normalized === name || normalized.startsWith(`${name} `) || name.startsWith(`${normalized} `)
+  ));
+  return [...new Set([
+    ...CAPTAIN_REPORT_RECIPIENTS,
+    ...(olivierTeam
+      ? ['olivier@ocnyc.com', 'heidi@ocnyc.com', 'sebastian@ocnyc.com', 'ashley@ocnyc.com']
+      : configuredRecipients),
+  ].map(email).filter(Boolean))];
+};
 
 export const renderEventReportEmail = (report = {}) => {
   const answers = report.answers || {};
@@ -146,7 +155,7 @@ export const sendEventReportEmail = async ({ report, event, configuredRecipients
   const isTest = event?.meta?.eventReportTest === true;
   const to = [...new Set((isTest
     ? ['ivan@ocnyc.com', 'iurie@ocnyc.com']
-    : (report?.reportType === 'kitchen' ? configuredRecipients : CAPTAIN_REPORT_RECIPIENTS)
+    : (report?.reportType === 'kitchen' ? configuredRecipients : captainReportRecipients(report?.salesRep, configuredRecipients))
   ).map(email).filter(Boolean))];
   if (!to.length) return { status: 'not_sent', recipients: [], cc: [], error: '' };
   const reporterEmail = email(report?.reporterEmail);

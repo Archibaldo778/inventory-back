@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CAPTAIN_REPORT_RECIPIENTS, EVENT_REPORT_EMAIL_SECTIONS, KITCHEN_REPORT_EMAIL_SECTIONS, renderEventReportEmail, renderEventReportText, sendEventReportEmail } from '../utils/eventReportEmail.js';
+import { CAPTAIN_REPORT_RECIPIENTS, EVENT_REPORT_EMAIL_SECTIONS, KITCHEN_REPORT_EMAIL_SECTIONS, captainReportRecipients, renderEventReportEmail, renderEventReportText, sendEventReportEmail } from '../utils/eventReportEmail.js';
 
 test('captain report email renders every report section and escapes answers', () => {
   const html = renderEventReportEmail({ eventTitle: '<Test>', reporterName: 'Ivan', answers: { overallFeedback: '<script>alert(1)</script>' } });
@@ -13,23 +13,36 @@ test('captain report email renders every report section and escapes answers', ()
   assert.match(renderEventReportText({ eventTitle: 'Test', answers: { overallFeedback: 'All good' } }), /Overall feedback: All good/);
 });
 
-test('production captain reports always go to Staffing and Service leadership and copy the captain', async () => {
+test('production captain reports route to the event sales team and copy the captain', async () => {
   const previousKey = process.env.RESEND_API_KEY;
   process.env.RESEND_API_KEY = 'test-key';
   let request;
   try {
     await sendEventReportEmail({
       event: { meta: {} },
-      report: { reportType: 'captain', eventTitle: 'Maison Madison', reporterName: 'Captain', reporterEmail: 'captain@ocnyc.com', answers: {} },
+      report: { reportType: 'captain', eventTitle: 'Maison Madison', reporterName: 'Captain', reporterEmail: 'captain@ocnyc.com', salesRep: 'Olivier Cheng', answers: {} },
       configuredRecipients: ['old-list@ocnyc.com'],
       fetchImpl: async (_url, options) => { request = JSON.parse(options.body); return { ok: true, json: async () => ({ id: 'email_456' }) }; },
     });
-    assert.deepEqual(request.to, CAPTAIN_REPORT_RECIPIENTS);
+    assert.deepEqual(request.to, [
+      ...CAPTAIN_REPORT_RECIPIENTS,
+      'olivier@ocnyc.com',
+      'heidi@ocnyc.com',
+      'sebastian@ocnyc.com',
+      'ashley@ocnyc.com',
+    ]);
     assert.deepEqual(request.cc, ['captain@ocnyc.com']);
     assert.match(request.from, /Staffing and Service Department/);
   } finally {
     if (previousKey === undefined) delete process.env.RESEND_API_KEY; else process.env.RESEND_API_KEY = previousKey;
   }
+});
+
+test('captain report keeps the central mailbox and configured team for other sales managers', () => {
+  assert.deepEqual(
+    captainReportRecipients('George Henderson', ['george-team@ocnyc.com', 'megan-team@ocnyc.com']),
+    ['captainreport@ocnyc.com', 'george-team@ocnyc.com', 'megan-team@ocnyc.com'],
+  );
 });
 
 test('kitchen report email uses the kitchen template', () => {

@@ -84,7 +84,8 @@ test('Kitchen Report cannot be opened for an unassigned, archived or unlinked ev
   await assert.rejects(openStaffKitchenReport(chef, '123'), /not linked/);
 });
 
-test('portal link loads and submits the existing Kitchen Report form with its kitchen-specific required answers', async (t) => {
+test('a chef can open and submit an unfilled Kitchen Report 14 days after the event, but cannot submit twice', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-10-15T16:00:00Z') });
   secret(t);
   const leadChef = { ...chef, jobTitle: '' };
   mockSources(t, { ...entry, shifts: [{ ...entry.shifts[0], position: 'Lead Chef' }] });

@@ -45,6 +45,31 @@ test('captain portal creates a report with the Dashboard account rep even when B
   assert.match(res.body.path, /event-report/);
 });
 
+test('captains and bar captains can reopen an unfilled report for a closed event from 14 days ago', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-10-15T16:00:00Z') });
+  env(t, 'JWT_SECRET', 'report-prefill-test-secret');
+  t.mock.method(Event, 'findById', () => ({ select: () => ({ lean: async () => ({ _id: eventId, title: 'Past dinner', date: '2026-10-01' }) }) }));
+  t.mock.method(BarEvent, 'findById', async () => ({ linkedEventId: eventId, eventDate: '2026-10-01', status: 'closed', assignedUserIds: ['captain1'], audit: [], save: async () => {} }));
+  const report = { _id: reportId, eventId, eventDate: '2026-10-01', status: 'pending', answers: { overallFeedback: 'Existing draft' } };
+  t.mock.method(EventReport, 'findOneAndUpdate', async (filter, update) => {
+    assert.deepEqual(filter, { eventId, slackUserId: 'account:captain1' });
+    assert.deepEqual(Object.keys(update), ['$setOnInsert']);
+    return report;
+  });
+  t.mock.method(EventReport, 'findOne', async () => report);
+  for (const role of ['captain', 'bar captain']) {
+    const opened = response();
+    await handler(barRouter, '/events/:id/captain-report-link', 'post')({ params: { id: eventId }, auth: { userId: 'captain1', role } }, opened);
+    assert.equal(opened.statusCode, 200);
+    const access = new URL(opened.body.path, 'https://example.com').searchParams.get('access');
+    const loaded = response();
+    await handler(publicRouter, '/:eventId', 'get')({ params: { eventId }, query: { access } }, loaded);
+    assert.equal(loaded.statusCode, 200);
+    assert.equal(loaded.body.report.status, 'pending');
+    assert.equal(loaded.body.report.answers.overallFeedback, 'Existing draft');
+  }
+});
+
 test('opening an existing empty report prefills the account rep without writing or changing answers', async (t) => {
   const req = accessRequest(t);
   mockEvent(t);

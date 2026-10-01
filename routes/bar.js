@@ -18,7 +18,11 @@ import {
   validateBarReturnQuantities,
 } from '../utils/barEventAccounting.js';
 import { prepareBarReturnBatchItem } from '../utils/barReturnBatch.js';
-import { buildDashboardBarSyncQuery, DASHBOARD_BAR_SYNC_SELECT } from '../utils/barDashboardSync.js';
+import {
+  buildActiveDashboardBarEventQuery,
+  buildDashboardBarSyncQuery,
+  DASHBOARD_BAR_SYNC_SELECT,
+} from '../utils/barDashboardSync.js';
 import { normalizeBarEventDate } from '../utils/barEventDates.js';
 import {
   barEventNumbersMatch,
@@ -374,7 +378,7 @@ const syncDashboardEventsToBar = async ({ eventId = null } = {}) => {
   const dashboardEvents = await Event.find(query).select(DASHBOARD_BAR_SYNC_SELECT).lean();
   if (!dashboardEvents.length) {
     if (eventId) return [];
-    const activeEvents = await Event.find({ status: { $not: /^deleted$/i } }).select('_id').lean();
+    const activeEvents = await Event.find(buildActiveDashboardBarEventQuery()).select('_id').lean();
     return activeEvents.map((event) => event._id);
   }
   const linkedIds = dashboardEvents.map((event) => event._id);
@@ -440,7 +444,7 @@ const syncDashboardEventsToBar = async ({ eventId = null } = {}) => {
     await BarEvent.bulkWrite(operations, { ordered: false });
   }
   if (eventId) return linkedIds;
-  const activeEvents = await Event.find({ status: { $not: /^deleted$/i } }).select('_id').lean();
+  const activeEvents = await Event.find(buildActiveDashboardBarEventQuery()).select('_id').lean();
   return activeEvents.map((event) => event._id);
 };
 

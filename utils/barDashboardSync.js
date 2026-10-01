@@ -17,8 +17,13 @@ export const DASHBOARD_BAR_SYNC_SELECT = [
   'meta.nowsta.shifts',
 ].join(' ');
 
+export const buildActiveDashboardBarEventQuery = () => ({
+  status: { $not: /^(?:deleted|cancelled|canceled|lost)$/i },
+  'meta.nowsta.excluded': { $ne: true },
+});
+
 export const buildDashboardBarSyncQuery = ({ eventId = null, today = isoDay(new Date()) } = {}) => ({
-  status: { $not: /^deleted$/i },
+  ...buildActiveDashboardBarEventQuery(),
   ...(eventId
     ? { _id: eventId }
     : { date: { $gte: shiftIsoDay(today, -30), $lte: shiftIsoDay(today, 90) } }),

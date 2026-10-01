@@ -17,3 +17,8 @@ test('current Nowsta events are never treated as removed', () => {
     [],
   );
 });
+
+test('legacy imported events are reconciled even without a schedule-entry row', () => {
+  const previous = [{ meta: { nowsta: { apiEventId: 'tiffany-cancelled' } } }];
+  assert.deepEqual(missingNowstaScheduleIds(previous, []), ['tiffany-cancelled']);
+});

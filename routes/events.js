@@ -749,12 +749,24 @@ export const runNowstaSync = async ({ from, to, actor } = {}) => {
     const result = await applyNowstaApiRows(fetched.events, actor);
     const rangeFrom = String(fetched.range?.from || '').slice(0, 10);
     const rangeTo = String(fetched.range?.to || '').slice(0, 10);
-    const previouslySynced = rangeFrom && rangeTo
-      ? await NowstaScheduleEntry.find({ date: { $gte: rangeFrom, $lte: rangeTo }, archived: { $ne: true } })
-        .select('nowstaEventId')
-        .lean()
-      : [];
-    const missingScheduleIds = missingNowstaScheduleIds(previouslySynced, fetched.scheduleEvents);
+    const [previouslySynced, previouslyImportedEvents] = rangeFrom && rangeTo
+      ? await Promise.all([
+        NowstaScheduleEntry.find({ date: { $gte: rangeFrom, $lte: rangeTo }, archived: { $ne: true } })
+          .select('nowstaEventId')
+          .lean(),
+        Event.find({
+          date: { $gte: rangeFrom, $lte: rangeTo },
+          'meta.nowsta.apiEventId': { $exists: true, $ne: '' },
+          'meta.nowsta.excluded': { $ne: true },
+        })
+          .select('meta.nowsta.apiEventId')
+          .lean(),
+      ])
+      : [[], []];
+    const missingScheduleIds = missingNowstaScheduleIds(
+      [...previouslySynced, ...previouslyImportedEvents],
+      fetched.scheduleEvents,
+    );
     if (missingScheduleIds.length) {
       const removedAt = new Date();
       await Promise.all([

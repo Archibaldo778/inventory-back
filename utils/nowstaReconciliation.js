@@ -3,6 +3,6 @@ export const missingNowstaScheduleIds = (existingEntries = [], currentEntries = 
     .map((entry) => String(entry?.nowstaEventId || '').trim())
     .filter(Boolean));
   return [...new Set((Array.isArray(existingEntries) ? existingEntries : [])
-    .map((entry) => String(entry?.nowstaEventId || '').trim())
+    .map((entry) => String(entry?.nowstaEventId || entry?.meta?.nowsta?.apiEventId || '').trim())
     .filter((id) => id && !currentIds.has(id)))];
 };

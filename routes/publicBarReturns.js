@@ -25,7 +25,7 @@ import {
   verifyGuestBarSession,
 } from '../utils/guestBarAccess.js';
 import { verifyEventGuestAccess } from '../utils/eventGuestAccess.js';
-import { verifyBarEventShareToken } from '../utils/barReturnsLinks.js';
+import { hashBarEventShareToken, verifyBarEventShareToken } from '../utils/barReturnsLinks.js';
 import { sendBarReturnEmail } from '../utils/barReturnEmail.js';
 
 const router = Router();
@@ -397,13 +397,27 @@ router.post('/verify-pin', requirePin, (req, res) => {
 });
 router.post('/event-access', async (req, res) => {
   try {
-    const dashboardEventId = clean(req.body?.eventId, 80);
+    let dashboardEventId = clean(req.body?.eventId, 80);
     const accessToken = clean(req.body?.accessToken, 4096);
+    const accessHash = hashBarEventShareToken(accessToken);
+    let sharedBarEvent = null;
+    if (!dashboardEventId && accessToken) {
+      sharedBarEvent = await BarEvent.findOne({
+        $or: [
+          { 'shareAccess.tokenHash': accessHash },
+          { 'shareAccess.tokenHashes': accessHash },
+        ],
+      }).select('+shareAccess.tokenHash +shareAccess.tokenHashes linkedEventId status');
+      dashboardEventId = clean(sharedBarEvent?.linkedEventId, 80);
+    }
+    if (!mongoose.Types.ObjectId.isValid(dashboardEventId)) {
+      return res.status(401).json({ message: 'This captain link is invalid' });
+    }
     const dashboardEvent = await Event.findOne({ _id: dashboardEventId, status: { $not: /^deleted$/i } })
       .select('title date client meta externalId');
     if (!dashboardEvent) return res.status(404).json({ message: 'Event not found' });
     const event = await syncDashboardEvent(dashboardEvent);
-    const eventWithSecret = await BarEvent.findById(event._id).select('+shareAccess.tokenHash +shareAccess.tokenHashes status');
+    const eventWithSecret = sharedBarEvent || await BarEvent.findById(event._id).select('+shareAccess.tokenHash +shareAccess.tokenHashes status');
     const shareHashes = [
       eventWithSecret?.shareAccess?.tokenHash,
       ...(Array.isArray(eventWithSecret?.shareAccess?.tokenHashes) ? eventWithSecret.shareAccess.tokenHashes : []),

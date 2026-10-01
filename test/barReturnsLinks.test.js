@@ -10,9 +10,9 @@ test('bartender share link is reusable for its event until returns are submitted
   try {
     const result = createBarEventShareLink({ dashboardEventId: 'event-a' });
     const parsed = new URL(result.url);
-    const token = parsed.searchParams.get('access');
+    const token = parsed.pathname.split('/').pop();
     assert.equal(parsed.origin, 'https://example.test');
-    assert.equal(parsed.searchParams.get('event'), 'event-a');
+    assert.match(parsed.pathname, /^\/bar\/r\/[A-Za-z0-9_-]{24}$/);
     assert.equal(verifyBarEventShareToken(token, result.tokenHash), true);
     assert.equal(verifyBarEventShareToken(token, result.tokenHash), true);
     assert.equal(verifyBarEventShareToken('another-token', result.tokenHash), false);

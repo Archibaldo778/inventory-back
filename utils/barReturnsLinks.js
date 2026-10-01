@@ -23,9 +23,9 @@ export const verifyBarEventShareToken = (token, expectedHash) => {
 export const createBarEventShareLink = ({ dashboardEventId } = {}) => {
   const eventId = String(dashboardEventId || '').trim();
   if (!eventId) throw new Error('This bar report is not linked to a Dashboard event');
-  const token = crypto.randomBytes(32).toString('base64url');
+  const token = crypto.randomBytes(18).toString('base64url');
   return {
-    url: `${barReturnsAppOrigin()}/bar/returns?event=${encodeURIComponent(eventId)}&access=${encodeURIComponent(token)}`,
+    url: `${barReturnsAppOrigin()}/bar/r/${encodeURIComponent(token)}`,
     tokenHash: hashBarEventShareToken(token),
   };
 };

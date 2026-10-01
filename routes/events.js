@@ -25,7 +25,7 @@ import { createMemoryRateLimiter } from '../middleware/rateLimit.js';
 import { clearApiCacheGroups, createGroupedApiCache } from '../utils/apiCache.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import { fetchNowstaImportRows, resolveNowstaSyncRange } from '../utils/nowstaApi.js';
-import { missingNowstaScheduleIds } from '../utils/nowstaReconciliation.js';
+import { missingNowstaScheduleIds, nowstaScheduleUpsert } from '../utils/nowstaReconciliation.js';
 import { buildOperationsPeople, matchStaffByName, normalizePersonName } from '../utils/operationsRoster.js';
 import { runWithTransactionFallback } from '../utils/mongoTransaction.js';
 import {
@@ -789,13 +789,7 @@ export const runNowstaSync = async ({ from, to, actor } = {}) => {
     }
     if (fetched.scheduleEvents.length) {
       const syncedAt = new Date();
-      await NowstaScheduleEntry.bulkWrite(fetched.scheduleEvents.map((entry) => ({
-        updateOne: {
-          filter: { nowstaEventId: entry.nowstaEventId },
-          update: { $set: { ...entry, archived: false, lastSyncedAt: syncedAt } },
-          upsert: true,
-        },
-      })), { ordered: false });
+      await NowstaScheduleEntry.bulkWrite(fetched.scheduleEvents.map((entry) => nowstaScheduleUpsert(entry, syncedAt)), { ordered: false });
     }
     if (fetched.scheduleDepartments.length) {
       const syncedAt = new Date();

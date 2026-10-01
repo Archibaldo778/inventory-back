@@ -3,7 +3,7 @@ import EventReport from '../models/EventReport.js';
 import EventReportReminder from '../models/EventReportReminder.js';
 import NowstaScheduleEntry from '../models/NowstaScheduleEntry.js';
 import User from '../models/Users.js';
-import { workerMatchesStaff } from './staffPortal.js';
+import { captainAssignedShifts, isCaptainPosition } from './captainEventDuties.js';
 import { buildActiveDashboardBarEventQuery } from './barDashboardSync.js';
 import { captainReportIdentity, openCaptainReport } from './captainReports.js';
 import { eventReportUrl } from './slackEventChannels.js';
@@ -26,7 +26,7 @@ export const captainReportReminderStage = (endsAt, now = new Date()) => {
 export const assignedReportCaptains = (schedule, users) => users.filter((user) => (
   user.isActive !== false && ['captain', 'bar captain'].includes(user.role)
   && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(user.email || '')
-  && (schedule.shifts || []).some((shift) => (shift.workers || []).some((worker) => workerMatchesStaff(worker, user)))
+  && captainAssignedShifts(schedule, user).some((shift) => isCaptainPosition(shift.position))
 ));
 
 export const captainReminderEmail = ({ event, user, report, endsAt, hours }) => {
@@ -50,6 +50,7 @@ export const captainReminderEmail = ({ event, user, report, endsAt, hours }) => 
 };
 
 export const deliverCaptainReportReminder = async ({ event, schedule, user, report, hours, now, fetchImpl }) => {
+  if (!assignedReportCaptains(schedule, [user]).length) return 'skipped';
   if (!requiresEventReport(event, schedule)) return 'skipped';
   if (!reminderEventEligible(event.date) || !reminderEventEligible(schedule.date)) return 'skipped';
   const id = `captain-report:${event._id}:${user._id}:${hours}`;

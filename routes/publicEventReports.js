@@ -10,6 +10,7 @@ import { sendEventReportEmail } from '../utils/eventReportEmail.js';
 import { EVENT_REPORT_CONTEXT_SELECT, resolveReportSalesRep } from '../utils/eventReportSalesRep.js';
 import { validateStaffKitchenReportAccess } from '../utils/staffKitchenReport.js';
 import { requiresEventReport } from '../utils/eventReportRequirement.js';
+import { reportCaptainStillAssigned } from '../utils/captainEventDuties.js';
 
 const router = Router();
 const limiter = createMemoryRateLimiter({ windowMs: 10 * 60 * 1000, max: 60, message: 'Too many event report requests' });
@@ -80,7 +81,7 @@ router.get('/:eventId', limiter, async (req, res) => {
     if (!report) return res.status(404).json({ message: 'Event report was not found' });
     await validateStaffKitchenReportAccess(access, report);
     const event = await Event.findById(report.eventId).select(`title ${EVENT_REPORT_CONTEXT_SELECT}`).lean();
-    return res.json({ report: { ...publicReport(report), salesRep: resolveReportSalesRep(report, event), reportRequired: requiresEventReport(event || { title: report.eventTitle }) } });
+    return res.json({ report: { ...publicReport(report), salesRep: resolveReportSalesRep(report, event), reportRequired: requiresEventReport(event || { title: report.eventTitle }) && await reportCaptainStillAssigned(report, event) } });
   } catch (error) {
     return sendApiError(res, error, { context: 'Public event report load failed', fallbackMessage: 'Could not load this event report' });
   }
@@ -96,6 +97,7 @@ router.post('/:eventId', limiter, async (req, res) => {
     if (report.status === 'submitted') return res.status(409).json({ message: 'This report has already been submitted' });
     const event = await Event.findById(report.eventId).select(`title ${EVENT_REPORT_CONTEXT_SELECT}`).lean();
     if (!requiresEventReport(event || { title: report.eventTitle })) return res.status(403).json({ message: 'No report is required for this event' });
+    if (!await reportCaptainStillAssigned(report, event)) return res.status(403).json({ message: 'No Captain report is required for your booking on this event' });
     const kitchenReport = report.reportType === 'kitchen';
     const stringFields = kitchenReport ? KITCHEN_REPORT_STRING_FIELDS : REPORT_STRING_FIELDS;
     const requiredFields = kitchenReport ? KITCHEN_REPORT_REQUIRED_FIELDS : REPORT_REQUIRED_FIELDS;

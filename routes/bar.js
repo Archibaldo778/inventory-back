@@ -32,6 +32,7 @@ import {
 import { sendApiError } from '../utils/apiErrors.js';
 import { issueEventGuestAccess } from '../utils/eventGuestAccess.js';
 import { openCaptainReport } from '../utils/captainReports.js';
+import { loadCaptainEventDuties, loadCaptainEventDutiesBatch } from '../utils/captainEventDuties.js';
 import { requiresEventReport } from '../utils/eventReportRequirement.js';
 import {
   INVALID_PACKOUT_UPLOAD_RESPONSE,
@@ -78,6 +79,7 @@ const MAX_SCAN_TOTAL_BYTES = 40 * 1024 * 1024;
 const SCAN_RATE_WINDOW_MS = 10 * 60 * 1000;
 const SCAN_RATE_MAX = 20;
 const scanRateBuckets = new Map();
+const captainBookings = new WeakMap();
 
 const packoutScanUpload = multer({
   storage: multer.memoryStorage(),
@@ -122,6 +124,9 @@ const isBarWorker = (auth) => BAR_WORKER_ROLES.has(normalizeRole(auth?.role));
 const isBarCaptain = (auth) => normalizeRole(auth?.role) === 'bar captain';
 const isCaptain = (auth) => ['captain', 'bar captain'].includes(normalizeRole(auth?.role));
 const isAssignedEventUser = (auth) => ASSIGNED_EVENT_ROLES.has(normalizeRole(auth?.role));
+const rememberCaptainBooking = (event, booking, auth) => captainBookings.set(event, {
+  ...booking, canOperateBar: isBarWorker(auth) && booking.captainAssigned,
+});
 
 const eventAssignedToAuth = (event, auth) => {
   const userId = String(auth?.userId || '');
@@ -138,7 +143,7 @@ export const canViewEvent = (event, auth) => (
 
 export const canOperateEvent = (event, auth) => (
   isBarManager(auth)
-  || (isBarWorker(auth) && eventAssignedToAuth(event, auth))
+  || (isBarWorker(auth) && eventAssignedToAuth(event, auth) && captainBookings.get(event)?.captainAssigned !== false)
 );
 
 const addAudit = (event, auth, action, details = {}) => {
@@ -205,6 +210,13 @@ const rememberCatalogMatchAcrossEvents = async ({ catalogItem, names, auth }) =>
 const serializeBarEvent = (source, { includeFinancials = false } = {}) => {
   const event = typeof source?.toObject === 'function' ? source.toObject() : { ...(source || {}) };
   event.reportRequired = requiresEventReport(event);
+  const booking = captainBookings.get(source);
+  if (booking) {
+    event.bookingPositions = booking.positions;
+    event.canUseCaptainReport = event.reportRequired && booking.captainAssigned;
+    event.canOperateBar = booking.canOperateBar;
+    event.reportRequired = event.canUseCaptainReport;
+  }
   const totals = calculateBarEventAccounting(event);
   const captainSyncAudit = [...(Array.isArray(event.audit) ? event.audit : [])].reverse().find((entry) => (
     ['guest_received_saved', 'guest_returns_submitted'].includes(String(entry?.action || ''))
@@ -349,7 +361,22 @@ const loadEvent = async (req, res) => {
     res.status(404).json({ message: 'Event bar report not found' });
     return null;
   }
+  if (isCaptain(req.auth) && isObjectId(event.linkedEventId)) {
+    const dashboardEvent = await Event.findById(event.linkedEventId).select('meta.nowsta').lean();
+    rememberCaptainBooking(event, dashboardEvent ? await loadCaptainEventDuties(dashboardEvent, req.auth) : { captainAssigned: false, positions: [] }, req.auth);
+  }
   return event;
+};
+
+const attachCaptainBookings = async (events, auth) => {
+  if (!isCaptain(auth)) return;
+  const ids = events.map((event) => event.linkedEventId).filter((id) => isObjectId(id));
+  if (!ids.length) return;
+  const dashboardEvents = await Event.find({ _id: { $in: ids } }).select('meta.nowsta').lean();
+  const bookings = await loadCaptainEventDutiesBatch(dashboardEvents, auth);
+  for (const event of events) {
+    if (isObjectId(event.linkedEventId)) rememberCaptainBooking(event, bookings.get(String(event.linkedEventId)) || { captainAssigned: false, positions: [] }, auth);
+  }
 };
 
 const eventVenue = (event) => cleanString(
@@ -868,6 +895,7 @@ router.get('/events', async (req, res) => {
       query.assignedUserIds = req.auth.userId;
     }
     const events = await BarEvent.find(query).sort({ eventDate: -1, createdAt: -1 });
+    await attachCaptainBookings(events, req.auth);
     return res.json(events.map((event) => serializeBarEvent(event, {
       includeFinancials: canSeeBarFinancials(req.auth),
     })));
@@ -1177,6 +1205,7 @@ router.get('/events/by-linked/:linkedEventId', async (req, res) => {
     await syncDashboardEventsToBar({ eventId: req.params.linkedEventId });
     const event = await BarEvent.findOne({ linkedEventId: req.params.linkedEventId });
     if (!event) return res.status(404).json({ message: 'Event bar report not found' });
+    await attachCaptainBookings([event], req.auth);
     if (!canViewEvent(event, req.auth)) {
       return res.status(403).json({
         message: isBarCaptain(req.auth)
@@ -1205,8 +1234,9 @@ router.get('/events/:id/packout-series', requireBarOperator, async (req, res) =>
     const from = new Date(sourceDate.getTime() - (14 * 86400000)).toISOString().slice(0, 10);
     const to = new Date(sourceDate.getTime() + (14 * 86400000)).toISOString().slice(0, 10);
     const candidates = await BarEvent.find({ eventDate: { $gte: from, $lte: to } })
-      .select('_id name eventDate client status assignedUserIds packout.seriesRole')
+      .select('_id linkedEventId name eventDate client status assignedUserIds packout.seriesRole')
       .lean();
+    await attachCaptainBookings(candidates, req.auth);
     const series = selectBarPackoutSeries(candidates, event)
       .filter((candidate) => canOperateEvent(candidate, req.auth));
     return res.json({ events: series.map((candidate, index) => ({
@@ -1265,6 +1295,9 @@ router.post('/events/:id/captain-report-link', async (req, res) => {
     if (!isBarManager(req.auth) && !eventAssignedToAuth(barEvent, req.auth)) {
       return res.status(403).json({ message: 'You can only open a report for an event assigned to your account' });
     }
+    if (!isBarManager(req.auth) && captainBookings.get(barEvent)?.captainAssigned === false) {
+      return res.status(403).json({ message: 'A confirmed Captain booking is required for this event' });
+    }
     if (!isObjectId(barEvent.linkedEventId)) {
       return res.status(409).json({ message: 'This bar report is not linked to a Dashboard event' });
     }
@@ -1272,7 +1305,7 @@ router.post('/events/:id/captain-report-link', async (req, res) => {
     if (!event) return res.status(404).json({ message: 'Dashboard event was not found' });
     const report = await openCaptainReport({
       event: { ...event, title: cleanString(event.title || barEvent.name, 300), date: cleanString(event.date || barEvent.eventDate, 20) },
-      user: req.auth, schedule: { title: barEvent.name }, fallbackSalesRep: barEvent.salesRep,
+      user: req.auth, schedule: captainBookings.get(barEvent)?.schedule || { title: barEvent.name }, fallbackSalesRep: barEvent.salesRep,
     });
     const accessToken = issueEventGuestAccess({
       eventIds: [String(event._id)], capability: 'event:report', subjectId: report.slackUserId,

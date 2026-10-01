@@ -100,7 +100,7 @@ test('only active assigned captains receive reminders, with exact email or full-
     assert.deepEqual(assignedReportCaptains(schedule, [{ ...user, ...changed }]), []);
   }
   assert.deepEqual(assignedReportCaptains({ ...schedule, shifts: [{ workers: [{ email: user.email, status: 'declined' }] }] }, [user]), []);
-  assert.equal(assignedReportCaptains({ ...schedule, shifts: [{ workers: [{ name: user.username, status: 'confirmed' }] }] }, [user]).length, 1);
+  assert.equal(assignedReportCaptains({ ...schedule, shifts: [{ position: 'Captain', workers: [{ name: user.username, status: 'confirmed' }] }] }, [user]).length, 1);
 });
 
 test('a never-opened report receives exactly three emails, with a working report link and Staffing reply address', async (t) => {
@@ -135,7 +135,7 @@ test('submission stops later reminders, including reports already submitted thro
   assert.equal((await state.run(36)).sent, 0);
   assert.equal((await state.run(48)).sent, 0);
   assert.equal(state.requests.length, 1);
-  assert.equal((await openCaptainReport({ event, user })).slackUserId, 'slack-captain');
+  assert.equal((await openCaptainReport({ event, user, schedule })).slackUserId, 'slack-captain');
 });
 
 test('submission immediately before sending cancels the claimed reminder', async (t) => {

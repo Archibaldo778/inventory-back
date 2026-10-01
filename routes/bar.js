@@ -1288,7 +1288,7 @@ router.post('/events/:id/share-link', requireBarOperator, async (req, res) => {
 
 router.post('/events/:id/captain-report-link', async (req, res) => {
   try {
-    if (!isCaptain(req.auth) && !isBarManager(req.auth)) {
+    if (!isCaptain(req.auth) && !isAdminAuth(req.auth)) {
       return res.status(403).json({ message: 'Captain account required' });
     }
     const barEvent = await loadEvent(req, res);
@@ -1304,6 +1304,7 @@ router.post('/events/:id/captain-report-link', async (req, res) => {
     }
     const event = await Event.findById(barEvent.linkedEventId).select('_id title date managerId meta catereaseOperations').lean();
     if (!event) return res.status(404).json({ message: 'Dashboard event was not found' });
+    if (isAdminAuth(req.auth)) return res.json({ path: `/events/${event._id}?view=reports` });
     const report = await openCaptainReport({
       event: { ...event, title: cleanString(event.title || barEvent.name, 300), date: cleanString(event.date || barEvent.eventDate, 20) },
       user: req.auth, schedule: captainBookings.get(barEvent)?.schedule || { title: barEvent.name }, fallbackSalesRep: barEvent.salesRep,

@@ -16,6 +16,7 @@ import { analyzeEventReports, eventReportAnalysisIsStale } from '../utils/eventR
 import EventReportFile from '../models/EventReportFile.js';
 import eventReportFilesRouter from './eventReportFiles.js';
 import { publicReportFile } from '../utils/eventReportFiles.js';
+import { visibleEventReports } from '../utils/eventReportVisibility.js';
 import {
   decryptDropboxSecret,
   getDropboxCurrentAccount,
@@ -197,7 +198,7 @@ router.get('/', async (req, res) => {
     ]);
     const analysis = event?.meta?.eventReportAnalysis || null;
     return res.json({
-      items: reports,
+      items: await visibleEventReports(reports),
       files: files.map(publicReportFile),
       ai: eventId ? {
         enabledForEvent: Boolean(event),

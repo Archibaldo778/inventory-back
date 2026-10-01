@@ -10,26 +10,31 @@ import { openStaffKitchenReport } from '../utils/staffKitchenReport.js';
 import { issueEventGuestAccess } from '../utils/eventGuestAccess.js';
 import { dashboardEventGuestCount, EVENT_GUEST_COUNT_FIELDS } from '../utils/barGuestCount.js';
 import { buildActiveDashboardBarEventQuery } from '../utils/barDashboardSync.js';
+import { requiresEventReport } from '../utils/eventReportRequirement.js';
 
 const router = Router();
 const eventFields = 'nowstaEventId title client date venue address guestCount timeZone shifts archived';
 const requireEventStaff = requireRoles(['event staff']);
 
-const withLinkedGuestCounts = async (items) => {
+const withLinkedEventDetails = async (items) => {
   if (!items.length) return items;
   const events = await Event.find({
     ...buildActiveDashboardBarEventQuery(),
     'meta.nowsta.apiEventId': { $in: items.map((item) => item.id) },
-  }).select(['meta.nowsta.apiEventId', ...EVENT_GUEST_COUNT_FIELDS].join(' ')).lean();
+  }).select(['title', 'meta.nowsta.apiEventId', ...EVENT_GUEST_COUNT_FIELDS].join(' ')).lean();
   const counts = new Map();
+  const exemptIds = new Set();
   for (const event of events) {
     const id = String(event.meta?.nowsta?.apiEventId);
+    if (!requiresEventReport(event)) exemptIds.add(id);
     const count = dashboardEventGuestCount(event);
     if (count > 0 || !counts.has(id)) counts.set(id, count);
   }
   return items.map((item) => {
     const linkedCount = counts.get(item.id);
-    return { ...item, guestCount: linkedCount > 0 ? linkedCount : item.guestCount ?? linkedCount ?? null };
+    const reportRequired = item.reportRequired && !exemptIds.has(item.id);
+    return { ...item, guestCount: linkedCount > 0 ? linkedCount : item.guestCount ?? linkedCount ?? null,
+      reportRequired, canUseKitchenReport: reportRequired && item.canUseKitchenReport };
   });
 };
 
@@ -46,7 +51,7 @@ router.get('/events', requireEventStaff, async (req, res) => {
     }
     const entries = await NowstaScheduleEntry.find({ ...staffScheduleQuery(req.auth), ...(!allDates ? { date: { $gte: from, $lte: to } } : {}) })
       .select(eventFields).sort({ date: 1, startsAt: 1 }).lean();
-    const items = await withLinkedGuestCounts(entries.map((entry) => serializeStaffEvent(entry, req.auth)).filter(Boolean));
+    const items = await withLinkedEventDetails(entries.map((entry) => serializeStaffEvent(entry, req.auth)).filter(Boolean));
     return res.json({ items, from, to });
   } catch (error) { return sendApiError(res, error, { fallbackMessage: 'Could not load your events' }); }
 });
@@ -57,7 +62,7 @@ router.get('/events/:id', requireEventStaff, async (req, res) => {
       .select(eventFields).lean();
     const event = serializeStaffEvent(entry, req.auth);
     if (!event) return res.status(404).json({ message: 'Event is not assigned to you' });
-    const [enrichedEvent] = await withLinkedGuestCounts([event]);
+    const [enrichedEvent] = await withLinkedEventDetails([event]);
     return res.json(enrichedEvent);
   } catch (error) { return sendApiError(res, error, { fallbackMessage: 'Could not load your event' }); }
 });

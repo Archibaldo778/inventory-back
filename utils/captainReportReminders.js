@@ -8,6 +8,7 @@ import { buildActiveDashboardBarEventQuery } from './barDashboardSync.js';
 import { captainReportIdentity, openCaptainReport } from './captainReports.js';
 import { eventReportUrl } from './slackEventChannels.js';
 import { fetchWithTimeout } from './fetchWithTimeout.js';
+import { requiresEventReport } from './eventReportRequirement.js';
 
 const HOUR = 60 * 60 * 1000;
 // Fixed rollout date in New York. Never move this forward with the current day.
@@ -49,6 +50,7 @@ export const captainReminderEmail = ({ event, user, report, endsAt, hours }) => 
 };
 
 export const deliverCaptainReportReminder = async ({ event, schedule, user, report, hours, now, fetchImpl }) => {
+  if (!requiresEventReport(event, schedule)) return 'skipped';
   if (!reminderEventEligible(event.date) || !reminderEventEligible(schedule.date)) return 'skipped';
   const id = `captain-report:${event._id}:${user._id}:${hours}`;
   const existing = await EventReportReminder.findById(id).select('status firstAttemptAt lockedUntil').lean();
@@ -107,7 +109,7 @@ export const runCaptainReportEmailReminders = async ({ now = new Date(), fetchIm
     const schedules = await NowstaScheduleEntry.find({
       date: { $gte: CAPTAIN_REPORT_REMINDERS_START_DATE },
       archived: { $ne: true }, endsAt: { $gte: new Date(now.getTime() - 14 * 24 * HOUR), $lte: new Date(now.getTime() - 24 * HOUR) },
-    }).select('nowstaEventId date endsAt archived shifts').lean();
+    }).select('nowstaEventId title date endsAt archived shifts').lean();
     if (!schedules.length) return summary;
     const [events, users] = await Promise.all([
       Event.find({ ...buildActiveDashboardBarEventQuery(), date: { $gte: CAPTAIN_REPORT_REMINDERS_START_DATE }, 'meta.eventReportTest': { $ne: true }, 'meta.nowsta.apiEventId': { $in: schedules.map((row) => row.nowstaEventId) } })
@@ -118,6 +120,7 @@ export const runCaptainReportEmailReminders = async ({ now = new Date(), fetchIm
       const matches = events.filter((event) => String(event.meta?.nowsta?.apiEventId) === schedule.nowstaEventId);
       if (matches.length !== 1) continue;
       const event = matches[0];
+      if (!requiresEventReport(event, schedule)) continue;
       if (!reminderEventEligible(event.date) || !reminderEventEligible(schedule.date)) continue;
       const hours = captainReportReminderStage(schedule.endsAt, now);
       if (!hours || schedule.archived) continue;

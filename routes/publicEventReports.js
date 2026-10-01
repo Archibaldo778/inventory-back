@@ -9,6 +9,7 @@ import { verifyEventGuestAccess } from '../utils/eventGuestAccess.js';
 import { sendEventReportEmail } from '../utils/eventReportEmail.js';
 import { EVENT_REPORT_CONTEXT_SELECT, resolveReportSalesRep } from '../utils/eventReportSalesRep.js';
 import { validateStaffKitchenReportAccess } from '../utils/staffKitchenReport.js';
+import { requiresEventReport } from '../utils/eventReportRequirement.js';
 
 const router = Router();
 const limiter = createMemoryRateLimiter({ windowMs: 10 * 60 * 1000, max: 60, message: 'Too many event report requests' });
@@ -78,8 +79,8 @@ router.get('/:eventId', limiter, async (req, res) => {
     const report = await EventReport.findOne({ eventId: req.params.eventId, slackUserId: clean(access.subjectId, 100) });
     if (!report) return res.status(404).json({ message: 'Event report was not found' });
     await validateStaffKitchenReportAccess(access, report);
-    const event = await Event.findById(report.eventId).select(EVENT_REPORT_CONTEXT_SELECT).lean();
-    return res.json({ report: { ...publicReport(report), salesRep: resolveReportSalesRep(report, event) } });
+    const event = await Event.findById(report.eventId).select(`title ${EVENT_REPORT_CONTEXT_SELECT}`).lean();
+    return res.json({ report: { ...publicReport(report), salesRep: resolveReportSalesRep(report, event), reportRequired: requiresEventReport(event || { title: report.eventTitle }) } });
   } catch (error) {
     return sendApiError(res, error, { context: 'Public event report load failed', fallbackMessage: 'Could not load this event report' });
   }
@@ -93,6 +94,8 @@ router.post('/:eventId', limiter, async (req, res) => {
     if (!report) return res.status(404).json({ message: 'Event report was not found' });
     await validateStaffKitchenReportAccess(access, report);
     if (report.status === 'submitted') return res.status(409).json({ message: 'This report has already been submitted' });
+    const event = await Event.findById(report.eventId).select(`title ${EVENT_REPORT_CONTEXT_SELECT}`).lean();
+    if (!requiresEventReport(event || { title: report.eventTitle })) return res.status(403).json({ message: 'No report is required for this event' });
     const kitchenReport = report.reportType === 'kitchen';
     const stringFields = kitchenReport ? KITCHEN_REPORT_STRING_FIELDS : REPORT_STRING_FIELDS;
     const requiredFields = kitchenReport ? KITCHEN_REPORT_REQUIRED_FIELDS : REPORT_REQUIRED_FIELDS;
@@ -100,10 +103,7 @@ router.post('/:eventId', limiter, async (req, res) => {
     if (!kitchenReport) answers.followUpRequired = req.body?.answers?.followUpRequired === true;
     const missingRequired = requiredFields.filter((key) => !answers[key]);
     if (missingRequired.length) return res.status(400).json({ message: `Complete all required questions (${missingRequired.length} remaining)` });
-    const [event, settings] = await Promise.all([
-      Event.findById(report.eventId).select(EVENT_REPORT_CONTEXT_SELECT).lean(),
-      EventReportSettings.findOne({ key: 'default' }).lean(),
-    ]);
+    const settings = await EventReportSettings.findOne({ key: 'default' }).lean();
     report.salesRep = resolveReportSalesRep(report, event);
     report.answers = answers;
     report.status = 'submitted';

@@ -1,5 +1,7 @@
 import EventReport from '../models/EventReport.js';
 import { resolveEventSalesRep } from './eventReportSalesRep.js';
+import { requiresEventReport } from './eventReportRequirement.js';
+import { createApiError } from './apiErrors.js';
 
 export const captainReportIdentity = (eventId, user) => ({
   eventId, reportType: 'captain',
@@ -10,6 +12,7 @@ export const captainReportIdentity = (eventId, user) => ({
 });
 
 export const openCaptainReport = async ({ event, user, schedule, fallbackSalesRep = '' }) => {
+  if (!requiresEventReport(event, schedule)) throw createApiError(403, 'No report is required for this event');
   // Reuse Slack requests and submitted reports for the same person.
   const existing = await EventReport.findOne(captainReportIdentity(event._id, user))
     .sort({ submittedAt: -1, createdAt: 1 });

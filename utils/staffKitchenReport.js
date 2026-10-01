@@ -6,6 +6,7 @@ import { kitchenReportPosition } from './eventStaffAccess.js';
 import { serializeStaffEvent, staffScheduleQuery } from './staffPortal.js';
 import { resolveEventSalesRep } from './eventReportSalesRep.js';
 import { createApiError } from './apiErrors.js';
+import { requiresEventReport } from './eventReportRequirement.js';
 
 export const kitchenReportEventQuery = (nowstaEventId) => ({
   'meta.nowsta.apiEventId': nowstaEventId,
@@ -19,10 +20,12 @@ export const openStaffKitchenReport = async (user, nowstaEventId) => {
     .select('nowstaEventId title date shifts archived').lean();
   const assignedEvent = serializeStaffEvent(entry, user);
   if (!assignedEvent) throw createApiError(404, 'Event is not assigned to you');
+  if (!assignedEvent.reportRequired) throw createApiError(403, 'No report is required for this event');
   if (!assignedEvent.canUseKitchenReport) throw createApiError(403, 'Lead Chef assignment or Executive Chef profile required');
   const event = await Event.findOne(kitchenReportEventQuery(nowstaEventId))
     .select('_id title date managerId meta catereaseOperations').lean();
   if (!event) throw createApiError(409, 'This Nowsta event is not linked to an active Inventory event. Ask an administrator to check the event sync.');
+  if (!requiresEventReport(event)) throw createApiError(403, 'No report is required for this event');
   const subjectId = `account:${user.userId}:kitchen`;
   const email = String(user.email || '').trim().toLowerCase();
   // Reuse a Kitchen Report already requested through Slack for this same chef.
@@ -55,7 +58,7 @@ export const validateStaffKitchenReportAccess = async (access, report) => {
   if (!nowstaEventId) throw createApiError(403, 'Event assignment is no longer available');
   const [event, entry] = await Promise.all([
     Event.findOne({ _id: report.eventId, ...kitchenReportEventQuery(nowstaEventId) }).select('_id').lean(),
-    NowstaScheduleEntry.findOne({ ...staffScheduleQuery(user), nowstaEventId }).select('nowstaEventId shifts archived').lean(),
+    NowstaScheduleEntry.findOne({ ...staffScheduleQuery(user), nowstaEventId }).select('nowstaEventId title shifts archived').lean(),
   ]);
   const assignedEvent = serializeStaffEvent(entry, user);
   if (!event || !assignedEvent) throw createApiError(403, 'Event is no longer assigned to you');

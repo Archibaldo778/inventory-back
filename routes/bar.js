@@ -32,6 +32,7 @@ import {
 import { sendApiError } from '../utils/apiErrors.js';
 import { issueEventGuestAccess } from '../utils/eventGuestAccess.js';
 import { openCaptainReport } from '../utils/captainReports.js';
+import { requiresEventReport } from '../utils/eventReportRequirement.js';
 import {
   INVALID_PACKOUT_UPLOAD_RESPONSE,
   isAllowedPackoutDocumentUpload,
@@ -203,6 +204,7 @@ const rememberCatalogMatchAcrossEvents = async ({ catalogItem, names, auth }) =>
 
 const serializeBarEvent = (source, { includeFinancials = false } = {}) => {
   const event = typeof source?.toObject === 'function' ? source.toObject() : { ...(source || {}) };
+  event.reportRequired = requiresEventReport(event);
   const totals = calculateBarEventAccounting(event);
   const captainSyncAudit = [...(Array.isArray(event.audit) ? event.audit : [])].reverse().find((entry) => (
     ['guest_received_saved', 'guest_returns_submitted'].includes(String(entry?.action || ''))
@@ -1270,7 +1272,7 @@ router.post('/events/:id/captain-report-link', async (req, res) => {
     if (!event) return res.status(404).json({ message: 'Dashboard event was not found' });
     const report = await openCaptainReport({
       event: { ...event, title: cleanString(event.title || barEvent.name, 300), date: cleanString(event.date || barEvent.eventDate, 20) },
-      user: req.auth, fallbackSalesRep: barEvent.salesRep,
+      user: req.auth, schedule: { title: barEvent.name }, fallbackSalesRep: barEvent.salesRep,
     });
     const accessToken = issueEventGuestAccess({
       eventIds: [String(event._id)], capability: 'event:report', subjectId: report.slackUserId,

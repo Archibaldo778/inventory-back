@@ -211,6 +211,22 @@ test('email reminders start with October 1 events, excluding older overnight eve
   assert.equal(state.requests.length, 1);
 });
 
+test('exempt event names never create reports or send email, including queued retries and Nowsta-only names', async (t) => {
+  const state = setup(t);
+  for (const title of ['Tasting', 'Walk Through', 'Load-in', 'Load out']) {
+    state.events = [{ ...event, title }];
+    state.schedules = [schedule];
+    assert.equal((await state.run(24)).sent, 0);
+    state.events = [event];
+    state.schedules = [{ ...schedule, title }];
+    assert.equal((await state.run(36)).sent, 0);
+    assert.equal(await deliverCaptainReportReminder({ event: { ...event, title }, schedule, user, report: { _id: reportId }, hours: 48, now: at(48), fetchImpl: state.fetch }), 'skipped');
+  }
+  assert.equal(state.report, null);
+  assert.equal(state.deliveries.size, 0);
+  assert.equal(state.requests.length, 0);
+});
+
 test('captain emails work without Slack; all Slack report reminders remain disabled even with legacy flags', async (t) => {
   const state = setup(t);
   env(t, 'SLACK_BOT_TOKEN', undefined);

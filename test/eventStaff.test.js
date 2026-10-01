@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import jwt from 'jsonwebtoken';
 import User from '../models/Users.js';
 import Product from '../models/Product.js';
+import Event from '../models/Event.js';
 import NowstaScheduleEntry from '../models/NowstaScheduleEntry.js';
 import router from '../routes/staffPortal.js';
 import userRouter from '../routes/users.js';
@@ -63,6 +64,7 @@ test('event projection exposes only the assigned shifts and no private notes or 
 });
 
 test('event list and direct links reject unassigned, removed and archived events', async (t) => {
+  t.mock.method(Event, 'find', () => ({ select: () => ({ lean: async () => [] }) }));
   let selected = entry;
   let query;
   t.mock.method(NowstaScheduleEntry, 'find', (filter) => {
@@ -97,6 +99,37 @@ test('event list and direct links reject unassigned, removed and archived events
   const allowed = response();
   await handler(router, '/events/:id')({ auth: user, params: { id: '123' } }, allowed);
   assert.equal(allowed.code, 200);
+});
+
+test('chef event list and detail use linked Caterease guests without exposing other event data', async (t) => {
+  const assigned = { ...entry, guestCount: 0 };
+  t.mock.method(NowstaScheduleEntry, 'find', () => ({ select: () => ({ sort: () => ({ lean: async () => [assigned] }) }) }));
+  t.mock.method(NowstaScheduleEntry, 'findOne', () => ({ select: () => ({ lean: async () => assigned }) }));
+  let linked = [{ meta: { nowsta: { apiEventId: '123' }, guestCount: 0 }, catereaseOperations: { guestCount: 180 }, client: 'Private client' }];
+  t.mock.method(Event, 'find', (query) => {
+    assert.deepEqual(query['meta.nowsta.apiEventId'], { $in: ['123'] });
+    assert.equal(query['meta.nowsta.excluded'].$ne, true);
+    assert.equal(query.status.$not.test('cancelled'), true);
+    return { select: () => ({ lean: async () => linked }) };
+  });
+  for (const [path, req] of [
+    ['/events', { query: { view: 'all' } }],
+    ['/events/:id', { params: { id: '123' } }],
+  ]) {
+    const res = response();
+    await handler(router, path)({ auth: user, ...req }, res);
+    const visible = res.body.items?.[0] || res.body;
+    assert.equal(visible.guestCount, 180);
+    assert.equal(visible.catereaseOperations, undefined);
+    assert.notEqual(visible.client, 'Private client');
+  }
+  linked = [];
+  for (const guestCount of [95, null]) {
+    assigned.guestCount = guestCount;
+    const res = response();
+    await handler(router, '/events/:id')({ auth: user, params: { id: '123' } }, res);
+    assert.equal(res.body.guestCount, guestCount);
+  }
 });
 
 test('staff portal rejects malformed date ranges without querying the database', async (t) => {

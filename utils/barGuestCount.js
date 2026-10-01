@@ -4,16 +4,15 @@ const numericGuestCount = (value) => {
   return Number.isFinite(parsed) && parsed >= 0 ? Math.round(parsed) : null;
 };
 
+export const EVENT_GUEST_COUNT_FIELDS = [
+  'meta.guestCount', 'meta.guest_count', 'meta.guests', 'meta.numberOfGuests',
+  'meta.number_of_guests', 'meta.pax',
+  'catereaseOperations.guestCount', 'catereaseOperations.eventDetails.guestCount',
+];
+
 export const dashboardEventGuestCount = (event = {}) => {
-  const candidates = [
-    event?.meta?.guestCount,
-    event?.meta?.guest_count,
-    event?.meta?.guests,
-    event?.meta?.numberOfGuests,
-    event?.meta?.number_of_guests,
-    event?.meta?.pax,
-    event?.catereaseOperations?.guestCount,
-    event?.catereaseOperations?.eventDetails?.guestCount,
-  ].map(numericGuestCount).filter((value) => value !== null);
+  const candidates = EVENT_GUEST_COUNT_FIELDS
+    .map((path) => path.split('.').reduce((value, key) => value?.[key], event))
+    .map(numericGuestCount).filter((value) => value !== null);
   return candidates.find((value) => value > 0) ?? candidates[0] ?? null;
 };

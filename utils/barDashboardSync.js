@@ -1,3 +1,5 @@
+import { EVENT_GUEST_COUNT_FIELDS } from './barGuestCount.js';
+
 const isoDay = (date) => [
   date.getUTCFullYear(),
   String(date.getUTCMonth() + 1).padStart(2, '0'),
@@ -12,7 +14,7 @@ const shiftIsoDay = (value, days) => {
 
 export const DASHBOARD_BAR_SYNC_SELECT = [
   '_id', 'externalId', 'title', 'date', 'client', 'managerId', 'status',
-  'meta.guestCount', 'meta.guest_count', 'meta.guests',
+  ...EVENT_GUEST_COUNT_FIELDS,
   'meta.venue', 'meta.location', 'meta.eventVenue', 'meta.event_venue',
   'meta.nowsta.shifts',
 ].join(' ');

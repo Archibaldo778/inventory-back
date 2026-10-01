@@ -12,6 +12,14 @@ import {
 } from '../utils/nowstaApi.js';
 import { uniqueNowstaTitleDateMatch } from '../routes/events.js';
 
+test('Nowsta import and schedule preserve unknown guest counts instead of inventing zero', () => {
+  for (const [value, expected] of [[null, null], [undefined, null], ['', null], ['  ', null], ['bad', null], [-1, null], [0, 0], ['150', 150]]) {
+    const data = { events: [{ id: 91, name: 'Dinner', occurs_at: '2026-10-01T22:00:00Z', number_of_guests: value }] };
+    assert.equal(buildNowstaImportRows(data)[0].meta.guestCount, expected);
+    assert.equal(buildNowstaScheduleRows(data)[0].guestCount, expected);
+  }
+});
+
 test('Nowsta sync may attach staffing to one unique same-title same-date event', () => {
   const event = { _id: 'existing-event' };
   assert.equal(uniqueNowstaTitleDateMatch([event]), event);

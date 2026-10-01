@@ -10,6 +10,12 @@ const clean = (value, maxLength = 2_000) => String(value ?? '')
   .trim()
   .slice(0, maxLength);
 
+const nowstaGuestCount = (value) => {
+  if (value == null || String(value).trim() === '') return null;
+  const count = Number(value);
+  return Number.isFinite(count) && count >= 0 ? count : null;
+};
+
 const boundedInteger = (value, fallback, minimum, maximum) => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return fallback;
@@ -389,7 +395,7 @@ export const buildNowstaImportRows = ({ events = [], shifts = [], companyUsers =
         status: 'draft',
         importSource: 'nowsta',
         meta: {
-          guestCount: Number.isFinite(Number(event.number_of_guests)) ? Number(event.number_of_guests) : null,
+          guestCount: nowstaGuestCount(event.number_of_guests),
           salesRep: salesperson,
           venue,
           address,
@@ -517,7 +523,6 @@ export const buildNowstaScheduleRows = ({
           : unfilled > 0
             ? 'incomplete'
             : 'fully_staffed';
-      const rawGuestCount = Number(event.number_of_guests);
       return {
         nowstaEventId,
         companyId: String(event.company_id ?? ''),
@@ -536,7 +541,7 @@ export const buildNowstaScheduleRows = ({
         defaultVisible: defaultVisibleIds.has(nowstaEventId),
         venue: eventVenueName(event, venuesById),
         address: eventAddress(event, venuesById),
-        guestCount: Number.isFinite(rawGuestCount) && rawGuestCount >= 0 ? rawGuestCount : null,
+        guestCount: nowstaGuestCount(event.number_of_guests),
         notes: clean(event.admin_notes || event.supervisor_notes, 2_000),
         shifts: eventShifts,
         sourceUpdatedAt: event.updated_at || null,

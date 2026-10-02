@@ -4,7 +4,7 @@ import jwt from 'jsonwebtoken';
 import User from '../models/Users.js';
 import { getJwtSecret } from '../middleware/auth.js';
 import { sendApiError } from '../utils/apiErrors.js';
-import { hashUserInviteToken } from '../utils/userInvitations.js';
+import { userInviteTokenQuery } from '../utils/userInvitations.js';
 import passwordResetRoutes from './passwordReset.js';
 
 const router = Router();
@@ -218,11 +218,7 @@ router.post('/login', enforceLoginRateLimit, async (req, res) => {
 
 router.get('/invitations/:token', async (req, res) => {
   try {
-    const user = await User.findOne({
-      inviteTokenHash: hashUserInviteToken(req.params.token),
-      inviteExpiresAt: { $gt: new Date() },
-      inviteAcceptedAt: null,
-    }).select('_id username email role inviteExpiresAt');
+    const user = await User.findOne(userInviteTokenQuery(req.params.token)).select('_id username email role inviteExpiresAt');
     if (!user) return res.status(404).json({ message: 'This invitation is invalid or has expired' });
     res.setHeader('Cache-Control', 'no-store');
     return res.json({ name: user.username, email: user.email, expiresAt: user.inviteExpiresAt });
@@ -236,15 +232,12 @@ router.post('/invitations/:token/accept', enforceLoginRateLimit, async (req, res
     const password = String(req.body?.password || '');
     if (password.length < 8) return res.status(400).json({ message: 'Password must be at least 8 characters' });
     const passwordHash = await bcrypt.hash(password, 10);
-    const user = await User.findOneAndUpdate({
-      inviteTokenHash: hashUserInviteToken(req.params.token),
-      inviteExpiresAt: { $gt: new Date() },
-      inviteAcceptedAt: null,
-    }, {
+    const user = await User.findOneAndUpdate(userInviteTokenQuery(req.params.token), {
       $set: {
         password: passwordHash,
         isActive: true,
         inviteTokenHash: '',
+        inviteReminderTokenHash: '',
         inviteExpiresAt: null,
         inviteAcceptedAt: new Date(),
       },

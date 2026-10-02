@@ -415,6 +415,11 @@ router.post('/invite', async (req, res) => {
     if (invite) {
       user.isActive = false;
       user.inviteTokenHash = invite.tokenHash;
+      user.inviteReminderTokenHash = '';
+      user.inviteReminderAttemptedAt = null;
+      user.inviteReminderSentAt = null;
+      user.inviteReminderError = '';
+      user.inviteSentAt = null;
       user.inviteExpiresAt = invite.expiresAt;
       user.inviteAcceptedAt = null;
     }

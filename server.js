@@ -478,6 +478,7 @@ import transportationRoutes from './routes/transportation.js';
 import slackIntegrationRoutes from './routes/slackIntegration.js';
 import { runSlackEventChannelSync, slackEventChannelsEnabled } from './utils/slackEventChannels.js';
 import { CAPTAIN_REPORT_EMAIL_REMINDERS_ENABLED, CAPTAIN_REPORT_REMINDERS_START_DATE, runCaptainReportEmailReminders } from './utils/captainReportReminders.js';
+import { runUserInviteReminders } from './utils/userInviteReminders.js';
 import { runEventReportEmailPreview } from './utils/eventReportEmailPreviews.js';
 import { ensureDropboxPoPolicy, runDropboxPoAlerts } from './utils/dropboxPoAlerts.js';
 import { getCatereaseConfig } from './utils/catereaseApi.js';
@@ -756,6 +757,13 @@ export const startServer = async () => {
   captainReportEmailTimer.unref?.();
   console.log(`Captain report email reminders enabled for events from ${CAPTAIN_REPORT_REMINDERS_START_DATE}`);
 
+  const userInviteReminderTimer = setInterval(() => {
+    runUserInviteReminders().then((summary) => {
+      if (summary.sent || summary.failed) console.log('User invitation reminders processed', summary);
+    }).catch((error) => console.error('User invitation reminders failed:', error?.message || error));
+  }, 60_000);
+  userInviteReminderTimer.unref?.();
+
   const reportPreviewTimer = setInterval(() => {
     runEventReportEmailPreview().catch((error) => console.error('Report email preview failed:', error?.message || error));
   }, 60_000);
@@ -784,6 +792,7 @@ export const startServer = async () => {
     if (slackStartupTimer) clearTimeout(slackStartupTimer);
     if (slackSyncTimer) clearInterval(slackSyncTimer);
     clearInterval(captainReportEmailTimer);
+    clearInterval(userInviteReminderTimer);
     clearInterval(reportPreviewTimer);
     clearInterval(poAlertTimer);
 

@@ -51,6 +51,8 @@ test('invitation creates captains and preserves credentials of active bar captai
   assert.equal(created.isActive, false);
   assert.ok(created.inviteTokenHash);
   assert.ok(created.inviteSentAt);
+  assert.equal(created.inviteReminderAttemptedAt, null);
+  assert.equal(created.inviteReminderTokenHash, '');
   assert.equal(saves, 2);
   assert.doesNotMatch(outgoing.text, /Bar Returns/);
   assert.deepEqual(outgoing.cc, ['copy@example.com']);
@@ -74,12 +76,15 @@ test('failed delivery is reported and does not record a sent invitation', async 
   const previousKey = process.env.RESEND_API_KEY;
   delete process.env.RESEND_API_KEY;
   t.after(() => { if (previousKey !== undefined) process.env.RESEND_API_KEY = previousKey; });
-  const existing = { role: 'captain', isActive: false, save: async () => {} };
+  const existing = { role: 'captain', isActive: false, inviteSentAt: new Date(), inviteReminderAttemptedAt: new Date(), inviteReminderSentAt: new Date(), inviteReminderTokenHash: 'old-reminder', save: async () => {} };
   t.mock.method(User, 'findOne', () => ({ select: async () => existing }));
   const res = response();
   await handler('/invite', 'post')({ body: { username: 'Test', email: 'test@example.com', role: 'captain' } }, res);
   assert.equal(res.code, 502);
-  assert.equal(existing.inviteSentAt, undefined);
+  assert.equal(existing.inviteSentAt, null);
+  assert.equal(existing.inviteReminderTokenHash, '');
+  assert.equal(existing.inviteReminderAttemptedAt, null);
+  assert.equal(existing.inviteReminderSentAt, null);
 });
 
 test('captain invitation cannot replace an account with another role', async (t) => {

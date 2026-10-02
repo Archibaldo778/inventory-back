@@ -22,6 +22,16 @@ export const createUserInviteToken = ({ now = Date.now() } = {}) => {
   return { token, tokenHash: hashUserInviteToken(token), expiresAt: new Date(Number(now) + INVITE_TTL_MS) };
 };
 
+export const userInviteTokenQuery = (token, now = new Date()) => ({
+  $or: [
+    { inviteTokenHash: hashUserInviteToken(token) },
+    { inviteReminderTokenHash: hashUserInviteToken(token) },
+  ],
+  isActive: false,
+  inviteExpiresAt: { $gt: now },
+  inviteAcceptedAt: null,
+});
+
 export const userInviteUrl = (token) => {
   const origin = clean(
     process.env.PUBLIC_APP_ORIGIN || process.env.FRONTEND_URL || process.env.FRONTEND_ORIGIN

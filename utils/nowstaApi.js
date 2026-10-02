@@ -1,4 +1,5 @@
 import { fetchWithTimeout } from './fetchWithTimeout.js';
+import { nowstaUniformText, nowstaClothingSizes } from './uniformRequirements.js';
 
 const NOWSTA_API_BASE_URL = 'https://api.nowsta.com/integrations';
 const DEFAULT_PAST_DAYS = 60;
@@ -355,10 +356,12 @@ export const buildNowstaImportRows = ({ events = [], shifts = [], companyUsers =
           phone: personPhone(person),
           status: clean(worker?.status, 40).toLowerCase(),
           agency: Boolean(person?.staffing_agency_placeholder),
+          sizes: nowstaClothingSizes(person),
         };
       })
       .filter(Boolean);
     const normalized = {
+      uniform: nowstaUniformText(shift),
       position: clean(shift?.position_name || shift?.name, 160),
       startTime: zonedTime(shift?.starts_at, shift?.time_zone),
       endTime: zonedTime(shift?.ends_at, shift?.time_zone),
@@ -407,7 +410,7 @@ export const buildNowstaImportRows = ({ events = [], shifts = [], companyUsers =
             venue,
             address,
             eventTime,
-            uniform: '',
+            uniform: nowstaUniformText(event),
             adminNotes: clean(event.admin_notes || event.supervisor_notes, 2_000),
             staffTotals: `${assigned} assigned · ${unfilled} unfilled`,
             updatedAt: clean(event.updated_at, 100),
@@ -490,12 +493,14 @@ export const buildNowstaScheduleRows = ({
           phone: personPhone(person),
           status: clean(worker?.status, 40).toLowerCase(),
           agency: Boolean(person?.staffing_agency_placeholder),
+          sizes: nowstaClothingSizes(person),
         };
       })
       .filter(Boolean);
     const list = shiftsByEvent.get(eventId) || [];
     list.push({
       nowstaShiftId: String(shift?.id ?? ''),
+      uniform: nowstaUniformText(shift),
       required: Number.isFinite(Number(shift?.quantity)) && shift?.quantity != null ? Math.max(0, Number(shift.quantity)) : null,
       position: clean(shift?.position_name || shift?.name, 160),
       startsAt: shift?.starts_at || null,
@@ -542,6 +547,7 @@ export const buildNowstaScheduleRows = ({
         defaultVisible: defaultVisibleIds.has(nowstaEventId),
         venue: eventVenueName(event, venuesById),
         address: eventAddress(event, venuesById),
+        uniform: nowstaUniformText(event),
         guestCount: nowstaGuestCount(event.number_of_guests),
         notes: clean(event.admin_notes || event.supervisor_notes, 2_000),
         shifts: eventShifts,

@@ -7,6 +7,8 @@ import Staff from '../models/Staff.js';
 import Event from '../models/Event.js';
 import Deck from '../models/Deck.js';
 import Page from '../models/Page.js';
+import uniformWorkspaceRoutes, { UNIFORM_EVENT_FIELDS } from './uniformWorkspace.js';
+import { eventUniformRequirements } from '../utils/uniformRequirements.js';
 import { requireRoles } from '../middleware/auth.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import { createMemoryRateLimiter } from '../middleware/rateLimit.js';
@@ -15,12 +17,25 @@ import { UNIFORM_PACKING_ROLES, uniformStaffing, buildUniformRoster, validateUni
 
 const router = Router();
 router.use(requireRoles(UNIFORM_PACKING_ROLES));
+router.use('/workspace', uniformWorkspaceRoutes);
 router.use(createMemoryRateLimiter({ windowMs: 60_000, max: 60, skipSafeMethods: true }));
 const dateString = (value) => /^\d{4}-\d{2}-\d{2}$/.test(value || '') && Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value;
 const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 const shiftDate = (value, days) => new Date(Date.parse(value) + days * 86400000).toISOString().slice(0, 10);
-const eventFields = 'nowstaEventId externalId title client date venue address shifts lastSyncedAt';
-const getEntry = (id) => NowstaScheduleEntry.findOne({ nowstaEventId: String(id), archived: { $ne: true }, entryType: 'event' }).select(eventFields).lean();
+const eventFields = 'nowstaEventId externalId title client date venue address uniform shifts lastSyncedAt';
+const getEntry = async (id) => {
+  if (!String(id).startsWith('event:')) return NowstaScheduleEntry.findOne({ nowstaEventId: String(id), archived: { $ne: true }, entryType: 'event' }).select(eventFields).lean();
+  const eventId = String(id).slice(6);
+  if (!mongoose.isValidObjectId(eventId)) return null;
+  const event = await Event.findOne({ _id: eventId, status: { $not: /^(deleted|cancelled|canceled|lost|archived)$/i }, 'meta.nowsta.excluded': { $ne: true } }).select(UNIFORM_EVENT_FIELDS).lean();
+  if (!event) return null;
+  if (event.meta?.nowsta?.apiEventId) {
+    const entry = await getEntry(event.meta.nowsta.apiEventId);
+    if (entry) return entry;
+  }
+  return { ...event, nowstaEventId: String(event.meta?.nowsta?.apiEventId || id), venue: event.meta?.venue || '', uniform: event.meta?.nowsta?.uniform || '',
+    shifts: event.meta?.nowsta?.shifts?.length ? event.meta.nowsta.shifts : (event.catereaseOperations?.staffRequest || []).map((row) => ({ ...row, workers: [], unfilled: row.required || 0 })) };
+};
 const summary = (entry) => ({ id: entry.nowstaEventId, title: entry.title, date: entry.date, client: entry.client,
   venue: entry.venue, address: entry.address, lastSyncedAt: entry.lastSyncedAt, ...uniformStaffing(entry) });
 const blankPackout = (id) => ({ nowstaEventId: id, revision: 0, lines: [], notes: '', rosterSizes: [], rosterImport: null });
@@ -43,10 +58,11 @@ export const saveUniformPackout = async (id, expectedRevision, changes, actor, M
 
 const linkedEvent = async (entry) => {
   const query = { 'meta.nowsta.excluded': { $ne: true }, status: { $nin: ['deleted', 'cancelled', 'canceled', 'archived'] } };
-  const direct = await Event.find({ ...query, 'meta.nowsta.apiEventId': entry.nowstaEventId }).select('_id').limit(2).lean();
+  if (String(entry.nowstaEventId).startsWith('event:')) return entry;
+  const direct = await Event.find({ ...query, 'meta.nowsta.apiEventId': entry.nowstaEventId }).select('_id meta.nowsta.uniform catereaseOperations.staffRequest').limit(2).lean();
   if (direct.length) return direct.length === 1 ? direct[0] : null;
   if (!entry.externalId) return null;
-  const matches = await Event.find({ ...query, externalId: entry.externalId, date: entry.date }).select('_id').limit(2).lean();
+  const matches = await Event.find({ ...query, externalId: entry.externalId, date: entry.date }).select('_id meta.nowsta.uniform catereaseOperations.staffRequest').limit(2).lean();
   return matches.length === 1 ? matches[0] : null;
 };
 
@@ -71,11 +87,15 @@ router.get('/events/:id', async (req, res) => {
   try {
     const entry = await getEntry(req.params.id);
     if (!entry) return res.status(404).json({ message: 'Event is unavailable or cancelled' });
-    const [packout, staff, catalog] = await Promise.all([
+    const [packout, staff, catalog, event] = await Promise.all([
       UniformPackout.findOne({ nowstaEventId: entry.nowstaEventId }).lean(), Staff.find({}).select(staffFields).lean(),
       UniformItem.find({ hidden: { $ne: true } }).select('name sizes color category image imageUrl location').sort({ name: 1 }).lean(),
+      linkedEvent(entry),
     ]);
-    return res.json({ event: summary(entry), roster: buildUniformRoster(entry, staff, packout?.rosterSizes), packout: packout || blankPackout(entry.nowstaEventId), catalog });
+    const requirements = eventUniformRequirements(entry, event);
+    return res.json({ event: { ...summary(entry), linkedEventId: event?._id || null }, requirements,
+      roster: buildUniformRoster(entry, staff, packout?.rosterSizes).map((person) => ({ ...person, uniform: [...new Set(requirements.filter((row) => person.positions.includes(row.position)).map((row) => row.uniform).filter(Boolean))].join(' / ') })),
+      packout: packout || blankPackout(entry.nowstaEventId), catalog });
   } catch (error) { return errorResponse(res, error); }
 });
 

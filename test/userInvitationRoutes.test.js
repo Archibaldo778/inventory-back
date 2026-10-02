@@ -12,7 +12,7 @@ test('admin preview provides report and uniform packing invitation templates', (
   assert.deepEqual(res.body.map((entry) => entry.role), ['captain', 'bar captain', 'uniform packer']);
   assert.doesNotMatch(res.body[0].text, /Bar Returns/);
   assert.match(res.body[1].text, /Bar Returns/);
-  assert.match(res.body[2].text, /Uniform Packing/);
+  assert.match(res.body[2].text, /Staff & Uniform/);
   assert.doesNotMatch(res.body[2].text, /Captain’s Report|Bar Returns|alcohol/);
 });
 
@@ -102,7 +102,7 @@ test('uniform invitation creates an inactive packer with its own instructions an
   assert.equal(created.role, 'uniform packer');
   assert.equal(created.isActive, false);
   assert.ok(created.inviteTokenHash);
-  assert.match(outgoing.text, /Uniform Packing/);
+  assert.match(outgoing.text, /Staff & Uniform/);
   assert.doesNotMatch(outgoing.text, /Captain’s Report|Bar Returns/);
   existing = { role: 'captain', isActive: true };
   const rejected = response();

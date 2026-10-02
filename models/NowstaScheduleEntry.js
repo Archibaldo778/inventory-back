@@ -7,6 +7,7 @@ const workerSchema = new mongoose.Schema({
   phone: { type: String, default: '', trim: true },
   status: { type: String, default: '', trim: true },
   agency: { type: Boolean, default: false },
+  sizes: { type: mongoose.Schema.Types.Mixed, default: {} },
 }, { _id: false });
 
 const shiftSchema = new mongoose.Schema({
@@ -19,6 +20,7 @@ const shiftSchema = new mongoose.Schema({
   workers: { type: [workerSchema], default: [] },
   unfilled: { type: Number, default: 0, min: 0 },
   required: { type: Number, default: null, min: 0 },
+  uniform: { type: String, default: '' },
 }, { _id: false });
 
 const nowstaScheduleEntrySchema = new mongoose.Schema({
@@ -38,6 +40,7 @@ const nowstaScheduleEntrySchema = new mongoose.Schema({
   archived: { type: Boolean, default: false, index: true },
   defaultVisible: { type: Boolean, default: false, index: true },
   venue: { type: String, default: '', trim: true },
+  uniform: { type: String, default: '' },
   address: { type: String, default: '', trim: true },
   guestCount: { type: Number, default: null, min: 0 },
   notes: { type: String, default: '', trim: true },

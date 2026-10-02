@@ -53,9 +53,9 @@ export const renderUserInviteEmail = ({ name, inviteUrl, role = 'captain', activ
     : 'Create your password using this private registration link:';
   const expiry = active ? '' : 'This link is private and expires in 72 hours.';
   const steps = uniformPacker ? [
-    'Sign in and open Uniform Packing. Select the event you are preparing.',
-    'Check the booked staff and open positions. Download the staffing roster with jacket, shirt, pants and shoe sizes.',
-    'Review the event’s decor and uniform boards. If sizes are missing, upload the Nowsta Staffing Roster CSV for that event.',
+    'Sign in and open Events. Select the event you are preparing.',
+    'Check the booked staff, open positions and sizes in Staff & Uniform. Saved staff sizes are used first, then sizes supplied by Nowsta.',
+    'Review the uniform requirements from Nowsta or Staff Request. Confirm any missing sizes before packing. You can also view submitted event reports.',
     'Select uniform items and sizes, enter the quantities you are sending, and save the packout.',
     'Print labels from the saved packout. If you forget your password, use Forgot password on the login page.',
   ] : [

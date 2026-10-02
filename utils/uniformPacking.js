@@ -26,7 +26,7 @@ export const buildUniformRoster = (entry, staff = [], overrides = []) => {
   for (const shift of entry?.shifts || []) for (const worker of shift.workers || []) {
     if (!confirmed(worker) || !clean(worker.name)) continue;
     const key = uniformWorkerKey(worker);
-    const record = workers.get(key) || { key, name: clean(worker.name), companyUserId: clean(worker.companyUserId), positions: [], calls: [], ends: [] };
+    const record = workers.get(key) || { key, name: clean(worker.name), companyUserId: clean(worker.companyUserId), nowstaSizes: worker.sizes || {}, positions: [], calls: [], ends: [] };
     if (shift.position && !record.positions.includes(shift.position)) record.positions.push(shift.position);
     if (shift.startTime && !record.calls.includes(shift.startTime)) record.calls.push(shift.startTime);
     if (shift.endTime && !record.ends.includes(shift.endTime)) record.ends.push(shift.endTime);
@@ -38,7 +38,7 @@ export const buildUniformRoster = (entry, staff = [], overrides = []) => {
       && nameKey(person.nowstaName || `${person.firstName} ${person.lastName}`) === nameKey(worker.name));
     const person = matches.length === 1 ? matches[0] : {};
     const saved = overrides.find((row) => row.key === worker.key) || {};
-    const sizes = Object.fromEntries(SIZE_FIELDS.map((field) => [field, clean(saved[field] || person[field], 60)]));
+    const sizes = Object.fromEntries(SIZE_FIELDS.map((field) => [field, clean(saved[field] || person[field] || worker.nowstaSizes[field], 60)]));
     const names = worker.name.split(' ');
     return { ...worker, firstName: person.firstName || names[0], lastName: person.lastName || names.slice(1).join(' '), ...sizes,
       payrollId: clean(saved.payrollId, 60), timeIn: clean(saved.timeIn, 60), timeOut: clean(saved.timeOut, 60),
@@ -136,7 +136,10 @@ export const uniformPackerRequestAllowed = (auth, req) => {
   if (auth?.role !== 'uniform packer') return true;
   const path = String(req.originalUrl || '').split('?')[0].replace(/\/$/, '');
   const method = String(req.method || '').toUpperCase();
+  if (/^\/api\/uniform-packing\/workspace(?:\/|$)/.test(path)) return ['GET', 'HEAD'].includes(method);
+  if (/^\/api\/uniform-packing\/events\/[^/]+\/boards(?:\/|$)/.test(path)) return false;
   if (/^\/api\/uniform-packing(?:\/|$)/.test(path)) return ['GET', 'HEAD', 'PUT', 'POST'].includes(method);
+  if (/^\/api\/nowsta-schedule(?:\/preferences)?$/.test(path)) return ['GET', 'HEAD'].includes(method) || (path.endsWith('/preferences') && method === 'PUT');
   if (['GET', 'HEAD'].includes(method)) return /^\/api\/(?:uniform-items|products)(?:\/[^/]+)?$/.test(path)
     || /^\/api\/products\/code\/[^/]+$/.test(path);
   return ['PUT', 'PATCH'].includes(method) && [`/api/users/${auth.userId}/password`, `/users/${auth.userId}/password`].includes(path);

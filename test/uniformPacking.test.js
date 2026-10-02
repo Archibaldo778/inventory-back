@@ -162,6 +162,7 @@ test('uniform dashboard router admits only administrators and uniform packers', 
 });
 
 test('event detail returns booked roster and saved quantities without writing to inventory', async (t) => {
+  t.mock.method(Event, 'find', () => chain([]));
   t.mock.method(NowstaScheduleEntry, 'findOne', (query) => { assert.equal(query.archived.$ne, true); return chain(entry); });
   t.mock.method(UniformPackout, 'findOne', () => chain({ revision: 3, lines: [{ quantity: 2 }], notes: '' }));
   t.mock.method(Staff, 'find', () => chain(staff));

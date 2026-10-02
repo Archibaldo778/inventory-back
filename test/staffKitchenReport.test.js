@@ -91,6 +91,9 @@ test('a chef can open and submit an unfilled Kitchen Report 14 days after the ev
   mockSources(t, { ...entry, shifts: [{ ...entry.shifts[0], position: 'Lead Chef' }] });
   t.mock.method(User, 'findById', () => ({ select: () => ({ lean: async () => leadChef }) }));
   const report = { _id: 'report-1', eventId, eventTitle: 'Dinner', reportType: 'kitchen', slackUserId: `account:${userId}:kitchen`, reporterName: chef.username, status: 'pending', answers: {}, save: async () => {}, toObject() { return { ...this }; } };
+  t.mock.method(EventReport, 'findOneAndUpdate', async (filter, update) => {
+    assert.equal(filter.status, 'pending'); Object.assign(report, update.$set); return report;
+  });
   t.mock.method(EventReport, 'findOne', () => ({ sort: async () => report }));
   const opened = response();
   await handler(router, '/events/:id/kitchen-report-link', 'post')({ auth: leadChef, params: { id: '123' } }, opened);

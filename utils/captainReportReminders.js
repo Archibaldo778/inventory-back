@@ -61,6 +61,7 @@ export const captainReminderEmail = ({ event, user, report, endsAt, hours }) => 
 
 export const deliverCaptainReportReminder = async ({ event, schedule, user, report, hours, now, fetchImpl, enabled = CAPTAIN_REPORT_EMAIL_REMINDERS_ENABLED }) => {
   if (!enabled) return 'skipped';
+  if (['submitted', 'cancelled'].includes(report?.status)) return 'skipped';
   if (!assignedReportCaptains(schedule, [user]).length) return 'skipped';
   if (!requiresEventReport(event, schedule)) return 'skipped';
   if (!captainReminderEventEligible({ event, schedule, report })) return 'skipped';
@@ -87,7 +88,7 @@ export const deliverCaptainReportReminder = async ({ event, schedule, user, repo
   }, { $set: { lockedUntil: new Date(now.getTime() + 2 * 60_000) } }, { new: true });
   if (!delivery) return 'skipped';
   // Submission through either the email link, portal or Slack stops reminders.
-  if (await EventReport.exists({ ...captainReportIdentity(event._id, user), status: 'submitted' })) {
+  if (await EventReport.exists({ ...captainReportIdentity(event._id, user), status: { $in: ['submitted', 'cancelled'] } })) {
     await EventReportReminder.updateOne({ _id: id }, { $set: { status: 'cancelled', lockedUntil: null } });
     return 'skipped';
   }
@@ -141,7 +142,7 @@ export const runCaptainReportEmailReminders = async ({ now = new Date(), fetchIm
       for (const user of assignedReportCaptains(schedule, users)) {
         try {
           const report = await openCaptainReport({ event, user, schedule });
-          if (report.status === 'submitted') { summary.skipped += 1; continue; }
+          if (['submitted', 'cancelled'].includes(report.status)) { summary.skipped += 1; continue; }
           summary[await deliverCaptainReportReminder({ event, schedule, user, report, hours, now, fetchImpl, enabled })] += 1;
         } catch (error) {
           summary.failed += 1;

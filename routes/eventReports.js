@@ -17,6 +17,7 @@ import EventReportFile from '../models/EventReportFile.js';
 import eventReportFilesRouter from './eventReportFiles.js';
 import { publicReportFile } from '../utils/eventReportFiles.js';
 import { visibleEventReports } from '../utils/eventReportVisibility.js';
+import { loadReportRequestContext, buildEventReportRequests, cancelEventReportRequest } from '../utils/eventReportRequests.js';
 import {
   decryptDropboxSecret,
   getDropboxCurrentAccount,
@@ -190,15 +191,18 @@ router.get('/', async (req, res) => {
     const eventId = clean(req.query?.eventId, 80);
     if (eventId && !mongoose.Types.ObjectId.isValid(eventId)) return res.status(400).json({ message: 'Invalid event' });
     if (eventId) filter.eventId = eventId;
-    if (req.query?.status) filter.status = clean(req.query.status, 40);
+    if (req.query?.status && !eventId) filter.status = clean(req.query.status, 40);
     const [reports, event, files] = await Promise.all([
       EventReport.find(filter).sort({ eventDate: -1, reporterName: 1 }).limit(1000).lean(),
-      eventId ? Event.findById(eventId).select('meta.eventReportTest meta.eventReportAnalysis').lean() : null,
+      eventId ? Event.findById(eventId).select('title date status meta.nowsta meta.eventReportTest meta.eventReportAnalysis').lean() : null,
       eventId ? EventReportFile.find({ eventId }).sort({ createdAt: 1 }).lean() : [],
     ]);
     const analysis = event?.meta?.eventReportAnalysis || null;
+    const visible = await visibleEventReports(reports);
+    const context = event ? await loadReportRequestContext(event) : null;
+    const items = context ? buildEventReportRequests({ event, ...context, reports: visible }) : visible;
     return res.json({
-      items: await visibleEventReports(reports),
+      items: req.query?.status ? items.filter((report) => report.status === req.query.status) : items,
       files: files.map(publicReportFile),
       ai: eventId ? {
         enabledForEvent: Boolean(event),
@@ -209,6 +213,22 @@ router.get('/', async (req, res) => {
     });
   } catch (error) {
     return sendApiError(res, error, { context: 'Event reports list failed', fallbackMessage: 'Could not load event reports' });
+  }
+});
+
+router.post('/events/:eventId/requests/cancel', async (req, res) => {
+  try {
+    const { eventId } = req.params;
+    const reportId = clean(req.body?.reportId, 80);
+    const userId = clean(req.body?.userId, 80);
+    if (!mongoose.isValidObjectId(eventId) || Boolean(reportId) === Boolean(userId)
+      || !mongoose.isValidObjectId(reportId || userId)) return res.status(400).json({ message: 'Choose a valid event and report request' });
+    const event = await Event.findById(eventId).select('title date status meta.nowsta').lean();
+    if (!event) return res.status(404).json({ message: 'Event not found' });
+    const report = await cancelEventReportRequest({ event, reportId, userId, actor: req.auth.userId });
+    return res.json({ report });
+  } catch (error) {
+    return sendApiError(res, error, { field: 'message', context: 'Cancel report request failed', fallbackMessage: 'Could not cancel this report request' });
   }
 });
 

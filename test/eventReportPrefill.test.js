@@ -126,6 +126,10 @@ test('submitting a previously empty report saves its rep and sends to that repâ€
   };
   t.mock.method(EventReport, 'findOne', async () => report);
   let sent;
+  t.mock.method(EventReport, 'findOneAndUpdate', async (filter, update) => {
+    assert.deepEqual(filter, { _id: reportId, status: 'pending' });
+    Object.assign(report, update.$set); return report;
+  });
   t.mock.method(globalThis, 'fetch', async (_url, options) => {
     sent = JSON.parse(options.body);
     return { ok: true, json: async () => ({ id: 'test-report-email' }) };
@@ -157,4 +161,29 @@ test('explicit email retry fills a missing submitted rep before resolving team r
   assert.equal(res.statusCode, 200);
   assert.equal(report.salesRep, 'Olivier Cheng');
   assert.ok(sent.to.includes('heidi@ocnyc.com'));
+});
+
+test('cancelled report links display no requirement and cannot submit or send email', async (t) => {
+  const req = accessRequest(t); mockEvent(t);
+  t.mock.method(EventReport, 'findOne', async () => ({ _id: reportId, eventId, status: 'cancelled', reportType: 'captain' }));
+  t.mock.method(EventReport, 'findOneAndUpdate', () => assert.fail('Cancelled requests must not be submitted'));
+  t.mock.method(globalThis, 'fetch', () => assert.fail('Cancelled requests must not send email'));
+  const loaded = response(); await handler(publicRouter, '/:eventId', 'get')(req, loaded);
+  assert.equal(loaded.body.report.reportRequired, false);
+  const submitted = response(); await handler(publicRouter, '/:eventId', 'post')(req, submitted);
+  assert.equal(submitted.statusCode, 403);
+});
+
+test('a form opened before cancellation cannot revive the request or send its report email', async (t) => {
+  const fields = ['staffEnough', 'staffingResponsive', 'uniformsReturned', 'staffAppearance', 'foodProvidedByOcc',
+    'foodMetStandards', 'leadChefCooperative', 'barProductProvidedByOcc', 'barServiceMetStandards', 'barProductEnough',
+    'beverageCountsCompleted', 'rentalEquipmentEnough', 'sanitationCooperative', 'finalWalkthrough', 'actualGuestCount',
+    'rerunsOrPurchases', 'paperworkAccurate', 'partyExtended', 'staffStayedLate', 'prepWorkTimeAdded', 'healthSafetyIssues', 'overallFeedback'];
+  const req = accessRequest(t, { answers: Object.fromEntries(fields.map((field) => [field, 'N/A'])) }); mockEvent(t);
+  t.mock.method(EventReport, 'findOne', async () => ({ _id: reportId, eventId, status: 'pending', reportType: 'captain' }));
+  t.mock.method(EventReportSettings, 'findOne', () => ({ lean: async () => null }));
+  t.mock.method(EventReport, 'findOneAndUpdate', async (filter) => { assert.equal(filter.status, 'pending'); return null; });
+  t.mock.method(globalThis, 'fetch', () => assert.fail('Losing submission must not send email'));
+  const res = response(); await handler(publicRouter, '/:eventId', 'post')(req, res);
+  assert.equal(res.statusCode, 409);
 });

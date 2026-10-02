@@ -85,6 +85,31 @@ const setup = (t) => {
   return state;
 };
 
+test('cancelled requests remain cancelled at all reminder stages and cannot be recreated by the worker', async (t) => {
+  const state = setup(t);
+  state.report = { _id: reportId, status: 'cancelled', reportType: 'captain', eventId: event._id, slackUserId: `account:${user._id}` };
+  for (const hours of [24, 36, 48]) {
+    const result = await state.run(hours);
+    assert.equal(result.sent, 0);
+    assert.equal(result.skipped, 1);
+  }
+  assert.equal(state.requests.length, 0);
+  assert.equal(state.deliveries.size, 0);
+  assert.equal(state.report.status, 'cancelled');
+});
+
+test('cancellation after reminder claim is checked again before sending email', async (t) => {
+  const state = setup(t);
+  t.mock.method(EventReport, 'exists', (filter) => {
+    assert.deepEqual(filter.status.$in, ['submitted', 'cancelled']);
+    return true;
+  });
+  const result = await state.run(24);
+  assert.equal(result.sent, 0);
+  assert.equal(state.requests.length, 0);
+  assert.equal([...state.deliveries.values()][0].status, 'cancelled');
+});
+
 test('reminders are due exactly 24, 36 and 48 elapsed hours after event end, including DST', () => {
   for (const [hours, stage] of [[0, null], [23.999, null], [24, 24], [35.999, 24], [36, 36], [47.999, 36], [48, 48], [72, 48]]) {
     assert.equal(captainReportReminderStage(endsAt, at(hours)), stage);

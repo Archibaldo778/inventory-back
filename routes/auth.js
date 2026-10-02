@@ -5,8 +5,10 @@ import User from '../models/Users.js';
 import { getJwtSecret } from '../middleware/auth.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import { hashUserInviteToken } from '../utils/userInvitations.js';
+import passwordResetRoutes from './passwordReset.js';
 
 const router = Router();
+router.use(passwordResetRoutes);
 const ACCESS_TOKEN_TTL = '15m';
 const REFRESH_TOKEN_TTL_REMEMBERED = '90d';
 const REFRESH_TOKEN_TTL_DEFAULT = '1d';

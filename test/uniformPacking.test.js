@@ -177,6 +177,7 @@ test('event detail returns booked roster and saved quantities without writing to
 });
 
 test('save endpoint uses canonical catalog names and a revision lock without deducting stock', async (t) => {
+  t.mock.method(UniformPackout, 'findOne', () => chain(null));
   t.mock.method(NowstaScheduleEntry, 'findOne', () => chain(entry));
   t.mock.method(UniformItem, 'find', () => chain(catalog));
   t.mock.method(UniformItem, 'updateOne', () => assert.fail('Packing must not silently deduct inventory'));

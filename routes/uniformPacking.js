@@ -10,6 +10,7 @@ import Page from '../models/Page.js';
 import uniformWorkspaceRoutes, { UNIFORM_EVENT_FIELDS } from './uniformWorkspace.js';
 import { eventUniformRequirements } from '../utils/uniformRequirements.js';
 import { fillMissingNowstaSizes } from '../utils/nowstaUniformSizes.js';
+import { validateUniformBags } from '../utils/uniformBags.js';
 import { requireRoles } from '../middleware/auth.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import { createMemoryRateLimiter } from '../middleware/rateLimit.js';
@@ -113,7 +114,14 @@ router.put('/events/:id/packout', async (req, res) => {
     const catalog = await UniformItem.find({ hidden: { $ne: true } }).select('name sizes hidden').lean();
     const lines = validateUniformLines(req.body?.lines, catalog);
     const notes = String(req.body?.notes || '').trim().slice(0, 3000);
-    const saved = await saveUniformPackout(entry.nowstaEventId, req.body?.expectedRevision, { lines, notes }, req.auth.username || req.auth.userId);
+    const changes = { lines, notes };
+    if (req.body?.bags !== undefined) changes.bags = validateUniformBags(req.body.bags, lines, catalog);
+    else {
+      // An older client must not invalidate bags another packer has already saved.
+      const current = await UniformPackout.findOne({ nowstaEventId: entry.nowstaEventId }).select('bags').lean();
+      if (current?.bags?.length) validateUniformBags(current.bags, lines, catalog);
+    }
+    const saved = await saveUniformPackout(entry.nowstaEventId, req.body?.expectedRevision, changes, req.auth.username || req.auth.userId);
     return res.json(saved);
   } catch (error) { return errorResponse(res, error); }
 });

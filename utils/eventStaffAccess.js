@@ -1,8 +1,7 @@
 export const KITCHEN_PORTAL_ROLES = ['event staff', 'kitchen lead'];
 const roleOf = (auth) => String(auth?.role || '').trim().toLowerCase();
 
-export const kitchenReportPosition = (auth, assignedShifts = []) => {
-  if (roleOf(auth) !== 'kitchen lead' && String(auth?.jobTitle || '').trim().toLowerCase() === 'executive chef') return 'Executive Chef';
+export const kitchenReportPosition = (_auth, assignedShifts = []) => {
   return assignedShifts.find((shift) => /\b(?:(?:lead|executive)\s+chef|kitchen\s+lead)\b/i.test(String(shift?.position || '').replace(/[-_]+/g, ' ')))?.position || '';
 };
 

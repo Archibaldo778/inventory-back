@@ -23,7 +23,8 @@ test('Kitchen Lead can use assigned kitchen reports but cannot read decor even w
   assert.equal(eventStaffRequestAllowed(chef, { method: 'POST', originalUrl: '/api/staff-portal/events/42' }), false);
   const executive = { role: 'event staff', jobTitle: 'executive chef', permissions: { inventoryRead: true } };
   assert.equal(canReadStaffInventory(executive), true);
-  assert.equal(canUseKitchenReport(executive), true);
+  assert.equal(canUseKitchenReport(executive), false);
+  assert.equal(canUseKitchenReport(executive, [{ position: 'Executive Chef' }]), true);
 });
 
 test('Kitchen Lead report eligibility follows their booked position, not another chef’s shift or stale executive title', () => {

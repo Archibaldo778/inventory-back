@@ -35,7 +35,8 @@ const secret = (t) => {
 
 test('Event Staff report requests reach the assignment check without granting other write permissions', () => {
   const req = { method: 'POST', originalUrl: '/api/staff-portal/events/123/kitchen-report-link' };
-  assert.equal(canUseKitchenReport(chef), true);
+  assert.equal(canUseKitchenReport(chef), false);
+  assert.equal(canUseKitchenReport(chef, entry.shifts), true);
   assert.equal(eventStaffRequestAllowed(chef, req), true);
   assert.equal(eventStaffRequestAllowed({ ...chef, jobTitle: '' }, req), true);
   assert.equal(eventStaffRequestAllowed(chef, { ...req, originalUrl: '/api/products' }), false);
@@ -173,8 +174,22 @@ test('new report uses the actual Lead Chef position and rejects a staff member w
   assert.equal(writes, 1);
 });
 
-test('saved report link is revoked if Lead Chef becomes a non-chef assignment without an Executive Chef profile', async (t) => {
-  mockSources(t, { ...entry, shifts: [{ ...entry.shifts[0], position: 'Server' }] });
-  t.mock.method(User, 'findById', () => ({ select: () => ({ lean: async () => ({ ...chef, jobTitle: '' }) }) }));
+test('saved report link is revoked if Lead Chef becomes Event Chef even with an Executive Chef profile', async (t) => {
+  mockSources(t, { ...entry, shifts: [{ ...entry.shifts[0], position: 'Event Chef' }] });
   await assert.rejects(validateStaffKitchenReportAccess({ context: `staff-kitchen:${userId}` }, { eventId, reportType: 'kitchen' }), /no longer available/);
+});
+
+
+test('Event Chef never requires a Kitchen Report based on account role or Executive Chef profile alone', async (t) => {
+  const schedule = { ...entry, shifts: [{ ...entry.shifts[0], position: 'Event Chef' }] };
+  mockSources(t, schedule);
+  t.mock.method(EventReport, 'findOne', () => assert.fail('An Event Chef must not create or open a report'));
+  for (const role of ['event staff', 'kitchen lead']) {
+    const user = { ...chef, role };
+    assert.equal(serializeStaffEvent(schedule, user).canUseKitchenReport, false);
+    await assert.rejects(openStaffKitchenReport(user, '123'), /Lead Chef assignment/);
+    for (const position of ['Lead Chef', 'Kitchen Lead', 'Executive Chef']) {
+      assert.equal(serializeStaffEvent({ ...entry, shifts: [{ ...entry.shifts[0], position }] }, user).canUseKitchenReport, true);
+    }
+  }
 });

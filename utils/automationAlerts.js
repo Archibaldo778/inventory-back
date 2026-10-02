@@ -94,23 +94,28 @@ const operationsSender = () => {
   return `OCC Operations <${address}>`;
 };
 
-export const sendAutomationAlertEmail = async ({ event, rule, matches, fetchImpl = fetch }) => {
-  const apiKey = clean(process.env.RESEND_API_KEY, 1000);
-  if (!apiKey) return { status: 'failed', error: 'RESEND_API_KEY is not configured' };
+export const buildAutomationAlertEmail = ({ event, rule, matches, stage = '' }) => {
   const eventTitle = clean(event?.title, 300) || 'Untitled event';
   const eventDate = clean(event?.date, 40);
   const recipients = Array.isArray(rule?.recipients) ? rule.recipients.map((value) => clean(value, 320).toLowerCase()).filter(Boolean) : [];
   const lines = matches.map(itemLine);
-  const response = await fetchImpl('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
+  const reason = stage === 'packing' ? 'Packing reminder: please prepare these items for the event.'
+    : stage === 'arrival' ? 'A PO is now available in Dropbox. Please plan for these items.' : '';
+  return {
       from: operationsSender(),
       to: recipients,
-      subject: `${clean(rule?.subjectPrefix, 160) || 'ACTION REQUIRED'} · ${eventTitle}${eventDate ? ` · ${eventDate}` : ''}`,
-      html: `<div style="font-family:Arial,sans-serif;color:#222"><h2 style="margin:0 0 8px">${escapeHtml(rule?.name || 'Automated alert')}</h2><p style="margin:0 0 16px"><strong>${escapeHtml(eventTitle)}</strong>${eventDate ? ` · ${escapeHtml(eventDate)}` : ''}</p><p>The following Pack Out items matched the ${escapeHtml(rule?.department || 'department')} rule:</p><ul>${lines.map((line) => `<li>${escapeHtml(line)}</li>`).join('')}</ul></div>`,
-      text: `${clean(rule?.name || 'AUTOMATED ALERT').toUpperCase()}\n${eventTitle}${eventDate ? ` · ${eventDate}` : ''}\n\n${lines.map((line) => `- ${line}`).join('\n')}`,
-    }),
+      subject: `${clean(rule?.subjectPrefix, 160) || 'ACTION REQUIRED'}${stage === 'packing' ? ' · Packing reminder' : ''} · ${eventTitle}${eventDate ? ` · ${eventDate}` : ''}`,
+      html: `<div style="font-family:Arial,sans-serif;color:#222"><h2 style="margin:0 0 8px">${escapeHtml(rule?.name || 'Automated alert')}</h2><p style="margin:0 0 16px"><strong>${escapeHtml(eventTitle)}</strong>${eventDate ? ` · ${escapeHtml(eventDate)}` : ''}</p>${reason ? `<p>${escapeHtml(reason)}</p>` : ''}<p>The following Pack Out items matched the ${escapeHtml(rule?.department || 'department')} rule:</p><ul>${lines.map((line) => `<li>${escapeHtml(line)}</li>`).join('')}</ul></div>`,
+      text: `${clean(rule?.name || 'AUTOMATED ALERT').toUpperCase()}\n${eventTitle}${eventDate ? ` · ${eventDate}` : ''}\n\n${reason ? `${reason}\n\n` : ''}${lines.map((line) => `- ${line}`).join('\n')}`,
+  };
+};
+
+export const sendAutomationAlertEmail = async ({ event, rule, matches, fetchImpl = fetch }) => {
+  const apiKey = clean(process.env.RESEND_API_KEY, 1000);
+  if (!apiKey) return { status: 'failed', error: 'RESEND_API_KEY is not configured' };
+  const response = await fetchImpl('https://api.resend.com/emails', {
+    method: 'POST', headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(buildAutomationAlertEmail({ event, rule, matches })),
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || !payload?.id) return { status: 'failed', error: clean(payload?.message || `Resend HTTP ${response.status}`, 1000) };

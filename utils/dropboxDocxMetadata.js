@@ -1,5 +1,6 @@
 import JSZip from 'jszip';
 import { parseRecognizedPackout } from './barPackoutRecognition.js';
+import { extractDropboxPoItems } from './dropboxPoItems.js';
 
 const MAX_DOCX_BYTES = 100 * 1024 * 1024;
 const MAX_DOCUMENT_XML_BYTES = 20 * 1024 * 1024;
@@ -298,6 +299,7 @@ export const readDropboxDocxMetadata = async (buffer, { documentType: typeHint =
     documentType,
     kitchenItems: [],
     barItems: packout.items,
+    poAlertItems: documentType === 'po' ? extractDropboxPoItems(xml) : [],
     packoutType: packout.packoutType,
   };
 };

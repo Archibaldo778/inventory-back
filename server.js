@@ -478,6 +478,7 @@ import slackIntegrationRoutes from './routes/slackIntegration.js';
 import { runSlackEventChannelSync, slackEventChannelsEnabled } from './utils/slackEventChannels.js';
 import { CAPTAIN_REPORT_EMAIL_REMINDERS_ENABLED, CAPTAIN_REPORT_REMINDERS_START_DATE, runCaptainReportEmailReminders } from './utils/captainReportReminders.js';
 import { runEventReportEmailPreview } from './utils/eventReportEmailPreviews.js';
+import { ensureDropboxPoPolicy, runDropboxPoAlerts } from './utils/dropboxPoAlerts.js';
 import { getCatereaseConfig } from './utils/catereaseApi.js';
 
 app.use('/api/auth', authRoutes);
@@ -631,6 +632,7 @@ export const startServer = async () => {
   await mongoose.connect(MONGO_URI, mongoOptions);
   console.log('✅ MongoDB connected');
   await ensureSuperAdmin();
+  if (getCatereaseConfig().eventDocumentSource === 'dropbox') await ensureDropboxPoPolicy();
 
   const server = app.listen(PORT, () => {
     console.log(`Сервер запущен на порту ${PORT}`);
@@ -757,6 +759,13 @@ export const startServer = async () => {
   }, 60_000);
   reportPreviewTimer.unref?.();
 
+  const poAlertTimer = setInterval(() => {
+    runDropboxPoAlerts().then((summary) => {
+      if (summary.sent || summary.failed) console.log('Dropbox PO alerts processed', summary);
+    }).catch((error) => console.error('Dropbox PO alerts failed:', error?.message));
+  }, 60_000);
+  poAlertTimer.unref?.();
+
   let shuttingDown = false;
   const shutdown = (signal) => {
     if (shuttingDown) return;
@@ -774,6 +783,7 @@ export const startServer = async () => {
     if (slackSyncTimer) clearInterval(slackSyncTimer);
     clearInterval(captainReportEmailTimer);
     clearInterval(reportPreviewTimer);
+    clearInterval(poAlertTimer);
 
     const forceExit = setTimeout(() => {
       console.error('Forced shutdown after timeout');

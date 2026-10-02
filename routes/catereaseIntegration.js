@@ -622,7 +622,7 @@ export const syncOperationalEvent = async (event, {
   const catereaseClient = String(snapshot?.client || '').trim().slice(0, 300);
   if (catereaseClient) event.client = catereaseClient;
   await event.save();
-  const automationAlerts = await processAlerts({ event, snapshot, previousSnapshot, previousChecksum }).catch((error) => ([{
+  const automationAlerts = getCatereaseConfig().eventDocumentSource === 'dropbox' ? [] : await processAlerts({ event, snapshot, previousSnapshot, previousChecksum }).catch((error) => ([{
     status: 'failed', error: String(error?.message || 'Automation alert processing failed').slice(0, 300),
   }]));
   const barSync = primaryFiles

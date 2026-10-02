@@ -29,6 +29,8 @@ const dropboxDocumentSchema = new mongoose.Schema({
   kitchenItems: { type: [mongoose.Schema.Types.Mixed], default: undefined },
   barItems: { type: [mongoose.Schema.Types.Mixed], default: undefined },
   packoutType: { type: String, trim: true, default: '' },
+  poAlertItems: { type: [mongoose.Schema.Types.Mixed], default: undefined },
+  poAlertParserVersion: { type: Number, default: 0 },
   isLatestRevision: { type: Boolean, default: false, index: true },
   supersededByDropboxId: { type: String, trim: true, default: '' },
   status: {

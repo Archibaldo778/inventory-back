@@ -10,6 +10,7 @@ import { sendApiError } from '../utils/apiErrors.js';
 import { clearApiCacheGroups } from '../utils/apiCache.js';
 import { mergeEventDocumentHistory } from '../utils/documentImportAudit.js';
 import { readDropboxDocxMetadata } from '../utils/dropboxDocxMetadata.js';
+import { runDropboxPoAlerts } from '../utils/dropboxPoAlerts.js';
 import {
   runImportedBarItemMergePipeline,
 } from '../utils/barManualItems.js';
@@ -228,6 +229,8 @@ const inspectDropboxDocumentContents = async (accessToken, namespaceId) => {
           kitchenItems: metadata.kitchenItems,
           barItems: metadata.barItems,
           packoutType: metadata.packoutType,
+          poAlertItems: metadata.poAlertItems,
+          poAlertParserVersion: 1,
           status,
           reason,
         } });
@@ -986,6 +989,7 @@ export const runDropboxDiscoverySync = async () => {
       integration.lastSyncCompletedAt = new Date();
       integration.lastSyncSummary = stats;
       await integration.save();
+      void runDropboxPoAlerts().catch((error) => console.error('Dropbox PO alerts failed:', error?.message));
       return stats;
     } catch (error) {
       integration.lastSyncError = String(error?.message || 'Dropbox sync failed').slice(0, 500);

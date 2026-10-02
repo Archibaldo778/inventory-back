@@ -42,7 +42,10 @@ test('Caterease series matching refuses ambiguous same-date candidates', () => {
   }), null);
 });
 
-test('a full Caterease operational sync leaves manual additions untouched', async () => {
+test('a full Caterease operational sync leaves manual additions untouched', async (t) => {
+  const source = process.env.EVENT_DOCUMENT_SOURCE;
+  process.env.EVENT_DOCUMENT_SOURCE = 'caterease';
+  t.after(() => { if (source === undefined) delete process.env.EVENT_DOCUMENT_SOURCE; else process.env.EVENT_DOCUMENT_SOURCE = source; });
   const additions = [{
     _id: '66f000000000000000000001',
     documentType: 'po',
@@ -82,6 +85,18 @@ test('a full Caterease operational sync leaves manual additions untouched', asyn
   assert.equal(event.saved, true);
   assert.equal(alertInput.previousSnapshot, previousSnapshot);
   assert.equal(alertInput.snapshot, snapshot);
+});
+
+test('Caterease preview sync cannot send a second PO alert when Dropbox owns the schedule', async (t) => {
+  const source = process.env.EVENT_DOCUMENT_SOURCE;
+  process.env.EVENT_DOCUMENT_SOURCE = 'dropbox';
+  t.after(() => { if (source === undefined) delete process.env.EVENT_DOCUMENT_SOURCE; else process.env.EVENT_DOCUMENT_SOURCE = source; });
+  const result = await syncOperationalEvent({ externalId: 'E12345', title: 'Dinner', date: '2026-10-04', markModified() {}, async save() {} }, {
+    primaryFiles: false,
+    fetchSnapshot: async () => ({ checksum: 'new', packOut: [], kitchenPackOut: [], kitchenMenu: [], staffRequest: [] }),
+    processAlerts: async () => { assert.fail('Dropbox schedules must not trigger legacy Caterease mail'); },
+  });
+  assert.deepEqual(result.automationAlerts, []);
 });
 
 test('operational sync promotes the Caterease client before syncing Bar Operations', async () => {

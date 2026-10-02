@@ -5,6 +5,8 @@ import AutomationAlertDelivery from '../models/AutomationAlertDelivery.js';
 import Event from '../models/Event.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import { ensureDefaultAutomationRule, processAutomationAlerts } from '../utils/automationAlerts.js';
+import { getCatereaseConfig } from '../utils/catereaseApi.js';
+import { PO_REMINDER_HOUR } from '../utils/dropboxPoAlerts.js';
 
 const router = Router();
 const clean = (value, max = 500) => String(value ?? '').trim().slice(0, max);
@@ -43,12 +45,13 @@ router.get('/', async (_req, res) => {
       AutomationAlertDelivery.find({}).sort({ createdAt: -1 }).limit(50).populate('ruleId', 'name department').populate('eventId', 'title date').lean(),
     ]);
     return res.json({
+      poSchedule: { enabled: getCatereaseConfig().eventDocumentSource === 'dropbox', hour: PO_REMINDER_HOUR, timeZone: 'America/New_York' },
       rules: rules.map(serializeRule),
       deliveries: deliveries.map((entry) => ({
         id: String(entry._id), ruleId: String(entry.ruleId?._id || entry.ruleId || ''),
         ruleName: entry.ruleId?.name || '', department: entry.ruleId?.department || '',
         eventId: String(entry.eventId?._id || entry.eventId || ''), eventTitle: entry.eventId?.title || '', eventDate: entry.eventId?.date || '',
-        status: entry.status, recipients: entry.recipients || [], matchedItems: entry.matchedItems || [],
+        status: entry.status, stage: entry.stage || '', source: entry.source || '', recipients: entry.recipients || [], matchedItems: entry.matchedItems || [],
         error: entry.error || '', sentAt: entry.sentAt, createdAt: entry.createdAt,
       })),
     });
@@ -59,6 +62,7 @@ router.get('/', async (_req, res) => {
 
 router.post('/backfill', async (req, res) => {
   try {
+    if (getCatereaseConfig().eventDocumentSource === 'dropbox') return res.status(409).json({ message: 'Dropbox PO alerts run automatically on arrival and at 08:00 New York time the day before the event. Historical bulk sending is disabled.' });
     const from = isoDate(req.body?.from);
     const to = isoDate(req.body?.to);
     const ruleId = clean(req.body?.ruleId, 100);

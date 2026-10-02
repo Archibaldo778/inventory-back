@@ -61,6 +61,32 @@ test('uniform role can read shared events and reports, but cannot write reports 
   assert.equal(allowed('POST', '/api/nowsta-schedule'), false);
 });
 
+test('uniform entered only against Captain applies to unlabelled waiters and bartenders', () => {
+  const rows = eventUniformRequirements({ shifts: [{ position: 'Captain' }, { position: 'Waiter' }, { position: 'Bartender' }] },
+    { catereaseOperations: { staffRequest: [{ position: 'Captain', uniform: 'Black Mandarin' }] } });
+  assert.deepEqual(rows.map((row) => row.uniform), ['Black Mandarin', 'Black Mandarin', 'Black Mandarin']);
+  assert.equal(rows[1].inherited, true);
+});
+
+test('captains provide their own default outfit unless a captain-specific instruction overrides it', () => {
+  const entry = { uniform: 'Black Mandarin', shifts: [{ position: 'Captain' }, { position: 'Waiter' }] };
+  const rows = eventUniformRequirements(entry);
+  assert.match(rows[0].uniform, /White shirt, suit jacket and tie/);
+  assert.equal(rows[0].selfProvided, true);
+  assert.equal(rows[1].uniform, 'Black Mandarin');
+  const explicit = eventUniformRequirements(entry, { catereaseOperations: { staffRequest: [{ position: 'Captain', uniform: 'White Nehru' }] } });
+  assert.equal(explicit[0].uniform, 'White Nehru');
+  assert.equal(explicit[0].selfProvided, false);
+});
+
+test('multiple distinct instructions are not guessed for unlabelled staff and explicit exceptions survive', () => {
+  const rows = eventUniformRequirements({ uniform: 'Black Mandarin', shifts: [{ position: 'Waiter' }, { position: 'Lead Chef', uniform: 'Chef whites' }] });
+  assert.equal(rows[0].uniform, 'Black Mandarin');
+  assert.equal(rows[1].uniform, 'Chef whites');
+  const ambiguous = eventUniformRequirements({ shifts: [{ position: 'Waiter' }, { position: 'Captain', uniform: 'White Nehru' }, { position: 'Bartender', uniform: 'Black shirt' }] });
+  assert.equal(ambiguous[0].uniform, '');
+});
+
 test('readonly report list selects only submitted reports for this event and does not send or create requests', async (t) => {
   t.mock.method(EventReport, 'find', (query) => { assert.deepEqual(query, { eventId, status: 'submitted' }); return chain([{ _id: 'report', eventId, status: 'submitted' }]); });
   t.mock.method(EventReportFile, 'find', (query) => { assert.deepEqual(query, { eventId }); return chain([]); });

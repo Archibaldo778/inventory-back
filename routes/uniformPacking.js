@@ -97,7 +97,11 @@ router.get('/events/:id', async (req, res) => {
     const sizes = await fillMissingNowstaSizes(buildUniformRoster(entry, staff, packout?.rosterSizes));
     return res.json({ event: { ...summary(entry), linkedEventId: event?._id || null }, requirements,
       sizeLookupWarning: sizes.sizeLookupWarning,
-      roster: sizes.roster.map((person) => ({ ...person, uniform: [...new Set(requirements.filter((row) => person.positions.includes(row.position)).map((row) => row.uniform).filter(Boolean))].join(' / ') })),
+      roster: sizes.roster.map((person) => {
+        const assigned = requirements.filter((row) => person.positions.includes(row.position));
+        return { ...person, uniform: [...new Set(assigned.map((row) => row.uniform).filter(Boolean))].join(' / '),
+          uniformSelfProvided: assigned.length > 0 && assigned.every((row) => row.selfProvided) };
+      }),
       packout: packout || blankPackout(entry.nowstaEventId), catalog });
   } catch (error) { return errorResponse(res, error); }
 });

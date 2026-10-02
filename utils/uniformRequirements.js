@@ -30,10 +30,9 @@ export const eventUniformRequirements = (entry, event) => {
   const requests = event?.catereaseOperations?.staffRequest || [];
   const positions = [...(entry.shifts || []).map((shift) => shift.position), ...requests.map((row) => row.position)]
     .filter((position, index, all) => position && all.findIndex((other) => key(other) === key(position)) === index);
-  return positions.map((position) => {
-    const shifts = (entry.shifts || []).filter((shift) => key(shift.position) === key(position));
-    const nowsta = [...new Set(shifts.map((shift) => clean(shift.uniform)).filter(Boolean))];
-    if (!nowsta.length && clean(entry.uniform || event?.meta?.nowsta?.uniform)) nowsta.push(clean(entry.uniform || event.meta.nowsta.uniform));
+  const explicit = positions.map((position) => {
+    const nowsta = [...new Set((entry.shifts || []).filter((shift) => key(shift.position) === key(position))
+      .map((shift) => clean(shift.uniform)).filter(Boolean))];
     const staffRequest = [...new Set(requests.filter((row) => key(row.position) === key(position)).map((row) => clean(row.uniform)).filter(Boolean))];
     return { position, uniform: nowsta.join(' / ') || staffRequest.join(' / '),
       source: nowsta.length ? 'Nowsta' : staffRequest.length ? 'Staff Request' : '',
@@ -42,5 +41,15 @@ export const eventUniformRequirements = (entry, event) => {
         !nowsta.every((instruction) => staffRequest.some((request) => sameUniform(instruction, request)))
         || !staffRequest.every((request) => nowsta.some((instruction) => sameUniform(instruction, request)))
       )) };
+  });
+  const globalUniform = clean(entry.uniform || event?.meta?.nowsta?.uniform);
+  const distinct = [...new Map(explicit.filter((row) => row.uniform).map((row) => [key(row.uniform.split(' — ')[0]), row.uniform])).values()];
+  // Sales commonly enters the shared uniform on just one staffing row.
+  const shared = globalUniform || (distinct.length === 1 ? distinct[0] : '');
+  return explicit.map((row) => {
+    if (row.uniform) return { ...row, selfProvided: false, inherited: false };
+    if (/\bcaptain\b/i.test(row.position)) return { ...row,
+      uniform: 'White shirt, suit jacket and tie — provided by Captain', source: 'Captain default', selfProvided: true, inherited: false };
+    return { ...row, uniform: shared, source: shared ? 'Event uniform' : '', selfProvided: false, inherited: Boolean(shared) };
   });
 };

@@ -21,7 +21,7 @@ export const openStaffKitchenReport = async (user, nowstaEventId) => {
   const assignedEvent = serializeStaffEvent(entry, user);
   if (!assignedEvent) throw createApiError(404, 'Event is not assigned to you');
   if (!assignedEvent.reportRequired) throw createApiError(403, 'No report is required for this event');
-  if (!assignedEvent.canUseKitchenReport) throw createApiError(403, 'Lead Chef assignment (or Kitchen Lead / Executive Chef) required');
+  if (!assignedEvent.canUseKitchenReport) throw createApiError(403, 'Lead Chef assignment (or Kitchen Lead / Proofer Lead / Executive Chef) required');
   const event = await Event.findOne(kitchenReportEventQuery(nowstaEventId))
     .select('_id title date managerId meta catereaseOperations').lean();
   if (!event) throw createApiError(409, 'This Nowsta event is not linked to an active Inventory event. Ask an administrator to check the event sync.');

@@ -57,7 +57,7 @@ export const renderUserInviteEmail = ({ name, inviteUrl, role = 'captain', activ
   const expiry = active ? '' : 'This link is private and expires in 72 hours.';
   const steps = kitchenLead ? [
     'Sign in and open My Events. You will see your confirmed Nowsta assignments.',
-    'Open the event where you are booked as Lead Chef or Kitchen Lead, then select Kitchen Report.',
+    'Open the event where you are booked as Lead Chef, Kitchen Lead, Proofer Lead or Executive Chef, then select Kitchen Report.',
     'Complete the report within 48 hours after the event. Include any staffing, food, equipment or service issues and submit it when finished.',
     'If you forget your password, use Forgot password on the login page.',
     'If an assigned event is missing or you need help registering, contact me directly.',

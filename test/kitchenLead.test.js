@@ -41,6 +41,7 @@ test('Kitchen Lead invitation explains registration and kitchen reports only and
   assert.match(invite.text, /Create your password/);
   assert.match(invite.text, /Kitchen Report/);
   assert.match(invite.text, /48 hours/);
+  assert.match(invite.text, /Proofer Lead/);
   assert.doesNotMatch(invite.text, /Captain|Bar Returns|alcohol|decor/i);
   assert.match(renderUserInviteEmail({ role: chef.role, active: true }).text, /existing password/);
   assert.equal(canInviteUserAsRole('kitchen lead', 'kitchen lead'), true);

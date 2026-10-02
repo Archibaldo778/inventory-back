@@ -188,8 +188,25 @@ test('Event Chef never requires a Kitchen Report based on account role or Execut
     const user = { ...chef, role };
     assert.equal(serializeStaffEvent(schedule, user).canUseKitchenReport, false);
     await assert.rejects(openStaffKitchenReport(user, '123'), /Lead Chef assignment/);
-    for (const position of ['Lead Chef', 'Kitchen Lead', 'Executive Chef']) {
+    for (const position of ['Lead Chef', 'Kitchen Lead', 'Proofer Lead', 'Executive Chef']) {
       assert.equal(serializeStaffEvent({ ...entry, shifts: [{ ...entry.shifts[0], position }] }, user).canUseKitchenReport, true);
     }
   }
+});
+
+
+test('a confirmed Proofer Lead can open their Kitchen Report and keeps the actual event position', async (t) => {
+  const proofer = { ...chef, role: 'kitchen lead', jobTitle: '' };
+  mockSources(t, { ...entry, shifts: [{ ...entry.shifts[0], position: 'Proofer Lead' }] });
+  t.mock.method(EventReport, 'findOne', () => ({ sort: async () => null }));
+  t.mock.method(EventReport, 'findOneAndUpdate', async (_filter, update) => ({ _id: 'proofer-report', ...update.$setOnInsert }));
+  const { report } = await openStaffKitchenReport(proofer, '123');
+  assert.equal(report.reportType, 'kitchen');
+  assert.equal(report.position, 'Proofer Lead');
+  assert.equal(report.slackUserId, `account:${userId}:kitchen`);
+  const otherLead = { ...entry, shifts: [
+    { position: 'Event Chef', workers: [{ email: proofer.email, status: 'confirmed' }] },
+    { position: 'Proofer Lead', workers: [{ email: 'other@example.com', status: 'confirmed' }] },
+  ] };
+  assert.equal(serializeStaffEvent(otherLead, proofer).canUseKitchenReport, false);
 });

@@ -1,17 +1,28 @@
 const clean = (value) => typeof value === 'string' || typeof value === 'number' ? String(value).trim().slice(0, 1000) : '';
 const key = (value) => clean(value).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+const sameUniform = (instruction, request) => key(instruction) === key(request)
+  || key(instruction.split(' — ')[0]) === key(request);
 
-export const nowstaUniformText = (source = {}) => [
-  source.uniform_name, typeof source.uniform === 'string' ? source.uniform : source.uniform?.name,
-  source.uniform_description, source.uniform?.description, source.dress_code,
-].map(clean).filter((value, index, values) => value && values.indexOf(value) === index).join(' — ');
+export const nowstaUniformText = (source = {}, uniforms = new Map()) => {
+  const reference = uniforms.get(String(source.uniform_id ?? ''));
+  return [
+    source.uniform_name || (typeof source.uniform === 'string' ? source.uniform : source.uniform?.name) || reference?.name,
+    source.uniform_description || source.uniform?.description || reference?.description, source.dress_code,
+  ].map(clean).filter((value, index, values) => value && values.indexOf(value) === index).join(' — ');
+};
 
 export const nowstaClothingSizes = (person = {}) => {
   const sources = [person, person.sizes, person.clothing_sizes, person.user, person.user?.sizes].filter(Boolean);
   const fields = { jacketSize: ['jacket_size', 'jacketSize'], shirtSize: ['shirt_size', 'shirtSize'],
     pantsSize: ['pants_size', 'pant_size', 'pantsSize'], shoeSize: ['shoe_size', 'shoes_size', 'shoeSize'], height: ['height'] };
+  const assignments = (Array.isArray(person.clothing_sizes) ? person.clothing_sizes : [])
+    .filter((row) => !row.archived_at)
+    .sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
+  const labels = { jacketSize: ['jacket', 'jacket size'], shirtSize: ['shirt', 'shirt size'],
+    pantsSize: ['pants', 'pants size'], shoeSize: ['shoes', 'shoe size', 'shoes size'], height: ['height'] };
   return Object.fromEntries(Object.entries(fields).map(([field, aliases]) => [field,
-    sources.flatMap((source) => aliases.map((alias) => clean(source[alias]))).find(Boolean) || '',
+    sources.flatMap((source) => aliases.map((alias) => clean(source[alias]))).find(Boolean)
+      || clean(assignments.find((row) => labels[field].includes(key(row.clothing_size_name)))?.value) || '',
   ]));
 };
 
@@ -27,6 +38,9 @@ export const eventUniformRequirements = (entry, event) => {
     return { position, uniform: nowsta.join(' / ') || staffRequest.join(' / '),
       source: nowsta.length ? 'Nowsta' : staffRequest.length ? 'Staff Request' : '',
       staffRequest: staffRequest.join(' / '),
-      conflict: Boolean(nowsta.length && staffRequest.length && key(nowsta.join(' / ')) !== key(staffRequest.join(' / '))) };
+      conflict: Boolean(nowsta.length && staffRequest.length && (
+        !nowsta.every((instruction) => staffRequest.some((request) => sameUniform(instruction, request)))
+        || !staffRequest.every((request) => nowsta.some((instruction) => sameUniform(instruction, request)))
+      )) };
   });
 };

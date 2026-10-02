@@ -57,7 +57,7 @@ const safeUpstreamMessage = (status) => {
   return `Nowsta API returned ${status || 'an invalid response'}`;
 };
 
-export const createNowstaClient = ({ apiKey = process.env.NOWSTA_API_KEY, fetchImpl = globalThis.fetch } = {}) => {
+export const createNowstaClient = ({ apiKey = process.env.NOWSTA_API_KEY, fetchImpl = globalThis.fetch, timeoutMs = 30_000, rateLimitRetries = 2 } = {}) => {
   const accessKey = clean(apiKey, 8_000);
   if (!accessKey) throw Object.assign(new Error('NOWSTA_API_KEY is not configured'), { statusCode: 503 });
 
@@ -71,8 +71,8 @@ export const createNowstaClient = ({ apiKey = process.env.NOWSTA_API_KEY, fetchI
         Accept: 'application/json',
         Authorization: `Bearer ${accessKey}`,
       },
-    }, { timeoutMs: 30_000, fetchImpl });
-    if (response.status === 429 && attempt < 2) {
+    }, { timeoutMs, fetchImpl });
+    if (response.status === 429 && attempt < rateLimitRetries) {
       await wait(parseRetrySeconds(response) * 1_000);
       return request(pathname, params, attempt + 1);
     }
@@ -338,9 +338,10 @@ export const classifyNowstaSourceEvents = (events = []) => {
   return { included, excluded };
 };
 
-export const buildNowstaImportRows = ({ events = [], shifts = [], companyUsers = [], venues = [] } = {}) => {
+export const buildNowstaImportRows = ({ events = [], shifts = [], companyUsers = [], venues = [], uniforms = [] } = {}) => {
   const people = new Map(companyUsers.map((person) => [String(person?.id ?? ''), person]));
   const venuesById = venueMap(venues);
+  const uniformsById = new Map(uniforms.map((row) => [String(row.id), row]));
   const shiftsByEvent = new Map();
   shifts.forEach((shift) => {
     const eventId = String(shift?.event_id ?? '');
@@ -361,7 +362,7 @@ export const buildNowstaImportRows = ({ events = [], shifts = [], companyUsers =
       })
       .filter(Boolean);
     const normalized = {
-      uniform: nowstaUniformText(shift),
+      uniform: nowstaUniformText(shift, uniformsById),
       position: clean(shift?.position_name || shift?.name, 160),
       startTime: zonedTime(shift?.starts_at, shift?.time_zone),
       endTime: zonedTime(shift?.ends_at, shift?.time_zone),
@@ -410,7 +411,7 @@ export const buildNowstaImportRows = ({ events = [], shifts = [], companyUsers =
             venue,
             address,
             eventTime,
-            uniform: nowstaUniformText(event),
+            uniform: nowstaUniformText(event, uniformsById),
             adminNotes: clean(event.admin_notes || event.supervisor_notes, 2_000),
             staffTotals: `${assigned} assigned · ${unfilled} unfilled`,
             updatedAt: clean(event.updated_at, 100),
@@ -464,6 +465,7 @@ export const buildNowstaScheduleRows = ({
   companyUsers = [],
   departments = [],
   venues = [],
+  uniforms = [],
   defaultVisibleIds = new Set(),
 } = {}) => {
   const people = new Map((Array.isArray(companyUsers) ? companyUsers : []).map((person) => [
@@ -471,6 +473,7 @@ export const buildNowstaScheduleRows = ({
     person,
   ]));
   const venuesById = venueMap(venues);
+  const uniformsById = new Map(uniforms.map((row) => [String(row.id), row]));
   const shiftsByEvent = new Map();
   const departmentsById = new Map((Array.isArray(departments) ? departments : []).map((department) => [
     String(department?.id ?? ''),
@@ -500,7 +503,7 @@ export const buildNowstaScheduleRows = ({
     const list = shiftsByEvent.get(eventId) || [];
     list.push({
       nowstaShiftId: String(shift?.id ?? ''),
-      uniform: nowstaUniformText(shift),
+      uniform: nowstaUniformText(shift, uniformsById),
       required: Number.isFinite(Number(shift?.quantity)) && shift?.quantity != null ? Math.max(0, Number(shift.quantity)) : null,
       position: clean(shift?.position_name || shift?.name, 160),
       startsAt: shift?.starts_at || null,
@@ -547,7 +550,7 @@ export const buildNowstaScheduleRows = ({
         defaultVisible: defaultVisibleIds.has(nowstaEventId),
         venue: eventVenueName(event, venuesById),
         address: eventAddress(event, venuesById),
-        uniform: nowstaUniformText(event),
+        uniform: nowstaUniformText(event, uniformsById),
         guestCount: nowstaGuestCount(event.number_of_guests),
         notes: clean(event.admin_notes || event.supervisor_notes, 2_000),
         shifts: eventShifts,
@@ -560,7 +563,7 @@ export const buildNowstaScheduleRows = ({
 export const fetchNowstaImportRows = async ({ from, to, fetchImpl, apiKey } = {}) => {
   const range = resolveNowstaSyncRange({ from, to });
   const client = createNowstaClient({ fetchImpl, apiKey });
-  const [events, shifts, companyUsers, departments, venues] = await Promise.all([
+  const [events, shifts, companyUsers, departments, venues, uniforms] = await Promise.all([
     client.listAll('/v2/events', { starts_after: range.from, starts_before: range.to }),
     client.listAll('/v2/shifts', {
       starts_at: range.from,
@@ -571,14 +574,15 @@ export const fetchNowstaImportRows = async ({ from, to, fetchImpl, apiKey } = {}
     client.listAll('/v2/company_users', { include_archived: false }),
     client.listAll('/v2/departments').catch(() => []),
     client.listAll('/v2/venues').catch(() => []),
+    client.listAll('/v2/uniforms'),
   ]);
   const classified = classifyNowstaSourceEvents(events);
   const defaultVisibleIds = new Set(classified.included.map((event) => String(event?.id ?? '')).filter(Boolean));
   return {
     range,
-    counts: { events: events.length, shifts: shifts.length, companyUsers: companyUsers.length, departments: departments.length, venues: venues.length },
-    events: buildNowstaImportRows({ events: classified.included, shifts, companyUsers, venues }),
-    scheduleEvents: buildNowstaScheduleRows({ events, shifts, companyUsers, departments, venues, defaultVisibleIds }),
+    counts: { events: events.length, shifts: shifts.length, companyUsers: companyUsers.length, departments: departments.length, venues: venues.length, uniforms: uniforms.length },
+    events: buildNowstaImportRows({ events: classified.included, shifts, companyUsers, venues, uniforms }),
+    scheduleEvents: buildNowstaScheduleRows({ events, shifts, companyUsers, departments, venues, uniforms, defaultVisibleIds }),
     scheduleDepartments: buildNowstaDepartmentRows(departments),
     excludedEvents: classified.excluded,
   };

@@ -9,6 +9,7 @@ import Deck from '../models/Deck.js';
 import Page from '../models/Page.js';
 import uniformWorkspaceRoutes, { UNIFORM_EVENT_FIELDS } from './uniformWorkspace.js';
 import { eventUniformRequirements } from '../utils/uniformRequirements.js';
+import { fillMissingNowstaSizes } from '../utils/nowstaUniformSizes.js';
 import { requireRoles } from '../middleware/auth.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import { createMemoryRateLimiter } from '../middleware/rateLimit.js';
@@ -93,8 +94,10 @@ router.get('/events/:id', async (req, res) => {
       linkedEvent(entry),
     ]);
     const requirements = eventUniformRequirements(entry, event);
+    const sizes = await fillMissingNowstaSizes(buildUniformRoster(entry, staff, packout?.rosterSizes));
     return res.json({ event: { ...summary(entry), linkedEventId: event?._id || null }, requirements,
-      roster: buildUniformRoster(entry, staff, packout?.rosterSizes).map((person) => ({ ...person, uniform: [...new Set(requirements.filter((row) => person.positions.includes(row.position)).map((row) => row.uniform).filter(Boolean))].join(' / ') })),
+      sizeLookupWarning: sizes.sizeLookupWarning,
+      roster: sizes.roster.map((person) => ({ ...person, uniform: [...new Set(requirements.filter((row) => person.positions.includes(row.position)).map((row) => row.uniform).filter(Boolean))].join(' / ') })),
       packout: packout || blankPackout(entry.nowstaEventId), catalog });
   } catch (error) { return errorResponse(res, error); }
 });

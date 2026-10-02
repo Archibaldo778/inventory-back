@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import eventMenuCardsRouter from './eventMenuCards.js';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
@@ -43,6 +44,7 @@ import {
 } from '../utils/documentImportAudit.js';
 
 const router = Router();
+router.use('/:eventId/menu-cards', eventMenuCardsRouter);
 const eventDocumentUploadRateLimit = createMemoryRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 120,

@@ -4,10 +4,11 @@ const clean = (value, max = 200) => String(value ?? '').replace(/\s+/g, ' ').tri
 const nameKey = (value) => clean(value).normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 const confirmed = (worker) => ['confirmed', 'assigned'].includes(clean(worker?.status).toLowerCase()) && !worker?.agency;
 export const uniformWorkerKey = (worker) => clean(worker.companyUserId) ? `nowsta:${clean(worker.companyUserId)}` : `name:${nameKey(worker.name)}`;
+export const uniformPackingPosition = (position) => !/\b(?:chefs?|cooks?|sanit(?:ation|ary)?|dishwashers?)\b/i.test(clean(position));
 
 export const uniformStaffing = (entry) => {
   const people = new Set(); let booked = 0; let pending = 0; let missing = 0;
-  const positions = (entry?.shifts || []).map((shift) => {
+  const positions = (entry?.shifts || []).filter((shift) => uniformPackingPosition(shift.position)).map((shift) => {
     const workers = shift.workers || [];
     const filled = workers.filter(confirmed);
     const waiting = workers.filter((worker) => !confirmed(worker) && !['declined', 'removed', 'cancelled', 'canceled'].includes(clean(worker.status).toLowerCase()) && !worker.agency).length;
@@ -23,7 +24,7 @@ export const uniformStaffing = (entry) => {
 
 export const buildUniformRoster = (entry, staff = [], overrides = []) => {
   const workers = new Map();
-  for (const shift of entry?.shifts || []) for (const worker of shift.workers || []) {
+  for (const shift of (entry?.shifts || []).filter((row) => uniformPackingPosition(row.position))) for (const worker of shift.workers || []) {
     if (!confirmed(worker) || !clean(worker.name)) continue;
     const key = uniformWorkerKey(worker);
     const record = workers.get(key) || { key, name: clean(worker.name), companyUserId: clean(worker.companyUserId), nowstaSizes: worker.sizes || {}, positions: [], calls: [], ends: [] };

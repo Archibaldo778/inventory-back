@@ -33,12 +33,12 @@ const csv = 'EVENT:,E123 - S456 Example Reception - Staffing\r\nDATE:,28/09/2026
 
 test('uniform staffing counts unique booked people, open shifts and pending confirmations separately', () => {
   const totals = uniformStaffing(entry);
-  assert.equal(totals.staffCount, 3);
-  assert.equal(totals.booked, 4);
+  assert.equal(totals.staffCount, 2);
+  assert.equal(totals.booked, 3);
   assert.equal(totals.pending, 1);
   assert.equal(totals.missing, 2);
-  assert.equal(totals.required, 6);
-  assert.deepEqual(totals.positions.map((position) => position.missing), [1, 1, 0]);
+  assert.equal(totals.required, 5);
+  assert.deepEqual(totals.positions.map((position) => position.missing), [1, 1]);
   assert.equal(uniformStaffing({ shifts: [{ workers: [worker('1', 'A')], unfilled: 2 }] }).missing, 2);
 });
 
@@ -50,14 +50,14 @@ test('Nowsta sync retains required slots even when a worker has declined', () =>
   assert.equal(uniformStaffing(row).missing, 3);
 });
 
-test('size roster includes chefs, excludes pending/declined/agency staff and deduplicates multiple shifts', () => {
+test('size roster excludes chefs and pending/declined/agency staff and deduplicates multiple shifts', () => {
   const roster = buildUniformRoster({ ...entry, shifts: [...entry.shifts, { workers: [{ ...worker('9', 'Agency Placeholder'), agency: true }] }] }, staff);
-  assert.deepEqual(roster.map((person) => person.name), ['Alex Smith', 'Sam Brown', 'Chris Cook']);
+  assert.deepEqual(roster.map((person) => person.name), ['Alex Smith', 'Sam Brown']);
   assert.deepEqual(roster[0].positions, ['Captain', 'Bartender']);
   assert.equal(roster[0].jacketSize, '42L');
   assert.equal(roster[0].height, `6'0"`);
   assert.deepEqual(roster[0].missingSizes, []);
-  assert.equal(roster[2].missingSizes.length, 4);
+  assert.equal(roster[1].missingSizes.length, 4);
 });
 
 test('size matching avoids another Nowsta identity and ambiguous names; event imports take precedence', () => {
@@ -78,8 +78,8 @@ test('Nowsta CSV import matches this event and preserves leading payroll zeros a
   assert.equal(imported.sizes[0].jacketSize, '44L');
   assert.equal(imported.sizes[0].timeIn, '3:45PM');
   assert.equal(imported.dress, 'Black Nehru');
-  assert.deepEqual(imported.unmatched, ['Unknown Worker']);
-  assert.deepEqual(imported.sizes[1], { key: 'nowsta:5' });
+  assert.deepEqual(imported.unmatched, ['Chris Cook', 'Unknown Worker']);
+  assert.equal(imported.sizes.length, 1);
   assert.throws(() => importUniformRoster(csv, { ...entry, date: '2026-09-29' }, []), /different event/);
   assert.throws(() => importUniformRoster(csv, { ...entry, externalId: 'E999' }, []), /different event/);
   assert.throws(() => importUniformRoster(csv, entry, []), /No CSV staff match/);
@@ -95,7 +95,7 @@ test('download uses Nowsta columns, escapes spreadsheet formulas, quotes and com
   assert.equal(rows[header].length, 14);
   assert.equal(rows[header + 1][4], '00123');
   assert.equal(rows[header + 1][9], `6'0"`);
-  assert.equal(rows[header + 3][5], '');
+  assert.equal(rows[header + 2][5], '');
   assert.equal(rows.find((row) => row[0] === 'LOC:')[1], 'Hall, East');
   const safe = parseUniformCsv(uniformRosterCsv({ ...entry, externalId: '', title: '=SUM(1,2)' }, roster));
   assert.equal(safe[0][1], "'=SUM(1,2)");
@@ -171,7 +171,7 @@ test('event detail returns booked roster and saved quantities without writing to
   const res = response();
   await handler('/events/:id')({ params: { id: '42' } }, res);
   assert.equal(res.code, 200);
-  assert.equal(res.body.event.staffCount, 3);
+  assert.equal(res.body.event.staffCount, 2);
   assert.equal(res.body.packout.revision, 3);
   assert.equal(res.body.roster[0].shirtSize, 'XL');
 });
@@ -236,4 +236,22 @@ test('board download is scoped to the selected event and only decor/uniform deck
   t.mock.method(Page, 'findOne', (query) => { assert.deepEqual(query.deckId.$in, ['allowed-deck']); assert.equal(query.deletedAt, null); return chain(null); });
   const res = response(); await handler('/events/:id/boards/:pageId')({ params: { id: '42', pageId } }, res);
   assert.equal(res.code, 404);
+});
+
+
+test('chefs and sanitation do not contribute people, missing sizes, vacancies or uniform requirements', () => {
+  const shifts = [
+    { position: 'Sanitation', required: 3, workers: [worker('san', 'San Worker')] },
+    { position: 'Lead Chef', required: 2, workers: [worker('chef', 'Kitchen Worker')] },
+    { position: 'Prep Cook', required: 1, workers: [] },
+    { position: 'Sanit', required: 1, workers: [] },
+    { position: 'Waiter', required: 3, workers: [worker('waiter', 'Service Worker'), worker('chef', 'Kitchen Worker')] },
+  ];
+  const result = uniformStaffing({ shifts });
+  assert.equal(result.staffCount, 2);
+  assert.equal(result.missing, 1);
+  assert.deepEqual(result.positions.map(row => row.position), ['Waiter']);
+  const roster = buildUniformRoster({ shifts });
+  assert.deepEqual(roster.map(row => row.positions), [['Waiter'], ['Waiter']]);
+  assert.equal(roster.some(row => row.name === 'San Worker'), false);
 });

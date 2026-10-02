@@ -1,3 +1,5 @@
+import { uniformPackingPosition } from './uniformPacking.js';
+
 const clean = (value) => typeof value === 'string' || typeof value === 'number' ? String(value).trim().slice(0, 1000) : '';
 const key = (value) => clean(value).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 const sameUniform = (instruction, request) => key(instruction) === key(request)
@@ -29,7 +31,7 @@ export const nowstaClothingSizes = (person = {}) => {
 export const eventUniformRequirements = (entry, event) => {
   const requests = event?.catereaseOperations?.staffRequest || [];
   const positions = [...(entry.shifts || []).map((shift) => shift.position), ...requests.map((row) => row.position)]
-    .filter((position, index, all) => position && all.findIndex((other) => key(other) === key(position)) === index);
+    .filter((position, index, all) => position && uniformPackingPosition(position) && all.findIndex((other) => key(other) === key(position)) === index);
   const explicit = positions.map((position) => {
     const nowsta = [...new Set((entry.shifts || []).filter((shift) => key(shift.position) === key(position))
       .map((shift) => clean(shift.uniform)).filter(Boolean))];

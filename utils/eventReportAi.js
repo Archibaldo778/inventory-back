@@ -1,5 +1,6 @@
 import { fetchWithTimeout } from './fetchWithTimeout.js';
 import { EVENT_REPORT_EMAIL_SECTIONS, KITCHEN_REPORT_EMAIL_SECTIONS } from './eventReportEmail.js';
+import { EVENT_REPORT_RERUN_GUIDANCE, eventReportRerunContext } from './eventReportReruns.js';
 
 const clean = (value, max = 4000) => String(value ?? '').trim().slice(0, max);
 
@@ -43,6 +44,7 @@ export const eventReportAnalysisInput = ({ event, reports = [] } = {}) => ({
     type: report?.reportType === 'kitchen' ? 'Kitchen Report' : "Captain's Report",
     reporter: clean(report?.reporterName, 200),
     position: clean(report?.position, 200),
+    reruns: eventReportRerunContext(report),
     answers: reportSections(report).flatMap(([section, fields]) => fields.map(([key, label]) => {
       const raw = key === 'followUpRequired'
         ? (report?.answers?.[key] ? 'Yes' : 'No')
@@ -108,6 +110,7 @@ export const analyzeEventReports = async ({ event, reports = [], files = [], fet
         'Write concise, natural, professional English for an event operations manager.',
         'Do not invent facts. Distinguish a reported concern from a confirmed fact.',
         'Use reporter names or positions as evidence when useful. Avoid empty filler.',
+        EVENT_REPORT_RERUN_GUIDANCE,
         'Attached PDFs are event reports, including scanned pages. Read them alongside the form responses. Cite PDF filenames and page numbers in evidence. If pages are unreadable, state that limitation rather than inventing their contents.',
       ].join(' '),
       input: files.length ? [{ role: 'user', content: [

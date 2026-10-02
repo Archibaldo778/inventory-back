@@ -1,5 +1,6 @@
 import { eventReportAnalysisInput } from './eventReportAi.js';
 import { fetchWithTimeout } from './fetchWithTimeout.js';
+import { EVENT_REPORT_RERUN_GUIDANCE } from './eventReportReruns.js';
 
 export const validateEmailBrief = (value) => {
   if (typeof value?.summary !== 'string' || !value.summary.trim() || value.summary.length > 500
@@ -25,6 +26,7 @@ export const generateEventReportEmailBrief = async ({ report, fetchImpl = global
         'summary: one or two short sentences describing the overall outcome, under 500 characters.',
         'attention: zero to two short items, each under 250 characters, ONLY for significant reported problems or explicit management follow-up.',
         'Do not invent problems, risks or recommendations. Do not infer missing answers as a problem or as proof that all was well.',
+        EVENT_REPORT_RERUN_GUIDANCE,
         'An N/A answer or no OCC food service is not a failure. Routine extra prep time is not a serious problem: mention it briefly in summary if relevant.',
         'If there are no significant issues, leave attention empty; say no major issues were reported only when the actual answers support that.',
         'Keep the entire result under 80 words. No greetings, long lists or duplicated report questions.',

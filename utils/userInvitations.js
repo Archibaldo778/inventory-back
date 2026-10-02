@@ -31,7 +31,9 @@ export const userInviteUrl = (token) => {
   return `${origin}/accept-invite?token=${encodeURIComponent(token)}`;
 };
 
-export const INVITE_ROLES = ['captain', 'bar captain', 'uniform packer'];
+export const INVITE_ROLES = ['captain', 'bar captain', 'uniform packer', 'kitchen lead'];
+export const canInviteUserAsRole = (currentRole, inviteRole) => INVITE_ROLES.includes(inviteRole)
+  && (currentRole === inviteRole || (['captain', 'bar captain'].includes(currentRole) && ['captain', 'bar captain'].includes(inviteRole)));
 export const isValidInviteEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 export const normalizeInviteCc = (value) => {
   const addresses = Array.isArray(value) ? value : String(value || '').split(/[;,]/);
@@ -43,16 +45,23 @@ export const normalizeInviteCc = (value) => {
 };
 
 export const renderUserInviteEmail = ({ name, inviteUrl, role = 'captain', active = false }) => {
+  const kitchenLead = role === 'kitchen lead';
   const barCaptain = role === 'bar captain';
   const uniformPacker = role === 'uniform packer';
-  const introduction = uniformPacker ? 'Your OCC uniform packing workspace is ready.' : barCaptain
+  const introduction = kitchenLead ? 'We are introducing a new system for completing Kitchen Reports at OCC.' : uniformPacker ? 'Your OCC uniform packing workspace is ready.' : barCaptain
     ? 'We are introducing a new system for tracking alcohol inventory and completing event reports at OCC.'
     : 'We are introducing a new system for completing event reports at OCC.';
   const registration = active
     ? 'Your account is already active. Sign in with your existing password:'
     : 'Create your password using this private registration link:';
   const expiry = active ? '' : 'This link is private and expires in 72 hours.';
-  const steps = uniformPacker ? [
+  const steps = kitchenLead ? [
+    'Sign in and open My Events. You will see your confirmed Nowsta assignments.',
+    'Open the event where you are booked as Lead Chef or Kitchen Lead, then select Kitchen Report.',
+    'Complete the report within 48 hours after the event. Include any staffing, food, equipment or service issues and submit it when finished.',
+    'If you forget your password, use Forgot password on the login page.',
+    'If an assigned event is missing or you need help registering, contact me directly.',
+  ] : uniformPacker ? [
     'Sign in and open Events. Select the event you are preparing.',
     'Check the booked staff, open positions and sizes in Staff & Uniform. Saved staff sizes are used first, then sizes supplied by Nowsta.',
     'Review the uniform requirements from Nowsta or Staff Request. Confirm any missing sizes before packing. You can also view submitted event reports.',
@@ -68,13 +77,13 @@ export const renderUserInviteEmail = ({ name, inviteUrl, role = 'captain', activ
     ] : []),
     'If an assigned event is missing or you need help registering, contact me directly.',
   ];
-  const subject = uniformPacker ? 'OCC — your uniform packing workspace' : barCaptain
+  const subject = kitchenLead ? 'OCC — Kitchen Reports: create your account' : uniformPacker ? 'OCC — your uniform packing workspace' : barCaptain
     ? 'OCC — new alcohol inventory and event reporting system'
     : 'OCC — new event reporting system';
   return {
     subject,
-    html: `<div style="font-family:Arial,sans-serif;color:#222;line-height:1.5;max-width:620px"><p>Hi ${escapeHtml(name || 'Captain')},</p><p>${escapeHtml(introduction)}</p><p>${escapeHtml(registration)}</p><p><a href="${escapeHtml(inviteUrl)}">${active ? 'Sign in' : 'Create my account'}</a></p>${expiry ? `<p>${expiry}</p>` : ''}<ol>${steps.map((step) => `<li>${escapeHtml(step)}</li>`).join('')}</ol><p>Thank you,<br><strong>Ivan</strong><br>Oliver Cheng Catering &amp; Events</p></div>`,
-    text: [`Hi ${clean(name || 'Captain', 200)},`, introduction, registration, inviteUrl, expiry,
+    html: `<div style="font-family:Arial,sans-serif;color:#222;line-height:1.5;max-width:620px"><p>Hi ${escapeHtml(name || (kitchenLead ? 'Chef' : 'Captain'))},</p><p>${escapeHtml(introduction)}</p><p>${escapeHtml(registration)}</p><p><a href="${escapeHtml(inviteUrl)}">${active ? 'Sign in' : 'Create my account'}</a></p>${expiry ? `<p>${expiry}</p>` : ''}<ol>${steps.map((step) => `<li>${escapeHtml(step)}</li>`).join('')}</ol><p>Thank you,<br><strong>Ivan</strong><br>Oliver Cheng Catering &amp; Events</p></div>`,
+    text: [`Hi ${clean(name || (kitchenLead ? 'Chef' : 'Captain'), 200)},`, introduction, registration, inviteUrl, expiry,
       steps.map((step, index) => `${index + 1}. ${step}`).join('\n'),
       'Thank you,\nIvan\nOliver Cheng Catering & Events'].filter(Boolean).join('\n\n'),
   };

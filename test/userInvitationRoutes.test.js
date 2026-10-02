@@ -9,7 +9,7 @@ const response = () => ({ code: 200, status(code) { this.code = code; return thi
 test('admin preview provides report and uniform packing invitation templates', () => {
   const res = response();
   handler('/invite-templates', 'get')({}, res);
-  assert.deepEqual(res.body.map((entry) => entry.role), ['captain', 'bar captain', 'uniform packer']);
+  assert.deepEqual(res.body.map((entry) => entry.role), ['captain', 'bar captain', 'uniform packer', 'kitchen lead']);
   assert.doesNotMatch(res.body[0].text, /Bar Returns/);
   assert.match(res.body[1].text, /Bar Returns/);
   assert.match(res.body[2].text, /Staff & Uniform/);

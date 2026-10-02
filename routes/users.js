@@ -9,6 +9,7 @@ import reportTeamRoutes from './reportTeams.js';
 import {
   createUserInviteToken,
   INVITE_ROLES,
+  canInviteUserAsRole,
   isValidInviteEmail,
   isExistingActiveInviteAccount,
   normalizeInviteCc,
@@ -377,7 +378,7 @@ router.post('/', async (req, res) => {
 router.get('/invite-templates', (req, res) => {
   res.json(INVITE_ROLES.map((role) => ({
     role,
-    ...renderUserInviteEmail({ name: '[Captain name]', inviteUrl: '[Personal registration link]', role }),
+    ...renderUserInviteEmail({ name: '[Name]', inviteUrl: '[Personal registration link]', role }),
   })));
 });
 
@@ -389,7 +390,7 @@ router.post('/invite', async (req, res) => {
     const nowstaName = String(body.nowstaName || username).trim().slice(0, 240);
     const inviteRole = normalizeRole(body.role || 'captain');
     if (!INVITE_ROLES.includes(inviteRole)) {
-      return res.status(400).json({ message: 'Choose Captain, Bar Captain or Uniform Packer' });
+      return res.status(400).json({ message: 'Choose Captain, Bar Captain, Kitchen Lead or Uniform Packer' });
     }
     let cc;
     try { cc = normalizeInviteCc(body.cc); } catch (error) {
@@ -399,8 +400,7 @@ router.post('/invite', async (req, res) => {
       return res.status(400).json({ message: 'A name and valid email are required' });
     }
     let user = await User.findOne({ email }).select('+inviteTokenHash +tokenVersion');
-    if (user && (!INVITE_ROLES.includes(normalizeRole(user.role))
-      || (normalizeRole(user.role) === 'uniform packer') !== (inviteRole === 'uniform packer'))) {
+    if (user && !canInviteUserAsRole(normalizeRole(user.role), inviteRole)) {
       return res.status(409).json({ message: 'This email already belongs to a different account role' });
     }
     const active = isExistingActiveInviteAccount(user);

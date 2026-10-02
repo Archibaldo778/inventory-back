@@ -1,11 +1,12 @@
+export const KITCHEN_PORTAL_ROLES = ['event staff', 'kitchen lead'];
 const roleOf = (auth) => String(auth?.role || '').trim().toLowerCase();
 
 export const kitchenReportPosition = (auth, assignedShifts = []) => {
-  if (String(auth?.jobTitle || '').trim().toLowerCase() === 'executive chef') return 'Executive Chef';
-  return assignedShifts.find((shift) => /\b(?:lead|executive)\s+chef\b/i.test(String(shift?.position || '').replace(/[-_]+/g, ' ')))?.position || '';
+  if (roleOf(auth) !== 'kitchen lead' && String(auth?.jobTitle || '').trim().toLowerCase() === 'executive chef') return 'Executive Chef';
+  return assignedShifts.find((shift) => /\b(?:(?:lead|executive)\s+chef|kitchen\s+lead)\b/i.test(String(shift?.position || '').replace(/[-_]+/g, ' ')))?.position || '';
 };
 
-export const canUseKitchenReport = (auth, assignedShifts = []) => roleOf(auth) === 'event staff'
+export const canUseKitchenReport = (auth, assignedShifts = []) => KITCHEN_PORTAL_ROLES.includes(roleOf(auth))
   && Boolean(kitchenReportPosition(auth, assignedShifts));
 
 export const canReadStaffInventory = (auth) => (
@@ -15,7 +16,7 @@ export const canReadStaffInventory = (auth) => (
 
 // Event Staff has no general workspace access, even through an authenticated integration URL.
 export const eventStaffRequestAllowed = (auth, req) => {
-  if (roleOf(auth) !== 'event staff') return true;
+  if (!KITCHEN_PORTAL_ROLES.includes(roleOf(auth))) return true;
   const path = String(req.originalUrl || '').split('?')[0];
   const method = String(req.method || '').toUpperCase();
   // The route checks the current user's assignment before granting report access.

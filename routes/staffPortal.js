@@ -3,7 +3,7 @@ import NowstaScheduleEntry from '../models/NowstaScheduleEntry.js';
 import Product from '../models/Product.js';
 import Event from '../models/Event.js';
 import { requireRoles } from '../middleware/auth.js';
-import { canReadStaffInventory } from '../utils/eventStaffAccess.js';
+import { canReadStaffInventory, KITCHEN_PORTAL_ROLES } from '../utils/eventStaffAccess.js';
 import { serializeStaffEvent, staffScheduleQuery } from '../utils/staffPortal.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import { openStaffKitchenReport } from '../utils/staffKitchenReport.js';
@@ -14,7 +14,7 @@ import { requiresEventReport } from '../utils/eventReportRequirement.js';
 
 const router = Router();
 const eventFields = 'nowstaEventId title client date venue address guestCount timeZone shifts archived';
-const requireEventStaff = requireRoles(['event staff']);
+const requireEventStaff = requireRoles(KITCHEN_PORTAL_ROLES);
 
 const withLinkedEventDetails = async (items) => {
   if (!items.length) return items;

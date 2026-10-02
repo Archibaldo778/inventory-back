@@ -193,8 +193,8 @@ test('new captain and kitchen report emails generate a short AI brief and preser
     assert.match(email.text, /Good service\./);
     assert.doesNotMatch(email.html, /NEEDS ATTENTION/);
     assert.doesNotMatch(email.subject, /PREVIEW/);
-    assert.deepEqual(email.to, reportType === 'kitchen' ? ['kitchen-manager@example.com'] : [
-      ...CAPTAIN_REPORT_RECIPIENTS, 'olivier@ocnyc.com', 'heidi@ocnyc.com', 'sebastian@ocnyc.com', 'ashley@ocnyc.com',
+    assert.deepEqual(email.to, [
+      ...(reportType === 'kitchen' ? ['leadchefreport@ocnyc.com'] : CAPTAIN_REPORT_RECIPIENTS), 'olivier@ocnyc.com', 'heidi@ocnyc.com', 'sebastian@ocnyc.com', 'ashley@ocnyc.com',
     ]);
     assert.deepEqual(email.cc, ['reporter@example.com']);
     assert.equal(email.bcc, undefined);
@@ -227,13 +227,14 @@ test('AI failure, timeout or invalid summary still sends the complete report onc
   ]) {
     const sent = [];
     const result = await sendEventReportEmail({
-      report: { status: 'submitted', reportType: 'kitchen', reporterEmail: 'chef@example.com', answers: { overallEvaluation: 'Full report preserved.' } },
+      report: { status: 'submitted', reportType: 'kitchen', salesRep: 'Example Sales', reporterEmail: 'chef@example.com', answers: { overallEvaluation: 'Full report preserved.' } },
       event: {}, configuredRecipients: ['manager@example.com'], generateBrief,
+      loadTeams: async () => ({ teams: [], users: [] }),
       fetchImpl: async (_url, options) => { sent.push(JSON.parse(options.body)); return { ok: true, json: async () => ({ id: 'fallback-email' }) }; },
     });
     assert.equal(result.status, 'sent');
     assert.equal(sent.length, 1);
-    assert.deepEqual(sent[0].to, ['manager@example.com']);
+    assert.deepEqual(sent[0].to, ['leadchefreport@ocnyc.com', 'manager@example.com']);
     assert.deepEqual(sent[0].cc, ['chef@example.com']);
     assert.match(sent[0].text, /Full report preserved\./);
     assert.doesNotMatch(sent[0].html, /AI QUICK SUMMARY|NEEDS ATTENTION/);

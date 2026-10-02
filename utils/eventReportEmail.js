@@ -109,14 +109,14 @@ const directoryEmail = (name, slackUsers) => {
   return emails[0];
 };
 
-export const captainReportRecipients = (salesRep, configuredRecipients = [], slackUsers = []) => {
+export const captainReportRecipients = (salesRep, configuredRecipients = [], slackUsers = [], baseRecipients = CAPTAIN_REPORT_RECIPIENTS) => {
   const normalized = normalizedPersonName(salesRep);
   const olivierTeam = ['olivier cheng', 'oliver cheng'].some((name) => (
     normalized === name || normalized.startsWith(`${name} `) || name.startsWith(`${normalized} `)
   ));
   const teamNames = salesTeamNames(salesRep);
   return [...new Set([
-    ...CAPTAIN_REPORT_RECIPIENTS,
+    ...baseRecipients,
     ...(olivierTeam
       ? ['olivier@ocnyc.com', 'heidi@ocnyc.com', 'sebastian@ocnyc.com', 'ashley@ocnyc.com']
       : (teamNames.length ? teamNames.map((name) => directoryEmail(name, slackUsers)) : configuredRecipients)),
@@ -193,28 +193,33 @@ export const renderEventReportText = (report = {}, { emailBrief = null } = {}) =
 
 export const sendEventReportEmail = async ({ report, event, configuredRecipients = [], fetchImpl = fetch, loadSlackUsers = listSlackUsers, loadTeams = loadReportTeamDirectory, generateBrief = generateEventReportEmailBrief }) => {
   const isTest = event?.meta?.eventReportTest === true;
+  const kitchen = report?.reportType === 'kitchen';
+  const baseRecipients = kitchen
+    ? [email(process.env.LEAD_CHEF_REPORT_EMAIL) || 'leadchefreport@ocnyc.com']
+    : CAPTAIN_REPORT_RECIPIENTS;
+  const fallbackRecipients = kitchen ? configuredRecipients.filter((address) => !CAPTAIN_REPORT_RECIPIENTS.includes(email(address))) : configuredRecipients;
   let teamRecipients = null;
-  if (!isTest && report?.reportType !== 'kitchen') {
+  if (!isTest) {
     try {
       const routing = resolveTeamRouting({ event, salesRep: report?.salesRep, ...await loadTeams() });
       if (routing.status === 'blocked') throw new Error(routing.issues.join('; '));
-      if (routing.status === 'ready') teamRecipients = [...CAPTAIN_REPORT_RECIPIENTS, ...routing.recipients];
+      if (routing.status === 'ready') teamRecipients = [...baseRecipients, ...routing.recipients];
     } catch (error) {
       return { status: 'failed', recipients: [], cc: [], error: clean(error?.message || 'Could not resolve the report team', 1000) };
     }
   }
   let slackUsers = [];
-  if (!teamRecipients && !isTest && report?.reportType !== 'kitchen' && salesTeamNames(report?.salesRep).length) {
+  if (!teamRecipients && !isTest && salesTeamNames(report?.salesRep).length) {
     try {
       slackUsers = await loadSlackUsers();
-      captainReportRecipients(report?.salesRep, configuredRecipients, slackUsers);
+      captainReportRecipients(report?.salesRep, fallbackRecipients, slackUsers, baseRecipients);
     } catch (error) {
       return { status: 'failed', recipients: [], cc: [], error: clean(error?.message || 'Could not resolve the report sales team', 1000) };
     }
   }
   const to = [...new Set((isTest
     ? ['ivan@ocnyc.com', 'iurie@ocnyc.com']
-    : (report?.reportType === 'kitchen' ? configuredRecipients : (teamRecipients || captainReportRecipients(report?.salesRep, configuredRecipients, slackUsers)))
+    : (teamRecipients || captainReportRecipients(report?.salesRep, fallbackRecipients, slackUsers, baseRecipients))
   ).map(email).filter(Boolean))];
   if (!to.length) return { status: 'not_sent', recipients: [], cc: [], error: '' };
   const reporterEmail = email(report?.reporterEmail);

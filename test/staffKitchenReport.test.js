@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import Event from '../models/Event.js';
 import EventReport from '../models/EventReport.js';
 import EventReportSettings from '../models/EventReportSettings.js';
+import ReportTeam from '../models/ReportTeam.js';
 import User from '../models/Users.js';
 import NowstaScheduleEntry from '../models/NowstaScheduleEntry.js';
 import router from '../routes/staffPortal.js';
@@ -20,6 +21,8 @@ const event = { _id: eventId, title: 'Dinner', date: entry.date, meta: { nowsta:
 const response = () => ({ code: 200, status(code) { this.code = code; return this; }, json(body) { this.body = body; return this; } });
 const handler = (source, path, method) => source.stack.find((layer) => layer.route?.path === path && layer.route.methods[method]).route.stack.at(-1).handle;
 const mockSources = (t, schedule = entry) => {
+  t.mock.method(ReportTeam, 'find', () => ({ sort: () => ({ lean: async () => [] }) }));
+  t.mock.method(User, 'find', () => ({ select: () => ({ lean: async () => [] }) }));
   t.mock.method(NowstaScheduleEntry, 'findOne', () => ({ select: () => ({ lean: async () => schedule }) }));
   t.mock.method(Event, 'findOne', () => ({ select: () => ({ lean: async () => event }) }));
   t.mock.method(Event, 'findById', () => ({ select: () => ({ lean: async () => event }) }));
@@ -75,7 +78,7 @@ test('reopening pending or submitted Kitchen Reports preserves existing answers,
 
 test('Kitchen Report cannot be opened for an unassigned, archived or unlinked event', async (t) => {
   mockSources(t, null);
-  await assert.rejects(openStaffKitchenReport({ ...chef, role: 'captain' }, '123'), /Event Staff/);
+  await assert.rejects(openStaffKitchenReport({ ...chef, role: 'captain' }, '123'), /Kitchen reporting account/);
   await assert.rejects(openStaffKitchenReport(chef, '123'), /not assigned/);
   t.mock.method(NowstaScheduleEntry, 'findOne', () => ({ select: () => ({ lean: async () => ({ ...entry, archived: true }) }) }));
   await assert.rejects(openStaffKitchenReport(chef, '123'), /not assigned/);
@@ -87,7 +90,7 @@ test('Kitchen Report cannot be opened for an unassigned, archived or unlinked ev
 test('a chef can open and submit an unfilled Kitchen Report 14 days after the event, but cannot submit twice', async (t) => {
   t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-10-15T16:00:00Z') });
   secret(t);
-  const leadChef = { ...chef, jobTitle: '' };
+  const leadChef = { ...chef, role: 'kitchen lead', jobTitle: '' };
   mockSources(t, { ...entry, shifts: [{ ...entry.shifts[0], position: 'Lead Chef' }] });
   t.mock.method(User, 'findById', () => ({ select: () => ({ lean: async () => leadChef }) }));
   const report = { _id: 'report-1', eventId, eventTitle: 'Dinner', reportType: 'kitchen', slackUserId: `account:${userId}:kitchen`, reporterName: chef.username, status: 'pending', answers: {}, save: async () => {}, toObject() { return { ...this }; } };

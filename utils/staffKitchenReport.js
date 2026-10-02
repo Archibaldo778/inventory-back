@@ -2,7 +2,7 @@ import Event from '../models/Event.js';
 import EventReport from '../models/EventReport.js';
 import User from '../models/Users.js';
 import NowstaScheduleEntry from '../models/NowstaScheduleEntry.js';
-import { kitchenReportPosition } from './eventStaffAccess.js';
+import { kitchenReportPosition, KITCHEN_PORTAL_ROLES } from './eventStaffAccess.js';
 import { serializeStaffEvent, staffScheduleQuery } from './staffPortal.js';
 import { resolveEventSalesRep } from './eventReportSalesRep.js';
 import { createApiError } from './apiErrors.js';
@@ -15,7 +15,7 @@ export const kitchenReportEventQuery = (nowstaEventId) => ({
 });
 
 export const openStaffKitchenReport = async (user, nowstaEventId) => {
-  if (String(user?.role || '').trim().toLowerCase() !== 'event staff') throw createApiError(403, 'Event Staff account required');
+  if (!KITCHEN_PORTAL_ROLES.includes(String(user?.role || '').trim().toLowerCase())) throw createApiError(403, 'Kitchen reporting account required');
   const entry = await NowstaScheduleEntry.findOne({ ...staffScheduleQuery(user), nowstaEventId })
     .select('nowstaEventId title date shifts archived').lean();
   const assignedEvent = serializeStaffEvent(entry, user);
@@ -52,7 +52,7 @@ export const validateStaffKitchenReportAccess = async (access, report) => {
   const userId = access.context.slice('staff-kitchen:'.length);
   if (!/^[a-f\d]{24}$/i.test(userId) || report.reportType !== 'kitchen') throw createApiError(403, 'Kitchen report access is no longer available');
   const user = await User.findById(userId).select('_id username email nowstaName role jobTitle isActive').lean();
-  if (!user || user.isActive === false || String(user.role || '').trim().toLowerCase() !== 'event staff') throw createApiError(403, 'Kitchen report access is no longer available');
+  if (!user || user.isActive === false || !KITCHEN_PORTAL_ROLES.includes(String(user.role || '').trim().toLowerCase())) throw createApiError(403, 'Kitchen report access is no longer available');
   const linkedEvent = await Event.findById(report.eventId).select('meta.nowsta.apiEventId').lean();
   const nowstaEventId = String(linkedEvent?.meta?.nowsta?.apiEventId || '');
   if (!nowstaEventId) throw createApiError(403, 'Event assignment is no longer available');

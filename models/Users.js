@@ -31,6 +31,7 @@ const userSchema = new mongoose.Schema(
         'packer',
         'uniform packer',
         'event staff',
+        'kitchen lead',
       ],
       default: 'user',
     },

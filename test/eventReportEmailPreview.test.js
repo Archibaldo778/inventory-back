@@ -55,7 +55,7 @@ test('preview contains the brief and full report with exactly one recipient, no 
   assert.match(payload.text, /AI QUICK SUMMARY/);
   assert.match(payload.text, /Overall feedback: Client happy\./);
   assert.ok(payload.text.indexOf('AI QUICK SUMMARY') < payload.text.indexOf('Staff\n'));
-  assert.doesNotMatch(payload.html, /Needs attention:/);
+  assert.doesNotMatch(payload.html, /NEEDS ATTENTION/);
   assert.deepEqual(report, before);
   assert.doesNotMatch(renderEventReportEmail(report), /AI QUICK SUMMARY/);
   assert.doesNotMatch(renderEventReportText(report), /AI QUICK SUMMARY/);
@@ -65,7 +65,8 @@ test('preview escapes AI output and displays significant issues without altering
   const payload = buildReportPreviewPayload({ report, user, brief: { summary: '<script>bad</script>', attention: ['Broken <glass>'] } });
   assert.doesNotMatch(payload.html, /<script>|<glass>/);
   assert.match(payload.html, /&lt;script&gt;/);
-  assert.match(payload.html, /Needs attention:.*Broken &lt;glass&gt;/);
+  assert.match(payload.html, /NEEDS ATTENTION/);
+  assert.match(payload.html, /Broken &lt;glass&gt;/);
   assert.match(payload.text, /Overall feedback: Client happy\./);
 });
 

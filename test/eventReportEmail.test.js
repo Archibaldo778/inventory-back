@@ -153,3 +153,104 @@ test('test report email uses fixed OCC recipients and copies the Slack email', a
     if (previousKey === undefined) delete process.env.RESEND_API_KEY; else process.env.RESEND_API_KEY = previousKey;
   }
 });
+
+test('new captain and kitchen report emails generate a short AI brief and preserve normal recipients and full answers', async (t) => {
+  const previousResend = process.env.RESEND_API_KEY;
+  const previousOpenAI = process.env.OPENAI_API_KEY;
+  process.env.RESEND_API_KEY = 'test-resend';
+  process.env.OPENAI_API_KEY = 'test-openai';
+  t.after(() => {
+    if (previousResend === undefined) delete process.env.RESEND_API_KEY; else process.env.RESEND_API_KEY = previousResend;
+    if (previousOpenAI === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = previousOpenAI;
+  });
+  for (const reportType of ['captain', 'kitchen']) {
+    const requests = [];
+    const report = {
+      status: 'submitted', reportType, eventTitle: 'New event', reporterName: 'Reporter',
+      reporterEmail: 'reporter@example.com', salesRep: 'Olivier Cheng',
+      answers: { overallFeedback: 'Good service.', overallEvaluation: 'Good service.' },
+    };
+    const result = await sendEventReportEmail({
+      report, event: {}, configuredRecipients: ['kitchen-manager@example.com'],
+      loadTeams: async () => ({ teams: [], users: [] }),
+      fetchImpl: async (url, options) => {
+        const body = JSON.parse(options.body);
+        requests.push({ url, body });
+        if (url === 'https://api.openai.com/v1/responses') {
+          assert.equal(JSON.parse(body.input).reports[0].type, reportType === 'kitchen' ? 'Kitchen Report' : "Captain's Report");
+          return { ok: true, json: async () => ({ output_text: JSON.stringify({ summary: 'Good service was reported.', attention: [] }) }) };
+        }
+        assert.equal(url, 'https://api.resend.com/emails');
+        return { ok: true, json: async () => ({ id: 'sent-with-ai' }) };
+      },
+    });
+    assert.equal(result.status, 'sent');
+    assert.equal(requests.length, 2);
+    const email = requests[1].body;
+    assert.match(email.html, /AI QUICK SUMMARY/);
+    assert.match(email.html, /Good service was reported\./);
+    assert.match(email.text, /Good service was reported\./);
+    assert.match(email.text, /Good service\./);
+    assert.doesNotMatch(email.html, /NEEDS ATTENTION/);
+    assert.doesNotMatch(email.subject, /PREVIEW/);
+    assert.deepEqual(email.to, reportType === 'kitchen' ? ['kitchen-manager@example.com'] : [
+      ...CAPTAIN_REPORT_RECIPIENTS, 'olivier@ocnyc.com', 'heidi@ocnyc.com', 'sebastian@ocnyc.com', 'ashley@ocnyc.com',
+    ]);
+    assert.deepEqual(email.cc, ['reporter@example.com']);
+    assert.equal(email.bcc, undefined);
+  }
+});
+
+test('reported issues appear in a red attention panel and remain readable in plain text', () => {
+  const report = { answers: { staffBelowStandards: 'Two staff arrived late.' } };
+  const emailBrief = { summary: 'Service had staffing issues.', attention: ['Two staff arrived late.', 'Client requested follow-up about <staffing>.'] };
+  const html = renderEventReportEmail(report, { emailBrief });
+  const text = renderEventReportText(report, { emailBrief });
+  assert.match(html, /bgcolor="#fff0ef"[^>]*border-left:4px solid #b42318/);
+  assert.match(html, /font-weight:bold;color:#9b1c13">NEEDS ATTENTION/);
+  assert.match(html, /color:#9b1c13">Two staff arrived late\./);
+  assert.match(html, /Client requested follow-up about &lt;staffing&gt;/);
+  assert.match(text, /Needs attention: Two staff arrived late\./);
+  assert.match(text, /Needs attention: Client requested follow-up about <staffing>\./);
+  assert.match(text, /Staff below standards: Two staff arrived late\./);
+});
+
+test('AI failure, timeout or invalid summary still sends the complete report once', async (t) => {
+  const previous = process.env.RESEND_API_KEY;
+  process.env.RESEND_API_KEY = 'test-key';
+  t.after(() => { if (previous === undefined) delete process.env.RESEND_API_KEY; else process.env.RESEND_API_KEY = previous; });
+  for (const generateBrief of [
+    async () => { throw new Error('OpenAI API key is not configured'); },
+    async () => { throw new Error('Upstream request timed out'); },
+    async () => ({ summary: '', attention: [] }),
+    async () => ({ summary: 'Good', attention: 'not an array' }),
+  ]) {
+    const sent = [];
+    const result = await sendEventReportEmail({
+      report: { status: 'submitted', reportType: 'kitchen', reporterEmail: 'chef@example.com', answers: { overallEvaluation: 'Full report preserved.' } },
+      event: {}, configuredRecipients: ['manager@example.com'], generateBrief,
+      fetchImpl: async (_url, options) => { sent.push(JSON.parse(options.body)); return { ok: true, json: async () => ({ id: 'fallback-email' }) }; },
+    });
+    assert.equal(result.status, 'sent');
+    assert.equal(sent.length, 1);
+    assert.deepEqual(sent[0].to, ['manager@example.com']);
+    assert.deepEqual(sent[0].cc, ['chef@example.com']);
+    assert.match(sent[0].text, /Full report preserved\./);
+    assert.doesNotMatch(sent[0].html, /AI QUICK SUMMARY|NEEDS ATTENTION/);
+  }
+});
+
+test('no recipient or blocked routing never triggers AI generation or email delivery', async () => {
+  for (const report of [
+    { status: 'submitted', reportType: 'kitchen' },
+    { status: 'submitted', reportType: 'captain', salesRep: 'George' },
+  ]) {
+    const result = await sendEventReportEmail({
+      report, event: {}, configuredRecipients: [],
+      loadTeams: async () => ({ teams: [], users: [] }), loadSlackUsers: async () => [],
+      generateBrief: async () => { assert.fail('No AI generation without valid recipients'); },
+      fetchImpl: async () => { assert.fail('No email without valid recipients'); },
+    });
+    assert.notEqual(result.status, 'sent');
+  }
+});

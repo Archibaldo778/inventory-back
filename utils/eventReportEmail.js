@@ -1,5 +1,6 @@
 import { listSlackUsers } from './slackApi.js';
 import { loadReportTeamDirectory, resolveTeamRouting } from './reportTeams.js';
+import { generateEventReportEmailBrief, validateEmailBrief } from './eventReportEmailBrief.js';
 
 const clean = (value, max = 5000) => String(value ?? '').trim().slice(0, max);
 const email = (value) => {
@@ -143,7 +144,10 @@ export const renderEventReportEmail = (report = {}, { emailBrief = null } = {}) 
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f3f1e9" style="border-left:4px solid #c8aa62;background:#f3f1e9"><tr><td style="padding:14px 16px">
       <div style="font-size:11px;font-weight:bold;letter-spacing:1px;color:#756b55">AI QUICK SUMMARY</div>
       <p style="margin:8px 0;font-size:14px;line-height:21px;color:#20272c">${escapeHtml(emailBrief.summary)}</p>
-      ${(emailBrief.attention || []).map((item) => `<p style="margin:6px 0;font-size:14px;line-height:21px;color:#8b382e"><strong>Needs attention:</strong> ${escapeHtml(item)}</p>`).join('')}
+      ${emailBrief.attention?.length ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#fff0ef" style="margin:12px 0;background-color:#fff0ef;border:1px solid #dfaaa5;border-left:4px solid #b42318"><tr><td style="padding:12px 14px;font-family:Arial,sans-serif;color:#9b1c13">
+        <div style="font-size:13px;line-height:18px;font-weight:bold;color:#9b1c13">NEEDS ATTENTION</div>
+        ${emailBrief.attention.map((item) => `<p style="margin:8px 0 0;font-size:14px;line-height:21px;color:#9b1c13">${escapeHtml(item)}</p>`).join('')}
+      </td></tr></table>` : ''}
       <div style="font-size:11px;color:#756b55">Based on the submitted report. Full responses below.</div>
     </td></tr></table>
   </td></tr>` : '';
@@ -187,7 +191,7 @@ export const renderEventReportText = (report = {}, { emailBrief = null } = {}) =
   return `${emailReportTitle(report).toUpperCase()}\n${clean(report.eventTitle) || '—'} · ${formatEventDate(report.eventDate) || '—'}\n${clean(report.reporterName) || '—'} · ${clean(report.position) || '—'}\n\n${brief}${sections}`;
 };
 
-export const sendEventReportEmail = async ({ report, event, configuredRecipients = [], fetchImpl = fetch, loadSlackUsers = listSlackUsers, loadTeams = loadReportTeamDirectory }) => {
+export const sendEventReportEmail = async ({ report, event, configuredRecipients = [], fetchImpl = fetch, loadSlackUsers = listSlackUsers, loadTeams = loadReportTeamDirectory, generateBrief = generateEventReportEmailBrief }) => {
   const isTest = event?.meta?.eventReportTest === true;
   let teamRecipients = null;
   if (!isTest && report?.reportType !== 'kitchen') {
@@ -217,6 +221,14 @@ export const sendEventReportEmail = async ({ report, event, configuredRecipients
   const cc = reporterEmail && !to.includes(reporterEmail) ? [reporterEmail] : [];
   const apiKey = clean(process.env.RESEND_API_KEY, 1000);
   if (!apiKey) return { status: 'failed', recipients: to, cc, error: 'RESEND_API_KEY is not configured' };
+  let emailBrief = null;
+  if (report?.status === 'submitted') {
+    try {
+      emailBrief = validateEmailBrief(await generateBrief({ report, fetchImpl }));
+    } catch (error) {
+      console.warn('Event report email AI summary unavailable:', clean(error?.message, 300));
+    }
+  }
   const response = await fetchImpl('https://api.resend.com/emails', {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
@@ -225,8 +237,8 @@ export const sendEventReportEmail = async ({ report, event, configuredRecipients
       to,
       ...(cc.length ? { cc } : {}),
       subject: `${emailReportTitle(report)} · ${clean(report.eventTitle, 300)} · ${clean(report.reporterName, 200)}`,
-      html: renderEventReportEmail(report),
-      text: renderEventReportText(report),
+      html: renderEventReportEmail(report, { emailBrief }),
+      text: renderEventReportText(report, { emailBrief }),
     }),
   });
   const payload = await response.json().catch(() => ({}));

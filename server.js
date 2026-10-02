@@ -477,6 +477,7 @@ import transportationRoutes from './routes/transportation.js';
 import slackIntegrationRoutes from './routes/slackIntegration.js';
 import { runSlackEventChannelSync, slackEventChannelsEnabled } from './utils/slackEventChannels.js';
 import { CAPTAIN_REPORT_EMAIL_REMINDERS_ENABLED, CAPTAIN_REPORT_REMINDERS_START_DATE, runCaptainReportEmailReminders } from './utils/captainReportReminders.js';
+import { runEventReportEmailPreview } from './utils/eventReportEmailPreviews.js';
 import { getCatereaseConfig } from './utils/catereaseApi.js';
 
 app.use('/api/auth', authRoutes);
@@ -751,6 +752,11 @@ export const startServer = async () => {
   captainReportEmailTimer.unref?.();
   console.log(`Captain report email reminders enabled for events from ${CAPTAIN_REPORT_REMINDERS_START_DATE}`);
 
+  const reportPreviewTimer = setInterval(() => {
+    runEventReportEmailPreview().catch((error) => console.error('Report email preview failed:', error?.message || error));
+  }, 60_000);
+  reportPreviewTimer.unref?.();
+
   let shuttingDown = false;
   const shutdown = (signal) => {
     if (shuttingDown) return;
@@ -767,6 +773,7 @@ export const startServer = async () => {
     if (slackStartupTimer) clearTimeout(slackStartupTimer);
     if (slackSyncTimer) clearInterval(slackSyncTimer);
     clearInterval(captainReportEmailTimer);
+    clearInterval(reportPreviewTimer);
 
     const forceExit = setTimeout(() => {
       console.error('Forced shutdown after timeout');

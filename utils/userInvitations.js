@@ -31,7 +31,7 @@ export const userInviteUrl = (token) => {
   return `${origin}/accept-invite?token=${encodeURIComponent(token)}`;
 };
 
-export const INVITE_ROLES = ['captain', 'bar captain'];
+export const INVITE_ROLES = ['captain', 'bar captain', 'uniform packer'];
 export const isValidInviteEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 export const normalizeInviteCc = (value) => {
   const addresses = Array.isArray(value) ? value : String(value || '').split(/[;,]/);
@@ -44,14 +44,21 @@ export const normalizeInviteCc = (value) => {
 
 export const renderUserInviteEmail = ({ name, inviteUrl, role = 'captain', active = false }) => {
   const barCaptain = role === 'bar captain';
-  const introduction = barCaptain
+  const uniformPacker = role === 'uniform packer';
+  const introduction = uniformPacker ? 'Your OCC uniform packing workspace is ready.' : barCaptain
     ? 'We are introducing a new system for tracking alcohol inventory and completing event reports at OCC.'
     : 'We are introducing a new system for completing event reports at OCC.';
   const registration = active
     ? 'Your account is already active. Sign in with your existing password:'
     : 'Create your password using this private registration link:';
   const expiry = active ? '' : 'This link is private and expires in 72 hours.';
-  const steps = [
+  const steps = uniformPacker ? [
+    'Sign in and open Uniform Packing. Select the event you are preparing.',
+    'Check the booked staff and open positions. Download the staffing roster with jacket, shirt, pants and shoe sizes.',
+    'Review the event’s decor and uniform boards. If sizes are missing, upload the Nowsta Staffing Roster CSV for that event.',
+    'Select uniform items and sizes, enter the quantities you are sending, and save the packout.',
+    'Print labels from the saved packout. If you forget your password, use Forgot password on the login page.',
+  ] : [
     'Sign in and open My Events. Select the correct assigned event.',
     'Open Captain’s Report, complete the event report, include relevant notes, and submit it when finished.',
     ...(barCaptain ? [
@@ -61,7 +68,7 @@ export const renderUserInviteEmail = ({ name, inviteUrl, role = 'captain', activ
     ] : []),
     'If an assigned event is missing or you need help registering, contact me directly.',
   ];
-  const subject = barCaptain
+  const subject = uniformPacker ? 'OCC — your uniform packing workspace' : barCaptain
     ? 'OCC — new alcohol inventory and event reporting system'
     : 'OCC — new event reporting system';
   return {

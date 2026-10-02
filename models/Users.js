@@ -29,6 +29,7 @@ const userSchema = new mongoose.Schema(
         'bar captain',
         'bartender',
         'packer',
+        'uniform packer',
         'event staff',
       ],
       default: 'user',

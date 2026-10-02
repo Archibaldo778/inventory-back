@@ -450,6 +450,7 @@ import staffRoutes from './routes/staff.js';
 import kitchenRoutes from './routes/kitchen.js';
 import kitchenPrepRoutes from './routes/kitchenPrep.js';
 import uniformRoutes from './routes/uniform.js';
+import uniformPackingRoutes from './routes/uniformPacking.js';
 import uniformSetRoutes from './routes/uniformSets.js';
 import beverageRoutes from './routes/beverage.js';
 import cocktailRecipeRoutes from './routes/cocktailRecipes.js';
@@ -501,6 +502,7 @@ app.use('/api/staff', requireAuth, requireWorkspaceAccess, requireAdminForMutati
 app.use('/api/kitchen-items', requireAuth, requireWorkspaceAccess, requireAdminForMutations, kitchenRoutes);
 app.use('/api/kitchen-prep', requireAuth, requireWorkspaceAccess, kitchenPrepRoutes);
 app.use('/api/uniform-items', requireAuth, requireWorkspaceAccess, requireAdminForMutations, uniformRoutes);
+app.use('/api/uniform-packing', requireAuth, uniformPackingRoutes);
 app.use('/api/uniform-sets', requireAuth, requireWorkspaceAccess, uniformSetRoutes);
 app.use('/api/beverage-items', requireAuth, requireBeverageManagerForMutations, beverageRoutes);
 app.use('/api/cocktail-recipes', requireAuth, requireBeverageManagerForMutations, cocktailRecipeRoutes);

@@ -389,7 +389,7 @@ router.post('/invite', async (req, res) => {
     const nowstaName = String(body.nowstaName || username).trim().slice(0, 240);
     const inviteRole = normalizeRole(body.role || 'captain');
     if (!INVITE_ROLES.includes(inviteRole)) {
-      return res.status(400).json({ message: 'Choose Captain or Bar Captain' });
+      return res.status(400).json({ message: 'Choose Captain, Bar Captain or Uniform Packer' });
     }
     let cc;
     try { cc = normalizeInviteCc(body.cc); } catch (error) {
@@ -399,7 +399,8 @@ router.post('/invite', async (req, res) => {
       return res.status(400).json({ message: 'A name and valid email are required' });
     }
     let user = await User.findOne({ email }).select('+inviteTokenHash +tokenVersion');
-    if (user && !['captain', 'bar captain'].includes(normalizeRole(user.role))) {
+    if (user && (!INVITE_ROLES.includes(normalizeRole(user.role))
+      || (normalizeRole(user.role) === 'uniform packer') !== (inviteRole === 'uniform packer'))) {
       return res.status(409).json({ message: 'This email already belongs to a different account role' });
     }
     const active = isExistingActiveInviteAccount(user);
@@ -425,7 +426,7 @@ router.post('/invite', async (req, res) => {
     await user.save();
     return res.status(201).json({ user: serializeUser(user), delivery });
   } catch (e) {
-    return sendApiError(res, e, { field: 'message', context: 'Invite user failed', fallbackMessage: 'Could not invite this captain' });
+    return sendApiError(res, e, { field: 'message', context: 'Invite user failed', fallbackMessage: 'Could not invite this user' });
   }
 });
 

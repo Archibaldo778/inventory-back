@@ -496,6 +496,7 @@ export const buildNowstaScheduleRows = ({
     const list = shiftsByEvent.get(eventId) || [];
     list.push({
       nowstaShiftId: String(shift?.id ?? ''),
+      required: Number.isFinite(Number(shift?.quantity)) && shift?.quantity != null ? Math.max(0, Number(shift.quantity)) : null,
       position: clean(shift?.position_name || shift?.name, 160),
       startsAt: shift?.starts_at || null,
       endsAt: shift?.ends_at || null,

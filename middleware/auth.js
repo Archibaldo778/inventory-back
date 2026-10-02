@@ -1,6 +1,7 @@
 import jwt from 'jsonwebtoken';
 import User from '../models/Users.js';
 import { eventStaffRequestAllowed } from '../utils/eventStaffAccess.js';
+import { uniformPackerRequestAllowed } from '../utils/uniformPacking.js';
 
 export const ADMIN_ROLES = Object.freeze(['admin', 'super admin']);
 export const WORKSPACE_ROLES = Object.freeze([
@@ -11,6 +12,7 @@ export const WORKSPACE_ROLES = Object.freeze([
   'super admin',
   'bar admin',
   'packer',
+  'uniform packer',
 ]);
 
 export const INVENTORY_MANAGER_ROLES = Object.freeze(['admin', 'super admin', 'packer']);
@@ -177,6 +179,7 @@ export const requireAuth = async (req, res, next) => {
       permissions: persistedUser.permissions,
     });
     if (!eventStaffRequestAllowed(auth, req)) return res.status(403).json({ message: 'Event Staff can only view assigned events and permitted inventory' });
+    if (!uniformPackerRequestAllowed(auth, req)) return res.status(403).json({ message: 'Uniform packers can access uniform packing, decor and uniform inventory only' });
     req.auth = auth;
     req.user = auth;
     return next();

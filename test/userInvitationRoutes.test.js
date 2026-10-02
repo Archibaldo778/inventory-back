@@ -6,12 +6,14 @@ import User from '../models/Users.js';
 const handler = (path, method) => router.stack.find((entry) => entry.route?.path === path && entry.route.methods[method]).route.stack[0].handle;
 const response = () => ({ code: 200, status(code) { this.code = code; return this; }, json(body) { this.body = body; return this; } });
 
-test('admin preview provides both role-specific invitation templates', () => {
+test('admin preview provides report and uniform packing invitation templates', () => {
   const res = response();
   handler('/invite-templates', 'get')({}, res);
-  assert.deepEqual(res.body.map((entry) => entry.role), ['captain', 'bar captain']);
+  assert.deepEqual(res.body.map((entry) => entry.role), ['captain', 'bar captain', 'uniform packer']);
   assert.doesNotMatch(res.body[0].text, /Bar Returns/);
   assert.match(res.body[1].text, /Bar Returns/);
+  assert.match(res.body[2].text, /Uniform Packing/);
+  assert.doesNotMatch(res.body[2].text, /Captain’s Report|Bar Returns|alcohol/);
 });
 
 test('invitation rejects invalid role and CC before creating an account', async () => {
@@ -85,4 +87,25 @@ test('captain invitation cannot replace an account with another role', async (t)
   const res = response();
   await handler('/invite', 'post')({ body: { username: 'Test', email: 'test@example.com', role: 'captain' } }, res);
   assert.equal(res.code, 409);
+});
+
+test('uniform invitation creates an inactive packer with its own instructions and rejects cross-role replacements', async (t) => {
+  const key = process.env.RESEND_API_KEY; process.env.RESEND_API_KEY = 'test-key';
+  t.after(() => { if (key === undefined) delete process.env.RESEND_API_KEY; else process.env.RESEND_API_KEY = key; });
+  let existing = null; let created; let outgoing;
+  t.mock.method(User, 'findOne', () => ({ select: async () => existing }));
+  t.mock.method(User, 'create', async (payload) => { created = { ...payload, save: async () => {} }; return created; });
+  t.mock.method(globalThis, 'fetch', async (_url, options) => { outgoing = JSON.parse(options.body); return { ok: true, json: async () => ({ id: 'test' }) }; });
+  const res = response();
+  await handler('/invite', 'post')({ body: { username: 'Packer', email: 'packer@example.com', role: 'uniform packer' } }, res);
+  assert.equal(res.code, 201);
+  assert.equal(created.role, 'uniform packer');
+  assert.equal(created.isActive, false);
+  assert.ok(created.inviteTokenHash);
+  assert.match(outgoing.text, /Uniform Packing/);
+  assert.doesNotMatch(outgoing.text, /Captain’s Report|Bar Returns/);
+  existing = { role: 'captain', isActive: true };
+  const rejected = response();
+  await handler('/invite', 'post')({ body: { username: 'Captain', email: 'captain@example.com', role: 'uniform packer' } }, rejected);
+  assert.equal(rejected.code, 409);
 });

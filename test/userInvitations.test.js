@@ -19,12 +19,25 @@ test('a new email is not mistaken for an existing active captain account', () =>
   assert.equal(isExistingActiveInviteAccount({}), true);
 });
 
-test('captain invitation creates a hashed 72 hour one-time credential', () => {
+test('captain invitation creates a hashed 30 day one-time credential', () => {
   const now = Date.parse('2026-09-30T12:00:00Z');
   const invite = createUserInviteToken({ now });
   assert.notEqual(invite.token, invite.tokenHash);
   assert.equal(invite.tokenHash, hashUserInviteToken(invite.token));
   assert.equal(invite.expiresAt.getTime(), now + INVITE_TTL_MS);
+  assert.equal(invite.expiresAt.toISOString(), '2026-10-30T12:00:00.000Z');
+});
+
+test('all invitation templates explain the 30 day deadline only for new accounts', () => {
+  for (const role of ['captain', 'bar captain', 'kitchen lead', 'uniform packer']) {
+    const pending = renderUserInviteEmail({ name: 'Staff', role, inviteUrl: 'https://example.com/invite' });
+    assert.match(pending.text, /expires in 30 days/);
+    assert.match(pending.html, /expires in 30 days/);
+    assert.doesNotMatch(pending.text, /72 hours/);
+    const active = renderUserInviteEmail({ name: 'Staff', role, active: true, inviteUrl: 'https://example.com/login' });
+    assert.doesNotMatch(active.text, /expires in/);
+    assert.match(active.text, /existing password/);
+  }
 });
 
 test('captain invitation link uses the configured OCC frontend', () => {

@@ -8,7 +8,7 @@ const escapeHtml = (value) => clean(value, 2000)
   .replace(/"/g, '&quot;')
   .replace(/'/g, '&#39;');
 
-export const INVITE_TTL_MS = 72 * 60 * 60 * 1000;
+export const INVITE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 export const normalizeInviteEmail = (value) => clean(value, 320).toLowerCase();
 export const isExistingActiveInviteAccount = (user) => Boolean(user && user.isActive !== false);
 
@@ -64,7 +64,7 @@ export const renderUserInviteEmail = ({ name, inviteUrl, role = 'captain', activ
   const registration = active
     ? 'Your account is already active. Sign in with your existing password:'
     : 'Create your password using this private registration link:';
-  const expiry = active ? '' : 'This link is private and expires in 72 hours.';
+  const expiry = active ? '' : 'This link is private and expires in 30 days.';
   const steps = kitchenLead ? [
     'Sign in and open My Events. You will see your confirmed Nowsta assignments.',
     'Open the event where you are booked as Lead Chef, Kitchen Lead, Proofer Lead or Executive Chef, then select Kitchen Report.',

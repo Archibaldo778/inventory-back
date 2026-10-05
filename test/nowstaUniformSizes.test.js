@@ -113,3 +113,11 @@ test('normal Nowsta sync fetches uniform definitions and aborts on a partial cat
   failCatalog = true;
   await assert.rejects(fetchNowstaImportRows(options), /503/);
 });
+
+test('API fallback annotates its own source and never overwrites a saved source', async () => {
+  const input = { ...person, sizeSources: { shirtSize: 'OCC staff' } };
+  const { roster } = await fillMissingNowstaSizes([input], { read: async () => completeSizes });
+  assert.equal(roster[0].sizeSources.shirtSize, 'OCC staff');
+  assert.equal(roster[0].sizeSources.jacketSize, 'Nowsta API');
+  assert.equal(input.sizeSources.jacketSize, undefined);
+});

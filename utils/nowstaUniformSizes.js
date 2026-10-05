@@ -1,6 +1,6 @@
 import { createNowstaClient } from './nowstaApi.js';
 import { nowstaClothingSizes } from './uniformRequirements.js';
-import { SIZE_FIELDS } from './uniformPacking.js';
+import { SIZE_FIELDS, uniformSizeValue } from './uniformPacking.js';
 
 // Cache only reads. Staff records and saved packing quantities are never changed here.
 export const createNowstaSizeReader = ({
@@ -28,8 +28,8 @@ export const createNowstaSizeReader = ({
 const readSizes = createNowstaSizeReader();
 
 export const fillMissingNowstaSizes = async (roster, { read = readSizes, now = Date.now, budgetMs = 10_000 } = {}) => {
-  const result = roster.map((person) => ({ ...person }));
-  const pending = result.filter((person) => person.companyUserId && SIZE_FIELDS.some((field) => !String(person[field] || '').trim()));
+  const result = roster.map((person) => ({ ...person, sizeSources: { ...person.sizeSources } }));
+  const pending = result.filter((person) => person.companyUserId && SIZE_FIELDS.some((field) => !uniformSizeValue(person[field])));
   const deadline = now() + budgetMs;
   let next = 0; let failed = 0; let stop = false;
   const run = async () => {
@@ -38,7 +38,10 @@ export const fillMissingNowstaSizes = async (roster, { read = readSizes, now = D
       if (stop || now() >= deadline) { failed += 1; continue; }
       try {
         const sizes = await read(person.companyUserId);
-        for (const field of SIZE_FIELDS) if (!String(person[field] || '').trim() && sizes[field]) person[field] = sizes[field];
+        for (const field of SIZE_FIELDS) if (!uniformSizeValue(person[field]) && uniformSizeValue(sizes[field])) {
+          person[field] = uniformSizeValue(sizes[field]);
+          person.sizeSources[field] = 'Nowsta API';
+        }
         person.missingSizes = SIZE_FIELDS.filter((field) => field !== 'height' && !person[field]);
       } catch (error) {
         failed += 1;

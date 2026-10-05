@@ -60,14 +60,15 @@ test('size roster excludes chefs and pending/declined/agency staff and deduplica
   assert.equal(roster[1].missingSizes.length, 4);
 });
 
-test('size matching avoids another Nowsta identity and ambiguous names; event imports take precedence', () => {
+test('size matching avoids another Nowsta identity and ambiguous names; OCC sizes take precedence over event imports', () => {
   const other = { ...staff[0], nowstaCompanyUserId: 'other' };
   assert.equal(buildUniformRoster(entry, [other])[0].jacketSize, '');
   const ambiguous = [{ ...staff[0], nowstaCompanyUserId: '' }, { ...staff[0], nowstaCompanyUserId: '' }];
   assert.equal(buildUniformRoster(entry, ambiguous)[0].ambiguousMatch, true);
   assert.equal(buildUniformRoster(entry, ambiguous)[0].jacketSize, '');
   const imported = buildUniformRoster(entry, staff, [{ key: 'nowsta:1', jacketSize: '44L' }])[0];
-  assert.equal(imported.jacketSize, '44L');
+  assert.equal(imported.jacketSize, '42L');
+  assert.equal(imported.sizeSources.jacketSize, 'OCC staff');
   assert.equal(imported.shirtSize, 'XL');
 });
 
@@ -208,14 +209,14 @@ test('CSV import keeps existing packing quantities and the download includes imp
   await handler('/events/:id/roster-import', 'post')({ params: { id: '42' }, auth: { username: 'Packer' }, body: { csv, expectedRevision: 2 } }, imported);
   assert.equal(imported.code, 200);
   assert.equal(imported.body.packout.lines[0].quantity, 6);
-  assert.equal(imported.body.roster[0].jacketSize, '44L');
+  assert.equal(imported.body.roster[0].jacketSize, '42L');
   const downloaded = response();
   await handler('/events/:id/roster.csv')({ params: { id: '42' } }, downloaded);
   assert.equal(downloaded.code, 200);
   assert.match(downloaded.headers['Content-Type'], /text\/csv/);
   assert.match(downloaded.headers['Content-Disposition'], /attachment/);
   const rows = parseUniformCsv(downloaded.body); const header = rows.findIndex((row) => row[0] === '#');
-  assert.equal(rows[header + 1][5], '44L');
+  assert.equal(rows[header + 1][5], '42L');
 });
 
 test('cancelled events cannot be opened, imported, saved or downloaded', async (t) => {
@@ -254,4 +255,18 @@ test('chefs and sanitation do not contribute people, missing sizes, vacancies or
   const roster = buildUniformRoster({ shifts });
   assert.deepEqual(roster.map(row => row.positions), [['Waiter'], ['Waiter']]);
   assert.equal(roster.some(row => row.name === 'San Worker'), false);
+});
+
+test('uniform sizes identify each source and fill OCC gaps from CSV or Nowsta without guessing', () => {
+  const roster = buildUniformRoster({ shifts: [{ position: 'Waiter', workers: [{ ...worker('1', 'Alex Smith'), sizes: { shirtSize: 'M', pantsSize: '30x32', shoeSize: '10' } }] }] },
+    [{ ...staff[0], jacketSize: '42L', shirtSize: '', pantsSize: '', shoeSize: '-' }],
+    [{ key: 'nowsta:1', jacketSize: '40L', shirtSize: 'L' }]);
+  assert.equal(roster[0].jacketSize, '42L');
+  assert.equal(roster[0].shirtSize, 'L');
+  assert.equal(roster[0].pantsSize, '30x32');
+  assert.equal(roster[0].shoeSize, '10');
+  assert.deepEqual(roster[0].sizeSources, { jacketSize: 'OCC staff', shirtSize: 'Event CSV', pantsSize: 'Nowsta roster', shoeSize: 'Nowsta roster', height: 'OCC staff' });
+  const totals = uniformStaffing({ shifts: [{ position: 'Waiter', required: 2, workers: [{ name: 'TT', agency: true, status: 'confirmed' }] }] });
+  assert.deepEqual(totals.positions[0].agencies, ['TT']);
+  assert.equal(totals.staffCount, 0);
 });

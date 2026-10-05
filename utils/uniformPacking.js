@@ -1,6 +1,10 @@
 export const UNIFORM_PACKING_ROLES = ['admin', 'super admin', 'kitchen admin', 'staffing admin', 'uniform packer'];
 export const SIZE_FIELDS = ['jacketSize', 'shirtSize', 'pantsSize', 'shoeSize', 'height'];
 const clean = (value, max = 200) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
+export const uniformSizeValue = (value) => {
+  const size = clean(value, 60);
+  return /^(?:[-—<]|n\/?a|none|unknown|not specified)$/i.test(size) ? '' : size;
+};
 const nameKey = (value) => clean(value).normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 const confirmed = (worker) => ['confirmed', 'assigned'].includes(clean(worker?.status).toLowerCase()) && !worker?.agency;
 export const uniformWorkerKey = (worker) => clean(worker.companyUserId) ? `nowsta:${clean(worker.companyUserId)}` : `name:${nameKey(worker.name)}`;
@@ -17,7 +21,8 @@ export const uniformStaffing = (entry) => {
     const open = Math.max(0, required - filled.length);
     filled.forEach((worker) => people.add(uniformWorkerKey(worker)));
     booked += filled.length; pending += waiting; missing += open;
-    return { position: shift.position, required, booked: filled.length, pending: waiting, missing: open, startTime: shift.startTime, endTime: shift.endTime };
+    const agencies = workers.filter((worker) => worker.agency && !['declined', 'removed', 'cancelled', 'canceled'].includes(clean(worker.status).toLowerCase())).map((worker) => clean(worker.name)).filter(Boolean);
+    return { position: shift.position, agencies, required, booked: filled.length, pending: waiting, missing: open, startTime: shift.startTime, endTime: shift.endTime };
   });
   return { staffCount: people.size, booked, pending, missing, required: booked + missing, positions };
 };
@@ -39,9 +44,15 @@ export const buildUniformRoster = (entry, staff = [], overrides = []) => {
       && nameKey(person.nowstaName || `${person.firstName} ${person.lastName}`) === nameKey(worker.name));
     const person = matches.length === 1 ? matches[0] : {};
     const saved = overrides.find((row) => row.key === worker.key) || {};
-    const sizes = Object.fromEntries(SIZE_FIELDS.map((field) => [field, clean(saved[field] || person[field] || worker.nowstaSizes[field], 60)]));
+    const sizeSources = {};
+    const sizes = Object.fromEntries(SIZE_FIELDS.map((field) => {
+      const match = [[person[field], 'OCC staff'], [saved[field], 'Event CSV'], [worker.nowstaSizes[field], 'Nowsta roster']]
+        .find(([value]) => uniformSizeValue(value));
+      sizeSources[field] = match?.[1] || '';
+      return [field, uniformSizeValue(match?.[0])];
+    }));
     const names = worker.name.split(' ');
-    return { ...worker, firstName: person.firstName || names[0], lastName: person.lastName || names.slice(1).join(' '), ...sizes,
+    return { ...worker, firstName: person.firstName || names[0], lastName: person.lastName || names.slice(1).join(' '), ...sizes, sizeSources,
       payrollId: clean(saved.payrollId, 60), timeIn: clean(saved.timeIn, 60), timeOut: clean(saved.timeOut, 60),
       missingSizes: SIZE_FIELDS.filter((field) => field !== 'height' && !sizes[field]), ambiguousMatch: matches.length > 1 };
   });

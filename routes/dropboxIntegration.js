@@ -4,7 +4,7 @@ import DropboxDocument from '../models/DropboxDocument.js';
 import Event from '../models/Event.js';
 import BarEvent from '../models/BarEvent.js';
 import CocktailRecipe from '../models/CocktailRecipe.js';
-import { requireAdmin, requireAuth } from '../middleware/auth.js';
+import { requireAdmin, requireAuth, requireRoles, requireWorkspaceAccess, requireAdminForMutations } from '../middleware/auth.js';
 import { createMemoryRateLimiter } from '../middleware/rateLimit.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import { clearApiCacheGroups } from '../utils/apiCache.js';
@@ -1141,7 +1141,7 @@ router.get('/activity', requireAuth, async (req, res) => {
   }
 });
 
-router.post('/transportation/sync', requireAuth, transportationRateLimit, async (req, res) => {
+router.post('/transportation/sync', requireAuth, requireWorkspaceAccess, requireAdminForMutations, transportationRateLimit, async (req, res) => {
   try {
     const date = String(req.body?.date || '').trim();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
@@ -1195,7 +1195,7 @@ router.post('/events/:eventId/rebuild-bar', ...requireDropboxAdmin, async (req, 
   }
 });
 
-router.get('/documents/:dropboxId/download', requireAuth, downloadRateLimit, async (req, res) => {
+router.get('/documents/:dropboxId/download', requireAuth, requireRoles(['admin', 'super admin']), downloadRateLimit, async (req, res) => {
   try {
     const document = await DropboxDocument.findOne({ dropboxId: String(req.params.dropboxId || '') }).lean();
     if (!document) return res.status(404).json({ error: 'Dropbox document not found' });

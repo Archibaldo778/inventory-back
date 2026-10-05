@@ -2,8 +2,9 @@ import jwt from 'jsonwebtoken';
 import User from '../models/Users.js';
 import { eventStaffRequestAllowed } from '../utils/eventStaffAccess.js';
 import { uniformPackerRequestAllowed } from '../utils/uniformPacking.js';
+import { DEPARTMENT_ADMIN_ROLES, isDepartmentAdmin, departmentAdminRequestAllowed } from '../utils/departmentAccess.js';
 
-export const ADMIN_ROLES = Object.freeze(['admin', 'super admin']);
+export const ADMIN_ROLES = Object.freeze(['admin', 'super admin', ...DEPARTMENT_ADMIN_ROLES]);
 export const WORKSPACE_ROLES = Object.freeze([
   'user',
   'manager',
@@ -11,13 +12,15 @@ export const WORKSPACE_ROLES = Object.freeze([
   'admin',
   'super admin',
   'bar admin',
+  ...DEPARTMENT_ADMIN_ROLES,
   'packer',
   'uniform packer',
 ]);
 
-export const INVENTORY_MANAGER_ROLES = Object.freeze(['admin', 'super admin', 'packer']);
+export const INVENTORY_MANAGER_ROLES = Object.freeze(['admin', 'super admin', ...DEPARTMENT_ADMIN_ROLES, 'packer']);
 export const WORKSPACE_EDITOR_ROLES = Object.freeze([
   'user', 'manager', 'sales rep', 'admin', 'super admin', 'bar admin',
+  ...DEPARTMENT_ADMIN_ROLES,
 ]);
 
 const ADMIN_ROLE_SET = new Set(ADMIN_ROLES);
@@ -127,7 +130,7 @@ export const canManageInventory = (auth) => INVENTORY_MANAGER_ROLES.includes(nor
 
 export const canAccessProposals = (auth) => isAdminAuth(auth) || resolveSeeProposals(auth);
 export const canSeeBarFinancials = (auth) => (
-  normalizeRole(auth?.role) === 'super admin' || resolveSeeBarFinancials(auth)
+  !isDepartmentAdmin(auth) && (normalizeRole(auth?.role) === 'super admin' || resolveSeeBarFinancials(auth))
 );
 
 export const requireAuth = async (req, res, next) => {
@@ -178,6 +181,7 @@ export const requireAuth = async (req, res, next) => {
       seeBarFinancials: persistedUser.seeBarFinancials,
       permissions: persistedUser.permissions,
     });
+    if (!departmentAdminRequestAllowed(auth, req)) return res.status(403).json({ message: 'This action requires a full administrator' });
     if (!eventStaffRequestAllowed(auth, req)) return res.status(403).json({ message: 'Event Staff can only view assigned events and permitted inventory' });
     if (!uniformPackerRequestAllowed(auth, req)) return res.status(403).json({ message: 'Uniform packers can access uniform packing, decor and uniform inventory only' });
     req.auth = auth;

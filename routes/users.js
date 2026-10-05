@@ -6,6 +6,7 @@ import User from '../models/Users.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import { userTeamProfile } from '../utils/userTeamProfile.js';
 import reportTeamRoutes from './reportTeams.js';
+import { invitationRolesFor, departmentUserFilter, canManageDepartmentUser, isDepartmentAdmin, departmentEmployeeRoles } from '../utils/departmentAccess.js';
 import {
   createUserInviteToken,
   INVITE_ROLES,
@@ -215,6 +216,16 @@ const updateAndReturn = async (id, body, auth, { allowPassword = false } = {}) =
 
   const user = await User.findById(userId).select('+password +tokenVersion');
   if (!user) return { status: 404, payload: { message: 'Пользователь не найден' } };
+  if (!canManageDepartmentUser(auth, user)) return { status: 403, payload: { message: 'You can manage only employees in your department' } };
+  if (isDepartmentAdmin(auth)) {
+    if (body.role !== undefined && !departmentEmployeeRoles(auth).includes(normalizeRole(body.role))) {
+      return { status: 403, payload: { message: 'You cannot grant this role' } };
+    }
+    const allowedFields = ['id', '_id', 'userId', 'username', 'name', 'email', 'nowstaName', 'role', 'isActive', 'active', 'password'];
+    if (Object.keys(body).some((key) => !allowedFields.includes(key))) {
+      return { status: 403, payload: { message: 'Only full administrators can change access permissions and team assignments' } };
+    }
+  }
   if (isSuperAdminRole(user.role) && !isSuperAdminAuth(auth)) {
     return { status: 403, payload: { message: 'Only a super admin can modify this account' } };
   }
@@ -303,7 +314,7 @@ router.get('/options', async (req, res) => {
 // Список пользователей (без паролей)
 router.get('/', async (req, res) => {
   try {
-    const users = await User.find().select('-password');
+    const users = await User.find(departmentUserFilter(req.auth)).select('-password');
     res.json(users.map((user) => serializeUser(user)));
   } catch (e) {
     return sendApiError(res, e, {
@@ -317,6 +328,7 @@ router.get('/', async (req, res) => {
 // Создание пользователя
 router.post('/', async (req, res) => {
   try {
+    if (isDepartmentAdmin(req.auth)) return res.status(403).json({ message: 'Use Send invitations to add department employees' });
     const body = req.body || {};
     const username = String(body.username ?? body.name ?? '').trim();
     const email = normalizeEmail(body.email);
@@ -376,7 +388,7 @@ router.post('/', async (req, res) => {
 });
 
 router.get('/invite-templates', (req, res) => {
-  res.json(INVITE_ROLES.map((role) => ({
+  res.json(invitationRolesFor(req.auth).map((role) => ({
     role,
     ...renderUserInviteEmail({ name: '[Name]', inviteUrl: '[Personal registration link]', role }),
   })));
@@ -390,8 +402,9 @@ router.post('/invite', async (req, res) => {
     const nowstaName = String(body.nowstaName || username).trim().slice(0, 240);
     const inviteRole = normalizeRole(body.role || 'captain');
     if (!INVITE_ROLES.includes(inviteRole)) {
-      return res.status(400).json({ message: 'Choose Captain, Bar Captain, Kitchen Lead or Uniform Packer' });
+      return res.status(400).json({ message: 'Choose a valid account role' });
     }
+    if (!invitationRolesFor(req.auth).includes(inviteRole)) return res.status(403).json({ message: 'You cannot invite this account role' });
     let cc;
     try { cc = normalizeInviteCc(body.cc); } catch (error) {
       return res.status(400).json({ message: error.message });
@@ -467,6 +480,7 @@ router.put('/:id/password', async (req, res) => {
     }
     const target = await User.findById(req.params.id).select('_id role');
     if (!target) return res.status(404).json({ message: 'Пользователь не найден' });
+    if (String(req.auth?.userId || '') !== String(target._id) && !canManageDepartmentUser(req.auth, target)) return res.status(403).json({ message: 'You can manage only employees in your department' });
     if (isSuperAdminRole(target.role) && !isSuperAdminAuth(req.auth)) {
       return res.status(403).json({ message: 'Only a super admin can reset this password' });
     }
@@ -493,6 +507,7 @@ router.delete('/:id', async (req, res) => {
     }
     const target = await User.findById(req.params.id).select('_id role');
     if (!target) return res.status(404).json({ message: 'Пользователь не найден' });
+    if (!canManageDepartmentUser(req.auth, target)) return res.status(403).json({ message: 'You can manage only employees in your department' });
     if (isSuperAdminRole(target.role)) {
       if (!isSuperAdminAuth(req.auth)) {
         return res.status(403).json({ message: 'Only a super admin can delete this account' });

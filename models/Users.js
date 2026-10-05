@@ -25,6 +25,8 @@ const userSchema = new mongoose.Schema(
         'super admin',
         'super Admin',
         'bar admin',
+        'kitchen admin',
+        'staffing admin',
         'captain',
         'bar captain',
         'bartender',
@@ -97,11 +99,11 @@ userSchema.pre('validate', function syncPermissions(next) {
     typeof this.seeBarFinancials === 'boolean'
       ? this.seeBarFinancials
       : (typeof permissionsSeeBarFinancials === 'boolean' ? permissionsSeeBarFinancials : false);
-  this.seeBarFinancials = nextSeeBarFinancials;
+  this.seeBarFinancials = ['kitchen admin', 'staffing admin'].includes(role) ? false : nextSeeBarFinancials;
   this.permissions = {
     ...rawPermissions,
     seeProposals: nextSeeProposals,
-    seeBarFinancials: nextSeeBarFinancials,
+    seeBarFinancials: this.seeBarFinancials,
   };
 
   next();

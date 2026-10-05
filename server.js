@@ -104,7 +104,7 @@ const requireAdminForPatchDelete = requireMethodGuards((req) => {
   return ['PATCH', 'PUT', 'DELETE'].includes(method) ? requireAdmin : null;
 });
 
-const requireBeverageManager = requireRoles(['admin', 'super admin', 'bar admin']);
+const requireBeverageManager = requireRoles(['admin', 'super admin', 'bar admin', 'kitchen admin', 'staffing admin']);
 const requireBeverageManagerForMutations = requireMethodGuards((req) => {
   const method = String(req.method || '').toUpperCase();
   return ['GET', 'HEAD', 'OPTIONS'].includes(method) ? null : requireBeverageManager;

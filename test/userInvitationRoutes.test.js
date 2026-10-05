@@ -3,21 +3,26 @@ import assert from 'node:assert/strict';
 import router from '../routes/users.js';
 import User from '../models/Users.js';
 
-const handler = (path, method) => router.stack.find((entry) => entry.route?.path === path && entry.route.methods[method]).route.stack[0].handle;
+const handler = (path, method) => (req, res) => router.stack.find((entry) => entry.route?.path === path && entry.route.methods[method]).route.stack[0].handle({ auth: { role: 'admin' }, ...req }, res);
 const response = () => ({ code: 200, status(code) { this.code = code; return this; }, json(body) { this.body = body; return this; } });
 
 test('admin preview provides report and uniform packing invitation templates', () => {
   const res = response();
   handler('/invite-templates', 'get')({}, res);
-  assert.deepEqual(res.body.map((entry) => entry.role), ['captain', 'bar captain', 'uniform packer', 'kitchen lead']);
-  assert.doesNotMatch(res.body[0].text, /Bar Returns/);
-  assert.match(res.body[1].text, /Bar Returns/);
-  assert.match(res.body[2].text, /Staff & Uniform/);
-  assert.doesNotMatch(res.body[2].text, /Captain’s Report|Bar Returns|alcohol/);
+  const templates = Object.fromEntries(res.body.map((entry) => [entry.role, entry]));
+  assert.ok(templates['kitchen lead']);
+  assert.ok(templates['kitchen admin']);
+  assert.ok(templates['staffing admin']);
+  assert.ok(templates.admin);
+  assert.equal(templates['super admin'], undefined);
+  assert.doesNotMatch(templates.captain.text, /Bar Returns/);
+  assert.match(templates['bar captain'].text, /Bar Returns/);
+  assert.match(templates['uniform packer'].text, /Staff & Uniform/);
+  assert.doesNotMatch(templates['uniform packer'].text, /Captain’s Report|Bar Returns|alcohol/);
 });
 
 test('invitation rejects invalid role and CC before creating an account', async () => {
-  for (const extra of [{ role: 'admin' }, { cc: 'bad-address' }]) {
+  for (const extra of [{ role: 'invalid-role' }, { cc: 'bad-address' }]) {
     const res = response();
     await handler('/invite', 'post')({ body: { username: 'Test', email: 'test@example.com', ...extra } }, res);
     assert.equal(res.code, 400);

@@ -56,7 +56,7 @@ test('inviting a Kitchen Lead creates a registration account and sends only the 
   t.mock.method(globalThis, 'fetch', async (_url, options) => { email = JSON.parse(options.body); return { ok: true, json: async () => ({ id: 'invite' }) }; });
   const handler = router.stack.find((layer) => layer.route?.path === '/invite' && layer.route.methods.post).route.stack[0].handle;
   const res = { code: 200, status(code) { this.code = code; return this; }, json(body) { this.body = body; } };
-  await handler({ body: { username: chef.username, email: chef.email, role: chef.role, cc: 'copy@example.com' } }, res);
+  await handler({ auth: { role: 'admin' }, body: { username: chef.username, email: chef.email, role: chef.role, cc: 'copy@example.com' } }, res);
   assert.equal(res.code, 201); assert.equal(created.role, 'kitchen lead'); assert.equal(created.isActive, false);
   assert.ok(created.inviteTokenHash); assert.ok(created.inviteSentAt);
   assert.deepEqual(email.to, [chef.email]); assert.deepEqual(email.cc, ['copy@example.com']);

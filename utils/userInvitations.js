@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { ACCOUNT_ROLES } from './departmentAccess.js';
 
 const clean = (value, max = 500) => String(value || '').trim().slice(0, max);
 const escapeHtml = (value) => clean(value, 2000)
@@ -41,7 +42,7 @@ export const userInviteUrl = (token) => {
   return `${origin}/accept-invite?token=${encodeURIComponent(token)}`;
 };
 
-export const INVITE_ROLES = ['captain', 'bar captain', 'uniform packer', 'kitchen lead'];
+export const INVITE_ROLES = ACCOUNT_ROLES;
 export const canInviteUserAsRole = (currentRole, inviteRole) => INVITE_ROLES.includes(inviteRole)
   && (currentRole === inviteRole || (['captain', 'bar captain'].includes(currentRole) && ['captain', 'bar captain'].includes(inviteRole)));
 export const isValidInviteEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
@@ -58,14 +59,17 @@ export const renderUserInviteEmail = ({ name, inviteUrl, role = 'captain', activ
   const kitchenLead = role === 'kitchen lead';
   const barCaptain = role === 'bar captain';
   const uniformPacker = role === 'uniform packer';
-  const introduction = kitchenLead ? 'We are introducing a new system for completing Kitchen Reports at OCC.' : uniformPacker ? 'Your OCC uniform packing workspace is ready.' : barCaptain
+  const captain = role === 'captain' || barCaptain;
+  const assignedChef = role === 'event staff';
+  const departmentAdmin = ['kitchen admin', 'staffing admin'].includes(role);
+  const introduction = kitchenLead || assignedChef ? 'We are introducing a new system for completing Kitchen Reports at OCC.' : uniformPacker ? 'Your OCC uniform packing workspace is ready.' : barCaptain
     ? 'We are introducing a new system for tracking alcohol inventory and completing event reports at OCC.'
-    : 'We are introducing a new system for completing event reports at OCC.';
+    : captain ? 'We are introducing a new system for completing event reports at OCC.' : 'Your OCC workspace account is ready.';
   const registration = active
     ? 'Your account is already active. Sign in with your existing password:'
     : 'Create your password using this private registration link:';
   const expiry = active ? '' : 'This link is private and expires in 30 days.';
-  const steps = kitchenLead ? [
+  const steps = kitchenLead || assignedChef ? [
     'Sign in and open My Events. You will see your confirmed Nowsta assignments.',
     'Open the event where you are booked as Lead Chef, Kitchen Lead, Proofer Lead or Executive Chef, then select Kitchen Report.',
     'Complete the report within 48 hours after the event. Include any staffing, food, equipment or service issues and submit it when finished.',
@@ -77,7 +81,7 @@ export const renderUserInviteEmail = ({ name, inviteUrl, role = 'captain', activ
     'Review the uniform requirements from Nowsta or Staff Request. Confirm any missing sizes before packing. You can also view submitted event reports.',
     'Select uniform items and sizes, enter the quantities you are sending, and save the packout.',
     'Print labels from the saved packout. If you forget your password, use Forgot password on the login page.',
-  ] : [
+  ] : captain ? [
     'Sign in and open My Events. Select the correct assigned event.',
     'Open Captain’s Report, complete the event report, include relevant notes, and submit it when finished.',
     ...(barCaptain ? [
@@ -86,10 +90,20 @@ export const renderUserInviteEmail = ({ name, inviteUrl, role = 'captain', activ
       'Submit final Bar Returns before leaving the venue or immediately after returning to the shop. Submit Captain’s Report separately; completing one does not submit the other.',
     ] : []),
     'If an assigned event is missing or you need help registering, contact me directly.',
+  ] : [
+    role === 'bartender' ? 'Sign in and open My Events to view your bar assignments.'
+      : role === 'packer' ? 'Sign in and open the Packing Station to prepare event inventory.'
+        : 'Sign in and open Events to find the event you are working on.',
+    ...(departmentAdmin ? [
+      `Open Admin to manage ${role === 'kitchen admin' ? 'kitchen' : 'staffing'} operations and reports.`,
+      'Open User Administration and select Send invitations to invite staff in your department. Each employee receives a personal registration link.',
+    ] : []),
+    'Use the sections available to your account for your work. If you need help or an access change, contact your administrator.',
+    'If you forget your password, use Forgot password on the login page.',
   ];
-  const subject = kitchenLead ? 'OCC — Kitchen Reports: create your account' : uniformPacker ? 'OCC — your uniform packing workspace' : barCaptain
+  const subject = kitchenLead || assignedChef ? 'OCC — Kitchen Reports: create your account' : uniformPacker ? 'OCC — your uniform packing workspace' : barCaptain
     ? 'OCC — new alcohol inventory and event reporting system'
-    : 'OCC — new event reporting system';
+    : captain ? 'OCC — new event reporting system' : 'OCC — your workspace invitation';
   return {
     subject,
     html: `<div style="font-family:Arial,sans-serif;color:#222;line-height:1.5;max-width:620px"><p>Hi ${escapeHtml(name || (kitchenLead ? 'Chef' : 'Captain'))},</p><p>${escapeHtml(introduction)}</p><p>${escapeHtml(registration)}</p><p><a href="${escapeHtml(inviteUrl)}">${active ? 'Sign in' : 'Create my account'}</a></p>${expiry ? `<p>${expiry}</p>` : ''}<ol>${steps.map((step) => `<li>${escapeHtml(step)}</li>`).join('')}</ol><p>Thank you,<br><strong>Ivan</strong><br>Oliver Cheng Catering &amp; Events</p></div>`,

@@ -66,7 +66,7 @@ test('only unaccepted delivered invitations in their last five hours get one rem
     pendingUser({ _id: 'undelivered', inviteSentAt: null }),
     pendingUser({ _id: 'already-attempted', inviteReminderAttemptedAt: now }),
     pendingUser({ _id: 'no-token', inviteTokenHash: '' }),
-    pendingUser({ _id: 'admin', role: 'admin' }),
+    pendingUser({ _id: 'invalid-role', role: 'invalid-role' }),
   ];
   mockUsers(t, rows);
   const messages = [];

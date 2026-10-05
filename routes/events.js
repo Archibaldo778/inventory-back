@@ -1133,7 +1133,7 @@ router.post('/imports/:runId/undo', requireAdmin, async (req, res) => {
   }
 });
 
-router.get('/document-imports', requireRoles(['admin', 'super admin', 'bar admin']), async (req, res) => {
+router.get('/document-imports', requireRoles(['admin', 'super admin', 'bar admin', 'kitchen admin', 'staffing admin']), async (req, res) => {
   try {
     const limit = Math.max(1, Math.min(100, Number(req.query?.limit) || 30));
     const query = {};
@@ -1152,7 +1152,7 @@ router.get('/document-imports', requireRoles(['admin', 'super admin', 'bar admin
   }
 });
 
-router.post('/document-imports/:runId/undo', requireRoles(['admin', 'super admin', 'bar admin']), async (req, res) => {
+router.post('/document-imports/:runId/undo', requireRoles(['admin', 'super admin', 'bar admin', 'kitchen admin', 'staffing admin']), async (req, res) => {
   try {
     const run = await DocumentImportRun.findById(req.params.runId);
     if (!run) return res.status(404).json({ error: 'Document import not found' });
@@ -1492,7 +1492,7 @@ router.get('/', cacheWithGroup('5 minutes', CACHE_GROUP, {
 // Re-uploading the same type replaces the current file and increments its version.
 router.post(
   '/:id/documents',
-  requireRoles(['admin', 'super admin', 'bar admin']),
+  requireRoles(['admin', 'super admin', 'bar admin', 'kitchen admin', 'staffing admin']),
   eventDocumentUploadRateLimit,
   eventDocumentUpload.single('file'),
   async (req, res) => {

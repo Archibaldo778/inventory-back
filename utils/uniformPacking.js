@@ -1,4 +1,4 @@
-export const UNIFORM_PACKING_ROLES = ['admin', 'super admin', 'uniform packer'];
+export const UNIFORM_PACKING_ROLES = ['admin', 'super admin', 'kitchen admin', 'staffing admin', 'uniform packer'];
 export const SIZE_FIELDS = ['jacketSize', 'shirtSize', 'pantsSize', 'shoeSize', 'height'];
 const clean = (value, max = 200) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 const nameKey = (value) => clean(value).normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();

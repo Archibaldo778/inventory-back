@@ -69,12 +69,15 @@ export const validateUniformLines = (lines, catalog) => {
     }
     if (line.quantity === 0) return [];
     const item = catalog.find((candidate) => String(candidate._id) === String(line.itemId) && !candidate.hidden);
-    const size = item?.sizes?.find((candidate) => clean(candidate.label).toLowerCase() === clean(line.size).toLowerCase());
-    if (!item || !size) throw Object.assign(new Error('Choose an existing uniform item and size'), { statusCode: 400 });
-    const key = `${item._id}:${clean(size.label).toLowerCase()}`;
+    if (!item) throw Object.assign(new Error('Choose an existing uniform item'), { statusCode: 400 });
+    const requestedSize = typeof line.size === 'string' ? line.size.replace(/\s+/g, ' ').trim() : '';
+    if (!requestedSize || requestedSize.length > 60) throw Object.assign(new Error('Enter a size of 1–60 characters'), { statusCode: 400 });
+    const size = item.sizes?.find((candidate) => clean(candidate.label).toLowerCase() === requestedSize.toLowerCase());
+    const label = size ? clean(size.label) : requestedSize;
+    const key = `${item._id}:${label.toLowerCase()}`;
     if (seen.has(key)) throw Object.assign(new Error('Each item and size can appear only once'), { statusCode: 400 });
     seen.add(key);
-    return [{ itemId: item._id, name: item.name, size: size.label, quantity: line.quantity }];
+    return [{ itemId: item._id, name: item.name, size: label, quantity: line.quantity }];
   });
 };
 

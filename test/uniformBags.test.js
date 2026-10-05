@@ -30,7 +30,7 @@ test('the same stock cannot be counted twice across bags, and invalid labels are
   assert.throws(() => validateUniformBags([bag(1, 1)], lines, catalog), /unique ID/);
   assert.throws(() => validateUniformBags([{ ...bag('one', 1), notes: 'x'.repeat(401) }], lines, catalog), /400/);
   assert.throws(() => validateUniformBags([bag('one', 1, [{ ...lines[0], quantity: 1.5 }])], lines, catalog), /whole/);
-  assert.throws(() => validateUniformBags([bag('one', 1, [{ ...lines[0], size: 'unknown' }])], lines, catalog), /existing/);
+  assert.throws(() => validateUniformBags([bag('one', 1, [{ ...lines[0], size: 'unknown' }])], lines, catalog), /exceed/);
   assert.throws(() => validateUniformBags([bag('one', 1, [lines[0]]), bag('one', 2, [lines[1]])], lines, catalog), /unique ID/);
   assert.throws(() => validateUniformBags([bag('one', 1, [lines[0]]), bag('two', 1, [lines[1]])], lines, catalog), /unique positive/);
 });
@@ -39,6 +39,26 @@ test('old packouts retain their totals without inventing bag contents', () => {
   const record = new UniformPackout({ nowstaEventId: '42', lines });
   assert.equal(record.bags, undefined);
   assert.equal(record.lines[0].quantity, 10);
+});
+
+test('custom sending sizes save with bag contents and survive reloading without changing the catalog', async (t) => {
+  t.mock.method(NowstaScheduleEntry, 'findOne', () => chain({ nowstaEventId: '42' }));
+  t.mock.method(UniformItem, 'find', () => chain(catalog));
+  t.mock.method(UniformItem, 'updateOne', () => assert.fail('Custom packing sizes must not edit inventory'));
+  const custom = [{ ...lines[0], size: '30x32', name: 'Spoofed name', quantity: 3 }];
+  t.mock.method(UniformPackout, 'findOneAndUpdate', async (filter, update) => {
+    assert.deepEqual(filter, { nowstaEventId: '42', revision: 4 });
+    const reloaded = new UniformPackout({ nowstaEventId: '42', ...update.$set, revision: 5 }).toObject();
+    assert.equal(reloaded.lines[0].size, '30x32');
+    assert.equal(reloaded.bags[0].lines[0].size, '30x32');
+    assert.equal(reloaded.bags[0].lines[0].name, shirt.name);
+    return reloaded;
+  });
+  const res = response();
+  await save({ params: { id: '42' }, auth: { username: 'Packer' }, body: { expectedRevision: 4, lines: custom, bags: [bag('custom', 1, custom)], notes: '' } }, res);
+  assert.equal(res.code, 200);
+  assert.equal(res.body.lines[0].quantity, 3);
+  assert.deepEqual(shirt.sizes, [{ label: 'M' }, { label: 'L' }]);
 });
 
 test('save writes bags and total quantities together under the existing revision without changing inventory', async (t) => {

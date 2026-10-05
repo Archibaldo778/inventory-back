@@ -107,7 +107,9 @@ test('packout accepts catalog sizes and integer quantities, strips zero rows and
   assert.deepEqual(validateUniformLines([line, { ...line, size: 'M', quantity: 0 }], catalog), [{ ...line, name: 'Black Nehru', size: 'XL' }]);
   for (const quantity of [-1, 1.2, '4', NaN, 10001]) assert.throws(() => validateUniformLines([{ ...line, quantity }], catalog), /whole numbers/);
   assert.throws(() => validateUniformLines([null], catalog), /whole numbers/);
-  assert.throws(() => validateUniformLines([{ ...line, size: 'XXXL' }], catalog), /existing uniform/);
+  assert.equal(validateUniformLines([{ ...line, size: 'XXXL' }], catalog)[0].size, 'XXXL');
+  assert.throws(() => validateUniformLines([{ ...line, itemId: 'missing' }], catalog), /existing uniform/);
+  for (const size of ['', '  ', null, 32, 'x'.repeat(61)]) assert.throws(() => validateUniformLines([{ ...line, size }], catalog), /1–60/);
   assert.throws(() => validateUniformLines([line, { ...line, size: 'XL' }], catalog), /only once/);
 });
 

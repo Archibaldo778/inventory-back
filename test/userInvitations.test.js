@@ -108,6 +108,7 @@ test('captain invitation email is sent from Ivan with a reply address', async ()
   const previousKey = process.env.RESEND_API_KEY;
   process.env.RESEND_API_KEY = 'test-key';
   let request;
+  const requests = [];
   try {
     const result = await sendUserInviteEmail({
       email: 'itsupport@ocnyc.com',
@@ -116,7 +117,8 @@ test('captain invitation email is sent from Ivan with a reply address', async ()
       cc: ['copy@example.com', 'itsupport@ocnyc.com'],
       inviteUrl: 'https://occdecks.com/accept-invite?token=test',
       fetchImpl: async (url, options) => {
-        request = { url, body: JSON.parse(options.body) };
+        requests.push({ url, body: JSON.parse(options.body) });
+        request = requests[0];
         return { ok: true, json: async () => ({ id: 'invite-email-1' }) };
       },
     });
@@ -124,7 +126,12 @@ test('captain invitation email is sent from Ivan with a reply address', async ()
     assert.equal(request.body.from, 'Ivan at OCC <reports@reports.occdecks.com>');
     assert.equal(request.body.reply_to, 'ivan@ocnyc.com');
     assert.deepEqual(request.body.to, ['itsupport@ocnyc.com']);
-    assert.deepEqual(request.body.cc, ['copy@example.com']);
+    assert.equal(request.body.cc, undefined);
+    assert.equal(requests.length, 2);
+    assert.deepEqual(requests[1].body.to, ['copy@example.com']);
+    assert.match(request.body.text, /accept-invite\?token=test/);
+    assert.doesNotMatch(JSON.stringify(requests[1].body), /accept-invite|token=|https:\/\/occdecks/);
+    assert.match(requests[1].body.text, /Invitation sent to Test Captain/);
     assert.doesNotMatch(request.body.text, /Bar Returns/);
   } finally {
     if (previousKey === undefined) delete process.env.RESEND_API_KEY;

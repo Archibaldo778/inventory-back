@@ -411,7 +411,14 @@ router.post('/invite', async (req, res) => {
       return res.status(400).json({ message: 'A name and valid email are required' });
     }
     let user = await User.findOne({ email }).select('+inviteTokenHash +tokenVersion');
-    if (user && !canInviteUserAsRole(normalizeRole(user.role), inviteRole)) {
+    const changeRole = body.changeRole === true;
+    if (user && (!canManageDepartmentUser(req.auth, user) || (isSuperAdminRole(user.role) && !isSuperAdminAuth(req.auth)))) {
+      return res.status(403).json({ message: 'You do not have permission to manage this account' });
+    }
+    if (user && changeRole && String(req.auth?.userId || '') === String(user._id) && isSuperAdminRole(user.role) && !isSuperAdminRole(inviteRole)) {
+      return res.status(400).json({ message: 'You cannot remove your own super admin role' });
+    }
+    if (user && !changeRole && !canInviteUserAsRole(normalizeRole(user.role), inviteRole)) {
       return res.status(409).json({ message: 'This email already belongs to a different account role' });
     }
     const active = isExistingActiveInviteAccount(user);
@@ -422,9 +429,10 @@ router.post('/invite', async (req, res) => {
     const sender = resolveUserInvitationSender(req.auth);
     const invite = active ? null : createUserInviteToken();
     user.inviteSender = { name: sender.name, email: sender.email };
-    user.username = username;
-    user.nowstaName = nowstaName;
-    user.role = inviteRole;
+    if (changeRole && normalizeRole(user.role) !== inviteRole) {
+      user.role = inviteRole;
+      user.tokenVersion = Number(user.tokenVersion || 0) + 1;
+    }
     if (invite) {
       user.isActive = false;
       user.inviteTokenHash = invite.tokenHash;
@@ -438,7 +446,7 @@ router.post('/invite', async (req, res) => {
     }
     await user.save();
     const inviteUrl = active ? new URL('/login', userInviteUrl('')).href : userInviteUrl(invite.token);
-    const delivery = await sendUserInviteEmail({ email, name: username, inviteUrl, role: inviteRole, active, cc, sender: req.auth });
+    const delivery = await sendUserInviteEmail({ email, name: user.username, inviteUrl, role: normalizeRole(user.role), active, cc, sender: req.auth });
     if (delivery.status !== 'sent') return res.status(502).json({ message: `Invitation was created but email failed: ${delivery.error}` });
     user.inviteSentAt = delivery.sentAt;
     await user.save();

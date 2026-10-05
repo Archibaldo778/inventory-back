@@ -60,20 +60,22 @@ test('invitation creates captains and preserves credentials of active bar captai
   assert.equal(created.inviteReminderTokenHash, '');
   assert.equal(saves, 2);
   assert.doesNotMatch(outgoing.text, /Bar Returns/);
-  assert.deepEqual(outgoing.cc, ['copy@example.com']);
+  assert.deepEqual(outgoing.to, ['copy@example.com']);
+  assert.equal(outgoing.cc, undefined);
+  assert.doesNotMatch(outgoing.text, /accept-invite|token=/);
 
   existing = { username: 'Test', email: 'test@example.com', role: 'captain', isActive: true, password: 'unchanged-hash', tokenVersion: 7, inviteAcceptedAt: new Date(), save: async () => {} };
   const accepted = existing.inviteAcceptedAt;
   const activeRes = response();
   await handler('/invite', 'post')({ body: { username: 'Test', email: 'test@example.com', role: 'bar captain' } }, activeRes);
   assert.equal(activeRes.code, 201);
-  assert.equal(existing.role, 'bar captain');
+  assert.equal(existing.role, 'captain');
   assert.equal(existing.isActive, true);
   assert.equal(existing.password, 'unchanged-hash');
   assert.equal(existing.tokenVersion, 7);
   assert.equal(existing.inviteAcceptedAt, accepted);
   assert.match(outgoing.text, /existing password/);
-  assert.match(outgoing.text, /Bar Returns/);
+  assert.doesNotMatch(outgoing.text, /Bar Returns/);
   assert.match(outgoing.text, /Captain’s Report/);
 });
 

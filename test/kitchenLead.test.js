@@ -50,16 +50,18 @@ test('Kitchen Lead invitation explains registration and kitchen reports only and
 
 test('inviting a Kitchen Lead creates a registration account and sends only the selected recipient plus CC', async (t) => {
   env(t, 'RESEND_API_KEY', 'test-key');
-  let created; let email;
+  let created; let email; const notifications = [];
   t.mock.method(User, 'findOne', () => ({ select: async () => null }));
   t.mock.method(User, 'create', async (body) => { created = { ...body, save: async () => {} }; return created; });
-  t.mock.method(globalThis, 'fetch', async (_url, options) => { email = JSON.parse(options.body); return { ok: true, json: async () => ({ id: 'invite' }) }; });
+  t.mock.method(globalThis, 'fetch', async (_url, options) => { notifications.push(JSON.parse(options.body)); email = notifications[0]; return { ok: true, json: async () => ({ id: 'invite' }) }; });
   const handler = router.stack.find((layer) => layer.route?.path === '/invite' && layer.route.methods.post).route.stack[0].handle;
   const res = { code: 200, status(code) { this.code = code; return this; }, json(body) { this.body = body; } };
   await handler({ auth: { role: 'admin' }, body: { username: chef.username, email: chef.email, role: chef.role, cc: 'copy@example.com' } }, res);
   assert.equal(res.code, 201); assert.equal(created.role, 'kitchen lead'); assert.equal(created.isActive, false);
   assert.ok(created.inviteTokenHash); assert.ok(created.inviteSentAt);
-  assert.deepEqual(email.to, [chef.email]); assert.deepEqual(email.cc, ['copy@example.com']);
+  assert.deepEqual(email.to, [chef.email]); assert.equal(email.cc, undefined);
+  assert.deepEqual(notifications[1].to, ['copy@example.com']);
+  assert.doesNotMatch(notifications[1].text, /accept-invite|token=/);
   assert.match(email.text, /Kitchen Report/);
 });
 

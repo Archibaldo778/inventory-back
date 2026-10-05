@@ -128,11 +128,34 @@ export const sendUserInviteEmail = async ({ email, name, inviteUrl, role = 'capt
     body: JSON.stringify({
       from: identity.from,
       reply_to: identity.email,
-      to: [recipient], ...(copies.length ? { cc: copies } : {}),
+      to: [recipient],
       subject: message.subject, html: message.html, text: message.text,
     }),
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || !payload?.id) return { status: 'failed', error: clean(payload?.message || `Resend HTTP ${response.status}`, 1000) };
-  return { status: 'sent', providerId: clean(payload.id, 200), sentAt: new Date() };
+  const delivery = { status: 'sent', providerId: clean(payload.id, 200), sentAt: new Date() };
+  if (copies.length) {
+    // A copy must never contain the personal registration credential. Failure
+    // here must not mark the already-delivered invitation for a retry.
+    try {
+      const notification = await fetchImpl('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from: identity.from, reply_to: identity.email, to: copies,
+          subject: `OCC — invitation sent to ${clean(name, 160)}`,
+          text: `Invitation sent to ${clean(name, 160)} (${recipient}). The employee received their own email with sign-in instructions.`,
+          html: `<p>Invitation sent to <strong>${escapeHtml(name)}</strong> (${escapeHtml(recipient)}).</p><p>The employee received their own email with sign-in instructions.</p>`,
+        }),
+      });
+      const notificationPayload = await notification.json().catch(() => ({}));
+      delivery.copyDelivery = notification.ok && notificationPayload?.id
+        ? { status: 'sent', providerId: clean(notificationPayload.id, 200) }
+        : { status: 'failed', error: clean(notificationPayload?.message || `Resend HTTP ${notification.status}`, 1000) };
+    } catch {
+      delivery.copyDelivery = { status: 'failed', error: 'Could not send the invitation notification' };
+    }
+  }
+  return delivery;
 };

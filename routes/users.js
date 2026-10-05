@@ -346,10 +346,7 @@ router.post('/', async (req, res) => {
       return res.status(403).json({ message: 'Only a super admin can grant this role' });
     }
 
-    // Явные проверки уникальности, чтобы не сыпать 500
-    if (await User.findOne({ username })) {
-      return res.status(409).json({ message: 'Такой username уже существует' });
-    }
+    // Email identifies an account; multiple accounts may share a person's name.
     if (await User.findOne({ email })) {
       return res.status(409).json({ message: 'Такой email уже существует' });
     }

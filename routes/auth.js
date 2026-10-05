@@ -180,10 +180,14 @@ router.post('/login', enforceLoginRateLimit, async (req, res) => {
     if (!password || (!email && !username)) {
       return res.status(400).json({ message: 'email or username and password are required' });
     }
-    const query = email
-      ? { email: String(email).toLowerCase().trim() }
-      : { username: String(username).trim() };
-    const user = await User.findOne(query).select('+password +tokenVersion');
+    let user;
+    if (email) {
+      user = await User.findOne({ email: String(email).toLowerCase().trim() }).select('+password +tokenVersion');
+    } else {
+      const matches = await User.find({ username: String(username).trim() }).limit(2).select('+password +tokenVersion');
+      if (matches.length > 1) return res.status(400).json({ message: 'Please sign in with your email address instead of your name' });
+      [user] = matches;
+    }
     if (!user) return res.status(401).json({ message: 'Invalid credentials' });
     if (user.isActive === false) return res.status(403).json({ message: 'User account is inactive' });
 

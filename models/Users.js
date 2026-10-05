@@ -9,7 +9,7 @@ const normalizeRole = (value) => {
 
 const userSchema = new mongoose.Schema(
   {
-    username: { type: String, required: true, unique: true, trim: true },
+    username: { type: String, required: true, trim: true },
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
     nowstaName: { type: String, default: '', trim: true },
     jobTitle: { type: String, enum: ['', 'sales', 'team manager', 'assistant', 'executive chef'], default: '' },

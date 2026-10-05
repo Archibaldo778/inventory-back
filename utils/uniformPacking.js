@@ -6,7 +6,7 @@ export const uniformSizeValue = (value) => {
   return /^(?:[-—<]|n\/?a|none|unknown|not specified)$/i.test(size) ? '' : size;
 };
 const nameKey = (value) => clean(value).normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-const confirmed = (worker) => ['confirmed', 'assigned'].includes(clean(worker?.status).toLowerCase()) && !worker?.agency;
+const confirmed = (worker) => ['confirmed', 'assigned'].includes(clean(worker?.status).toLowerCase());
 export const uniformWorkerKey = (worker) => clean(worker.companyUserId) ? `nowsta:${clean(worker.companyUserId)}` : `name:${nameKey(worker.name)}`;
 export const uniformPackingPosition = (position) => !/\b(?:chefs?|cooks?|sanit(?:ation|ary)?|dishwashers?)\b/i.test(clean(position));
 
@@ -15,7 +15,7 @@ export const uniformStaffing = (entry) => {
   const positions = (entry?.shifts || []).filter((shift) => uniformPackingPosition(shift.position)).map((shift) => {
     const workers = shift.workers || [];
     const filled = workers.filter(confirmed);
-    const waiting = workers.filter((worker) => !confirmed(worker) && !['declined', 'removed', 'cancelled', 'canceled'].includes(clean(worker.status).toLowerCase()) && !worker.agency).length;
+    const waiting = workers.filter((worker) => !confirmed(worker) && !['declined', 'removed', 'cancelled', 'canceled'].includes(clean(worker.status).toLowerCase())).length;
     const required = Number.isInteger(shift.required) && shift.required >= 0 ? shift.required
       : workers.length + Math.max(0, Number(shift.unfilled) || 0);
     const open = Math.max(0, required - filled.length);
@@ -30,9 +30,11 @@ export const uniformStaffing = (entry) => {
 export const buildUniformRoster = (entry, staff = [], overrides = []) => {
   const workers = new Map();
   for (const shift of (entry?.shifts || []).filter((row) => uniformPackingPosition(row.position))) for (const worker of shift.workers || []) {
-    if (!confirmed(worker) || !clean(worker.name)) continue;
+    const pendingAgency = worker.agency && !['declined', 'removed', 'cancelled', 'canceled'].includes(clean(worker.status).toLowerCase());
+    if ((!confirmed(worker) && !pendingAgency) || !clean(worker.name)) continue;
     const key = uniformWorkerKey(worker);
-    const record = workers.get(key) || { key, name: clean(worker.name), companyUserId: clean(worker.companyUserId), nowstaSizes: worker.sizes || {}, positions: [], calls: [], ends: [] };
+    const record = workers.get(key) || { key, name: clean(worker.name), companyUserId: clean(worker.companyUserId), nowstaSizes: worker.sizes || {}, agency: Boolean(worker.agency), uniformPackingPending: !confirmed(worker), positions: [], calls: [], ends: [] };
+    if (confirmed(worker)) record.uniformPackingPending = false;
     if (shift.position && !record.positions.includes(shift.position)) record.positions.push(shift.position);
     if (shift.startTime && !record.calls.includes(shift.startTime)) record.calls.push(shift.startTime);
     if (shift.endTime && !record.ends.includes(shift.endTime)) record.ends.push(shift.endTime);

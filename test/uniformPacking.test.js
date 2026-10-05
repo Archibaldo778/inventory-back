@@ -50,9 +50,9 @@ test('Nowsta sync retains required slots even when a worker has declined', () =>
   assert.equal(uniformStaffing(row).missing, 3);
 });
 
-test('size roster excludes chefs and pending/declined/agency staff and deduplicates multiple shifts', () => {
+test('size roster excludes chefs and unconfirmed OCC staff but includes agency assignments and deduplicates shifts', () => {
   const roster = buildUniformRoster({ ...entry, shifts: [...entry.shifts, { workers: [{ ...worker('9', 'Agency Placeholder'), agency: true }] }] }, staff);
-  assert.deepEqual(roster.map((person) => person.name), ['Alex Smith', 'Sam Brown']);
+  assert.deepEqual(roster.map((person) => person.name), ['Alex Smith', 'Sam Brown', 'Agency Placeholder']);
   assert.deepEqual(roster[0].positions, ['Captain', 'Bartender']);
   assert.equal(roster[0].jacketSize, '42L');
   assert.equal(roster[0].height, `6'0"`);
@@ -268,5 +268,25 @@ test('uniform sizes identify each source and fill OCC gaps from CSV or Nowsta wi
   assert.deepEqual(roster[0].sizeSources, { jacketSize: 'OCC staff', shirtSize: 'Event CSV', pantsSize: 'Nowsta roster', shoeSize: 'Nowsta roster', height: 'OCC staff' });
   const totals = uniformStaffing({ shifts: [{ position: 'Waiter', required: 2, workers: [{ name: 'TT', agency: true, status: 'confirmed' }] }] });
   assert.deepEqual(totals.positions[0].agencies, ['TT']);
-  assert.equal(totals.staffCount, 0);
+  assert.equal(totals.staffCount, 1);
+});
+
+test('named agency staff appear in the roster and confirmed staff counts without inventing sizes', () => {
+  const fabian = { companyUserId: 'tt-fabian', name: 'zz TT - Fabian Abramowitz (Agency)', status: 'confirmed', agency: true };
+  const casey = { companyUserId: 'tt-casey', name: 'zz TT - Casey Currin (Agency)', status: 'pending', agency: true };
+  const source = { shifts: [{ position: 'Waiter', required: 3, workers: [fabian, casey, { ...fabian, companyUserId: 'cancelled', name: 'Cancelled', status: 'cancelled' }] },
+    { position: 'Beverage Attendant', required: 1, workers: [fabian] },
+    { position: 'Chef', required: 1, workers: [{ ...fabian, companyUserId: 'chef', name: 'Chef' }] }] };
+  const roster = buildUniformRoster(source);
+  assert.deepEqual(roster.map((person) => person.name), [fabian.name, casey.name]);
+  assert.equal(roster[0].agency, true);
+  assert.equal(roster[0].uniformPackingPending, false);
+  assert.equal(roster[1].uniformPackingPending, true);
+  assert.equal(roster[0].jacketSize, '');
+  assert.equal(roster[0].shirtSize, '');
+  const totals = uniformStaffing(source);
+  assert.equal(totals.staffCount, 1);
+  assert.equal(totals.booked, 2);
+  assert.equal(totals.pending, 1);
+  assert.equal(totals.missing, 2);
 });

@@ -703,7 +703,7 @@ router.patch('/:eventId/received', async (req, res) => {
     if (!required.length) return res.status(400).json({ message: 'This event has no receivable items' });
     if (rows.length > MAX_ITEMS) return res.status(400).json({ message: 'Too many received items' });
     const now = new Date();
-    const receivedResult = applyGuestReceivedRows(required, rows, { at: now, by: reporterName });
+    const receivedResult = applyGuestReceivedRows(required, rows, { at: now, by: req.auth?.username || reporterName, userId: req.auth?.userId, audit: event.audit });
     if (!receivedResult.valid) return res.status(400).json({ message: receivedResult.message });
     if (event.status === 'draft' || event.status === 'ready') event.status = 'in_progress';
     event.guestIntake.reporterName = reporterName;
@@ -733,7 +733,7 @@ router.patch('/:eventId/returns', async (req, res) => {
     }
     if (rows.length > MAX_ITEMS) return res.status(400).json({ message: 'Too many returned items' });
     const now = new Date();
-    const prepared = applyGuestReturnRows(required, rows, { at: now, by: reporterName });
+    const prepared = applyGuestReturnRows(required, rows, { at: now, by: req.auth?.username || reporterName, userId: req.auth?.userId, audit: event.audit });
     if (!prepared.valid) return res.status(400).json({ message: prepared.message });
     const { updates, variances, unverifiedReceived } = prepared;
     event.status = 'submitted';

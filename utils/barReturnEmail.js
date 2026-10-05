@@ -7,17 +7,20 @@ const escapeHtml = (value) => clean(value).replace(/[&<>"']/g, (character) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 }[character]));
 
+const sentChanged = (item) => item.sentQtyPending !== true && item.sentQtyOriginal != null && Number(item.sentQtyOriginal) !== Number(item.sentQty);
+
 export const renderBarReturnEmail = (event = {}) => {
+  const showWarehouse = (event.items || []).some((item) => item.included !== false && sentChanged(item));
   const rows = (Array.isArray(event.items) ? event.items : []).filter((item) => item?.included !== false).map((item) => (
-    `<tr><td>${escapeHtml(item.name)}</td><td>${Number(item.sentQty) || 0}</td><td>${Number(item.deliveredQty ?? item.sentQty) || 0}</td><td>${Number(item.returnedFullQty) || 0}</td><td>${Number(item.returnedOpenQty) || 0}</td><td>${Number(item.lostDamagedQty) || 0}</td></tr>`
+    `<tr><td>${escapeHtml(item.name)}</td>${showWarehouse ? `<td>${Number(item.sentQtyOriginal ?? item.sentQty) || 0}</td>` : ''}<td>${Number(item.sentQty) || 0}</td><td>${Number(item.deliveredQty ?? item.sentQty) || 0}</td><td>${Number(item.returnedFullQty) || 0}</td><td>${Number(item.returnedOpenQty) || 0}</td><td>${Number(item.lostDamagedQty) || 0}</td></tr>`
   )).join('');
-  return `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#20272c"><h1>Bar Returns</h1><p><strong>${escapeHtml(event.name)}</strong> · ${escapeHtml(event.eventDate)}</p><p>Submitted by ${escapeHtml(event.submittedBy || event.guestIntake?.reporterName) || '—'}</p><table cellpadding="8" cellspacing="0" border="1" style="border-collapse:collapse"><thead><tr><th>Item</th><th>Sent</th><th>Received</th><th>Full return</th><th>Open return</th><th>Lost / damaged</th></tr></thead><tbody>${rows}</tbody></table></body></html>`;
+  return `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#20272c"><h1>Bar Returns</h1><p><strong>${escapeHtml(event.name)}</strong> · ${escapeHtml(event.eventDate)}</p><p>Submitted by ${escapeHtml(event.submittedBy || event.guestIntake?.reporterName) || '—'}</p><table cellpadding="8" cellspacing="0" border="1" style="border-collapse:collapse"><thead><tr><th>Item</th>${showWarehouse ? '<th>Warehouse sent</th>' : ''}<th>Sent</th><th>Received</th><th>Full return</th><th>Open return</th><th>Lost / damaged</th></tr></thead><tbody>${rows}</tbody></table></body></html>`;
 };
 
 export const renderBarReturnText = (event = {}) => [
   `BAR RETURNS\n${clean(event.name)} · ${clean(event.eventDate)}\nSubmitted by ${clean(event.submittedBy || event.guestIntake?.reporterName) || '—'}`,
   ...(Array.isArray(event.items) ? event.items : []).filter((item) => item?.included !== false).map((item) => (
-    `${clean(item.name)}: sent ${Number(item.sentQty) || 0}; received ${Number(item.deliveredQty ?? item.sentQty) || 0}; full return ${Number(item.returnedFullQty) || 0}; open return ${Number(item.returnedOpenQty) || 0}; lost/damaged ${Number(item.lostDamagedQty) || 0}`
+    `${clean(item.name)}: sent ${Number(item.sentQty) || 0}${sentChanged(item) ? `; warehouse sent ${Number(item.sentQtyOriginal)}` : ''}; received ${Number(item.deliveredQty ?? item.sentQty) || 0}; full return ${Number(item.returnedFullQty) || 0}; open return ${Number(item.returnedOpenQty) || 0}; lost/damaged ${Number(item.lostDamagedQty) || 0}`
   )),
 ].join('\n');
 

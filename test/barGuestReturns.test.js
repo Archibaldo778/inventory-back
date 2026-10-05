@@ -150,3 +150,30 @@ test('captain can submit final returns without inventing an Actual received coun
   assert.equal(item.returnedOpenQty, 4);
   assert.equal(item.returnConfirmed, true);
 });
+
+for (const apply of [applyGuestReceivedRows, applyGuestReturnRows]) {
+  test(`${apply.name} preserves warehouse quantity and audits every correction, excluding pending counts`, () => {
+    const item = { _id: 'a', name: 'Vodka', scope: 'alcohol', sentQty: 12 };
+    const audit = [];
+    const at = new Date('2026-10-05T12:00:00Z');
+    const row = { itemId: 'a', sentQty: 10, deliveredQty: 10, returnedQty: 2 };
+    assert.equal(apply([item], [row], { by: 'Captain', at, audit }).valid, true);
+    assert.equal(item.sentQtyOriginal, 12);
+    assert.equal(item.sentQtyChangedBy, 'Captain');
+    assert.equal(item.sentQtyChangedAt, at);
+    assert.deepEqual(audit[0].details, { itemId: 'a', name: 'Vodka', oldValue: 12, newValue: 10 });
+    assert.equal(audit[0].username, 'Captain');
+    apply([item], [{ ...row, sentQty: 11 }], { by: 'Second captain', at, audit });
+    assert.equal(item.sentQtyOriginal, 12);
+    assert.equal(audit.length, 2);
+    assert.equal(audit[1].details.oldValue, 10);
+    apply([item], [{ ...row, sentQty: 11 }], { audit });
+    assert.equal(audit.length, 2);
+    const pending = { _id: 'a', name: 'Vodka', scope: 'alcohol', sentQty: 0, sentQtyPending: true };
+    apply([pending], [row], { by: 'Captain', at, audit });
+    assert.equal(pending.sentQty, 10);
+    assert.equal(pending.sentQtyOriginal, undefined);
+    assert.equal(pending.sentQtyChangedBy, undefined);
+    assert.equal(audit.length, 2);
+  });
+}

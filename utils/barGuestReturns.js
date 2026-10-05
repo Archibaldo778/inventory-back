@@ -3,6 +3,18 @@ import { requiresBarReturn } from './barPackoutScope.js';
 const itemId = (item) => String(item?._id || item?.id || '');
 const itemName = (item) => String(item?.name || 'Unnamed item').trim() || 'Unnamed item';
 
+const recordSentQuantityChange = (item, sentQty, { at, by, userId = '', audit }) => {
+  const oldValue = Number(item.sentQty || 0);
+  if (item.sentQtyPending === true || oldValue === sentQty) return;
+  if (item.sentQtyOriginal === undefined || item.sentQtyOriginal === null) item.sentQtyOriginal = oldValue;
+  item.sentQtyChangedBy = String(by || '');
+  item.sentQtyChangedAt = at;
+  audit.push({
+    action: 'guest_sent_qty_changed', username: String(by || ''), userId: String(userId || ''), at,
+    details: { itemId: itemId(item), name: itemName(item), oldValue, newValue: sentQty },
+  });
+};
+
 const indexGuestRows = (required, rows, action) => {
   const requiredById = new Map(required.map((item) => [itemId(item), item]));
   const byId = new Map();
@@ -27,7 +39,7 @@ const indexGuestRows = (required, rows, action) => {
   return { valid: true, message: '', byId };
 };
 
-export const applyGuestReceivedRows = (items, rows, { at = new Date(), by = '' } = {}) => {
+export const applyGuestReceivedRows = (items, rows, { at = new Date(), by = '', userId = '', audit = [] } = {}) => {
   const required = (Array.isArray(items) ? items : []).filter((item) => item?.included !== false && requiresBarReturn(item));
   const sourceRows = Array.isArray(rows) ? rows : [];
   if (!required.length) return { valid: false, message: 'This event has no receivable items', count: 0 };
@@ -50,6 +62,7 @@ export const applyGuestReceivedRows = (items, rows, { at = new Date(), by = '' }
     updates.push({ item, sentQty, deliveredQty });
   }
   updates.forEach(({ item, sentQty, deliveredQty }) => {
+    recordSentQuantityChange(item, sentQty, { at, by, userId, audit });
     item.sentQty = sentQty;
     item.sentQtyText = String(sentQty);
     item.sentQtyPending = false;
@@ -107,10 +120,11 @@ export const prepareGuestReturnRows = (items, rows) => {
   return { valid: true, message: '', updates, variances, unverifiedReceived };
 };
 
-export const applyGuestReturnRows = (items, rows, { at = new Date(), by = '' } = {}) => {
+export const applyGuestReturnRows = (items, rows, { at = new Date(), by = '', userId = '', audit = [] } = {}) => {
   const prepared = prepareGuestReturnRows(items, rows);
   if (!prepared.valid) return prepared;
   prepared.updates.forEach(({ item, sentQty, deliveredQty, returnedQty }) => {
+    recordSentQuantityChange(item, sentQty, { at, by, userId, audit });
     item.sentQty = sentQty;
     item.sentQtyText = String(sentQty);
     item.sentQtyPending = false;

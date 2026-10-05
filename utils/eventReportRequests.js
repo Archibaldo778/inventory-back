@@ -39,7 +39,6 @@ export const buildEventReportRequests = ({ event, schedule, users, reports }) =>
     if (!assigned.length || reports.some((report) => matchesUser(report, user))) continue;
     let reason = '';
     if (!requiresEventReport(event, schedule)) reason = 'This event does not require a report.';
-    else if (event.date < CAPTAIN_REPORT_REMINDERS_START_DATE) reason = 'Reports before the rollout were collected separately.';
     else if (!assigned.some(isCaptainPosition)) reason = 'Not booked as a Captain on this event.';
     items.push({
       id: `planned:${user._id}`, userId: String(user._id), eventId: String(event._id),
@@ -47,6 +46,8 @@ export const buildEventReportRequests = ({ event, schedule, users, reports }) =>
       reporterName: user.username || user.nowstaName || user.email, reporterEmail: user.email,
       eventPosition: assigned.join(' / '), position: assigned.join(' / '),
       status: reason ? 'not_required' : 'pending', planned: true, requirementReason: reason,
+      reminderNote: !reason && event.date < CAPTAIN_REPORT_REMINDERS_START_DATE
+        ? 'Automatic reminders apply to events from October 1, 2026.' : '',
       canCancelRequest: !reason, reminderCount: 0, requestSentAt: null,
       emailDelivery: { status: 'not_sent' },
     });

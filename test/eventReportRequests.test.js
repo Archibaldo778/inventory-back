@@ -8,6 +8,7 @@ import NowstaScheduleEntry from '../models/NowstaScheduleEntry.js';
 import User from '../models/Users.js';
 import router from '../routes/eventReports.js';
 import { buildEventReportRequests, cancelEventReportRequest } from '../utils/eventReportRequests.js';
+import { assignedReportCaptains, deliverCaptainReportReminder } from '../utils/captainReportReminders.js';
 
 const eventId = '507f1f77bcf86cd799439001';
 const userId = '507f1f77bcf86cd799439002';
@@ -56,7 +57,29 @@ test('removed/unconfirmed workers and cancelled events do not become future repo
   for (const title of ['Tasting', 'Walk through', 'Load in', 'Load out']) {
     assert.equal(buildEventReportRequests({ event: { ...event, title }, schedule, users: [user], reports: [] })[0].status, 'not_required');
   }
-  assert.equal(buildEventReportRequests({ event: { ...event, date: '2026-09-30' }, schedule, users: [user], reports: [] })[0].status, 'not_required');
+});
+
+test('every Captain position requires a report on either side of the reminder rollout without emailing historical events', async () => {
+  for (const position of ['Captain', 'Captain - Floor', 'Captain - Expeditor', 'Captain - Bar', 'Floor Captain', 'BAR-CAPTAIN']) {
+    for (const date of ['2026-09-30', '2026-10-01', '2026-10-04']) {
+      const currentEvent = { ...event, date };
+      const currentSchedule = { ...schedule, date, endsAt: new Date(`${date}T20:00:00-04:00`), shifts: [{ position, workers: [{ name: user.username, email: user.email, status: 'confirmed' }] }] };
+      const [request] = buildEventReportRequests({ event: currentEvent, schedule: currentSchedule, users: [user], reports: [] });
+      assert.equal(request.status, 'pending', `${position} on ${date}`);
+      assert.equal(request.canCancelRequest, true);
+      assert.equal(request.requirementReason, '');
+      assert.equal(request.eventPosition, position);
+      assert.deepEqual(assignedReportCaptains(currentSchedule, [user]), [user]);
+      if (date < '2026-10-01') {
+        assert.match(request.reminderNote, /October 1, 2026/);
+        assert.equal(await deliverCaptainReportReminder({ event: currentEvent, schedule: currentSchedule, user, report: request,
+          hours: 24, now: new Date(currentSchedule.endsAt.getTime() + 24 * 3600000), fetchImpl: () => assert.fail('Must not send historical reminders') }), 'skipped');
+      } else assert.equal(request.reminderNote, '');
+    }
+  }
+  const [waiter] = buildEventReportRequests({ event: { ...event, date: '2026-09-30' }, schedule: { shifts: [{ position: 'VIP Waiter', workers: [{ email: user.email, status: 'confirmed' }] }] }, users: [user], reports: [] });
+  assert.equal(waiter.status, 'not_required');
+  assert.equal(waiter.requirementReason, 'Not booked as a Captain on this event.');
 });
 
 test('opening/refreshing reports only reads assignments and cannot create reports or send mail', async (t) => {

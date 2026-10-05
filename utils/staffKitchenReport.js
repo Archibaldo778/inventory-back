@@ -3,10 +3,20 @@ import EventReport from '../models/EventReport.js';
 import User from '../models/Users.js';
 import NowstaScheduleEntry from '../models/NowstaScheduleEntry.js';
 import { kitchenReportPosition, KITCHEN_PORTAL_ROLES } from './eventStaffAccess.js';
-import { serializeStaffEvent, staffScheduleQuery } from './staffPortal.js';
+import { serializeStaffEvent, staffScheduleQuery, workerMatchesStaff } from './staffPortal.js';
 import { resolveEventSalesRep } from './eventReportSalesRep.js';
 import { createApiError } from './apiErrors.js';
 import { requiresEventReport } from './eventReportRequirement.js';
+
+export const staffKitchenReporterName = (user, entry) => {
+  const workerNames = (entry?.shifts || []).flatMap((shift) => (shift.workers || [])
+    .filter((worker) => workerMatchesStaff(worker, user)).map((worker) => worker.name));
+  const names = [...workerNames, user?.nowstaName, user?.username]
+    .map((value) => String(value || '').trim()).filter(Boolean);
+  return names.find((name) => !/^(?:(?:executive|lead|event)\s+chef|(?:kitchen|proofer)\s+lead|chef|event\s+staff)$/i.test(name)
+    && name.toLowerCase() !== String(user?.jobTitle || '').trim().toLowerCase())
+    || String(user?.email || '').trim();
+};
 
 export const kitchenReportEventQuery = (nowstaEventId) => ({
   'meta.nowsta.apiEventId': nowstaEventId,
@@ -38,7 +48,7 @@ export const openStaffKitchenReport = async (user, nowstaEventId) => {
       eventId: event._id, nowstaEventId,
       eventTitle: event.title || entry.title, eventDate: event.date || entry.date,
       reportType: 'kitchen', slackUserId: subjectId,
-      reporterName: user.nowstaName || user.username, reporterEmail: email,
+      reporterName: staffKitchenReporterName(user, entry), reporterEmail: email,
       position: kitchenReportPosition(user, assignedEvent.shifts), salesRep: resolveEventSalesRep(event), status: 'pending',
     } },
     { upsert: true, new: true, setDefaultsOnInsert: true },
@@ -63,4 +73,5 @@ export const validateStaffKitchenReportAccess = async (access, report) => {
   const assignedEvent = serializeStaffEvent(entry, user);
   if (!event || !assignedEvent) throw createApiError(403, 'Event is no longer assigned to you');
   if (!assignedEvent.canUseKitchenReport) throw createApiError(403, 'Kitchen report access is no longer available');
+  return { reporterName: staffKitchenReporterName(user, entry) };
 };

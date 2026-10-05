@@ -8,7 +8,8 @@ import User from '../models/Users.js';
 import NowstaScheduleEntry from '../models/NowstaScheduleEntry.js';
 import router from '../routes/staffPortal.js';
 import publicRouter from '../routes/publicEventReports.js';
-import { openStaffKitchenReport, validateStaffKitchenReportAccess } from '../utils/staffKitchenReport.js';
+import { openStaffKitchenReport, validateStaffKitchenReportAccess, staffKitchenReporterName } from '../utils/staffKitchenReport.js';
+import { renderEventReportEmail } from '../utils/eventReportEmail.js';
 import { canUseKitchenReport, eventStaffRequestAllowed } from '../utils/eventStaffAccess.js';
 import { serializeStaffEvent } from '../utils/staffPortal.js';
 import { verifyEventGuestAccess } from '../utils/eventGuestAccess.js';
@@ -32,6 +33,25 @@ const secret = (t) => {
   const old = process.env.JWT_SECRET; process.env.JWT_SECRET = 'staff-kitchen-test-secret';
   t.after(() => { if (old === undefined) delete process.env.JWT_SECRET; else process.env.JWT_SECRET = old; });
 };
+
+test('Kitchen Report resolves the matched worker name instead of a job title in the profile', async (t) => {
+  const user = { ...chef, username: 'Maye Lamonica', nowstaName: 'Executive Chef', jobTitle: '' };
+  const schedule = { ...entry, shifts: [{ position: 'Lead Chef', workers: [
+    { name: 'Another Chef', email: 'another@example.com', status: 'confirmed' },
+    { name: 'Declined Name', email: user.email, status: 'declined' },
+    { name: 'Maye Lamonica', email: user.email, status: 'confirmed' },
+  ] }] };
+  mockSources(t, schedule);
+  t.mock.method(EventReport, 'findOne', () => ({ sort: async () => null }));
+  t.mock.method(EventReport, 'findOneAndUpdate', async (_query, update) => update.$setOnInsert);
+  const { report } = await openStaffKitchenReport(user, '123');
+  assert.equal(report.reporterName, 'Maye Lamonica');
+  assert.equal(report.position, 'Lead Chef');
+  assert.equal(report.reporterEmail, chef.email);
+  assert.equal(staffKitchenReporterName(user, entry), 'Maye Lamonica');
+  assert.equal(staffKitchenReporterName({ ...user, username: 'Kitchen Lead' }, entry), user.email);
+  assert.equal(staffKitchenReporterName(chef, entry), chef.nowstaName);
+});
 
 test('Event Staff report requests reach the assignment check without granting other write permissions', () => {
   const req = { method: 'POST', originalUrl: '/api/staff-portal/events/123/kitchen-report-link' };
@@ -91,10 +111,10 @@ test('Kitchen Report cannot be opened for an unassigned, archived or unlinked ev
 test('a chef can open and submit an unfilled Kitchen Report 14 days after the event, but cannot submit twice', async (t) => {
   t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-10-15T16:00:00Z') });
   secret(t);
-  const leadChef = { ...chef, role: 'kitchen lead', jobTitle: '' };
-  mockSources(t, { ...entry, shifts: [{ ...entry.shifts[0], position: 'Lead Chef' }] });
+  const leadChef = { ...chef, role: 'kitchen lead', jobTitle: '', nowstaName: 'Executive Chef' };
+  mockSources(t, { ...entry, shifts: [{ position: 'Lead Chef', workers: [{ email: chef.email, status: 'confirmed', name: 'Maye Lamonica' }] }] });
   t.mock.method(User, 'findById', () => ({ select: () => ({ lean: async () => leadChef }) }));
-  const report = { _id: 'report-1', eventId, eventTitle: 'Dinner', reportType: 'kitchen', slackUserId: `account:${userId}:kitchen`, reporterName: chef.username, status: 'pending', answers: {}, save: async () => {}, toObject() { return { ...this }; } };
+  const report = { _id: 'report-1', eventId, eventTitle: 'Dinner', reportType: 'kitchen', slackUserId: `account:${userId}:kitchen`, reporterName: 'Executive Chef', status: 'pending', answers: {}, save: async () => {}, toObject() { return { ...this }; } };
   t.mock.method(EventReport, 'findOneAndUpdate', async (filter, update) => {
     assert.equal(filter.status, 'pending'); Object.assign(report, update.$set); return report;
   });
@@ -112,6 +132,8 @@ test('a chef can open and submit an unfilled Kitchen Report 14 days after the ev
   const loaded = response();
   await handler(publicRouter, '/:eventId', 'get')(request, loaded);
   assert.equal(loaded.body.report.reportType, 'kitchen');
+  assert.equal(loaded.body.report.reporterName, 'Maye Lamonica');
+  assert.equal(report.reporterName, 'Executive Chef', 'Preview does not write to the saved draft');
   const incomplete = response();
   await handler(publicRouter, '/:eventId', 'post')({ ...request, body: { answers: { overallFeedback: 'Captain answer' } } }, incomplete);
   assert.equal(incomplete.code, 400);
@@ -120,6 +142,10 @@ test('a chef can open and submit an unfilled Kitchen Report 14 days after the ev
   await handler(publicRouter, '/:eventId', 'post')({ ...request, body: { answers: Object.fromEntries(fields.map((field) => [field, 'N/A'])) } }, submitted);
   assert.equal(submitted.code, 200);
   assert.equal(report.status, 'submitted');
+  assert.equal(report.reporterName, 'Maye Lamonica');
+  const email = renderEventReportEmail(report);
+  assert.match(email, /Maye Lamonica/);
+  assert.doesNotMatch(email, /Executive Chef/);
   assert.equal(report.answers.overallEvaluation, 'N/A');
   assert.equal(report.answers.overallFeedback, undefined);
   const duplicate = response();

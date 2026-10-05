@@ -79,9 +79,9 @@ router.get('/:eventId', limiter, async (req, res) => {
     if (!access) return undefined;
     const report = await EventReport.findOne({ eventId: req.params.eventId, slackUserId: clean(access.subjectId, 100) });
     if (!report) return res.status(404).json({ message: 'Event report was not found' });
-    await validateStaffKitchenReportAccess(access, report);
+    const kitchenIdentity = await validateStaffKitchenReportAccess(access, report);
     const event = await Event.findById(report.eventId).select(`title ${EVENT_REPORT_CONTEXT_SELECT}`).lean();
-    return res.json({ report: { ...publicReport(report), salesRep: resolveReportSalesRep(report, event), reportRequired: report.status !== 'cancelled' && requiresEventReport(event || { title: report.eventTitle }) && await reportCaptainStillAssigned(report, event) } });
+    return res.json({ report: { ...publicReport(report), ...(report.status === 'pending' ? kitchenIdentity : {}), salesRep: resolveReportSalesRep(report, event), reportRequired: report.status !== 'cancelled' && requiresEventReport(event || { title: report.eventTitle }) && await reportCaptainStillAssigned(report, event) } });
   } catch (error) {
     return sendApiError(res, error, { context: 'Public event report load failed', fallbackMessage: 'Could not load this event report' });
   }
@@ -93,7 +93,7 @@ router.post('/:eventId', limiter, async (req, res) => {
     if (!access) return undefined;
     let report = await EventReport.findOne({ eventId: req.params.eventId, slackUserId: clean(access.subjectId, 100) });
     if (!report) return res.status(404).json({ message: 'Event report was not found' });
-    await validateStaffKitchenReportAccess(access, report);
+    const kitchenIdentity = await validateStaffKitchenReportAccess(access, report);
     if (report.status === 'submitted') return res.status(409).json({ message: 'This report has already been submitted' });
     if (report.status === 'cancelled') return res.status(403).json({ message: 'This report request was cancelled. No report is required.' });
     const event = await Event.findById(report.eventId).select(`title ${EVENT_REPORT_CONTEXT_SELECT}`).lean();
@@ -110,6 +110,7 @@ router.post('/:eventId', limiter, async (req, res) => {
     // Cancellation and submission compete for the same pending state. A stale
     // form cannot revive a cancelled request or send a second submission email.
     report = await EventReport.findOneAndUpdate({ _id: report._id, status: 'pending' }, { $set: {
+      ...kitchenIdentity,
       salesRep: resolveReportSalesRep(report, event), answers, status: 'submitted', submittedAt: new Date(),
       nextReminderAt: null, emailDelivery: { status: 'pending', recipients: [], cc: [], error: '' },
     } }, { new: true, runValidators: true });

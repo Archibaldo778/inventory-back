@@ -51,7 +51,7 @@ export const eventUniformRequirements = (entry, event) => {
   return explicit.map((row) => {
     if (row.uniform) return { ...row, selfProvided: false, inherited: false };
     if (/\bcaptain\b/i.test(row.position)) return { ...row,
-      uniform: 'White shirt, suit jacket and tie — provided by Captain', source: 'Captain default', selfProvided: true, inherited: false };
+      uniform: 'White Button Down Shirt + Black Tie — pack for every Captain, even if they bring their own.', source: 'Captain default', selfProvided: false, inherited: false };
     return { ...row, uniform: shared, source: shared ? 'Event uniform' : '', selfProvided: false, inherited: Boolean(shared) };
   });
 };

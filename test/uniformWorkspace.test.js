@@ -68,11 +68,11 @@ test('uniform entered only against Captain applies to unlabelled waiters and bar
   assert.equal(rows[1].inherited, true);
 });
 
-test('captains provide their own default outfit unless a captain-specific instruction overrides it', () => {
+test('captain default requires a packed shirt and tie, while keeping explicit event instructions', () => {
   const entry = { uniform: 'Black Mandarin', shifts: [{ position: 'Captain' }, { position: 'Waiter' }] };
   const rows = eventUniformRequirements(entry);
-  assert.match(rows[0].uniform, /White shirt, suit jacket and tie/);
-  assert.equal(rows[0].selfProvided, true);
+  assert.match(rows[0].uniform, /White Button Down Shirt \+ Black Tie/);
+  assert.equal(rows[0].selfProvided, false);
   assert.equal(rows[1].uniform, 'Black Mandarin');
   const explicit = eventUniformRequirements(entry, { catereaseOperations: { staffRequest: [{ position: 'Captain', uniform: 'White Nehru' }] } });
   assert.equal(explicit[0].uniform, 'White Nehru');

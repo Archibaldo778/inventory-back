@@ -11,6 +11,7 @@ const uniformSizeSchema = new mongoose.Schema(
 const uniformItemSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true },
+    sizeField: { type: String, enum: ['', 'shirtSize', 'jacketSize', 'pantsSize', 'shoeSize'], default: undefined },
     category: { type: String, trim: true, index: true },
     description: { type: String, trim: true },
     color: { type: String, trim: true },

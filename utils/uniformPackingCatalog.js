@@ -5,7 +5,18 @@ export const packingCatalogFields = (body) => {
   const size = clean(body?.size) || 'One size';
   if (!name || name.length > 120) throw Object.assign(new Error('Enter an item name of 1–120 characters.'), { statusCode: 400 });
   if (size.length > 60 || (body?.size != null && typeof body.size !== 'string')) throw Object.assign(new Error('Enter a size of 1–60 characters.'), { statusCode: 400 });
-  return { name, sizes: [{ label: size, quantity: 0 }], quantity: 0, hidden: false };
+  const fields = { name, sizes: [{ label: size, quantity: 0 }], quantity: 0, hidden: false };
+  if (body?.sizeField !== undefined) {
+    if (!['', 'shirtSize', 'jacketSize', 'pantsSize', 'shoeSize'].includes(body.sizeField)) throw Object.assign(new Error('Choose which staff sizes to use.'), { statusCode: 400 });
+    fields.sizeField = body.sizeField;
+    if (Array.isArray(body.sizes)) {
+      if (body.sizes.length > 50) throw Object.assign(new Error('Use up to 50 sizes.'), { statusCode: 400 });
+      const labels = [...new Set(body.sizes.map((row) => clean(row?.label)))];
+      if (labels.some((label) => !label || label.length > 60)) throw Object.assign(new Error('Enter size names of 1–60 characters.'), { statusCode: 400 });
+      fields.sizes = labels.map((label) => ({ label, quantity: 0 }));
+    }
+  }
+  return fields;
 };
 
 export const findOrCreatePackingItem = async (body, Model) => {

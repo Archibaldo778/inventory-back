@@ -42,6 +42,7 @@ test('old packouts retain their totals without inventing bag contents', () => {
 });
 
 test('custom sending sizes save with bag contents and survive reloading without changing the catalog', async (t) => {
+  t.mock.method(UniformPackout, 'findOne', () => chain({ revision: 4 }));
   t.mock.method(NowstaScheduleEntry, 'findOne', () => chain({ nowstaEventId: '42' }));
   t.mock.method(UniformItem, 'find', () => chain(catalog));
   t.mock.method(UniformItem, 'updateOne', () => assert.fail('Custom packing sizes must not edit inventory'));
@@ -62,6 +63,7 @@ test('custom sending sizes save with bag contents and survive reloading without 
 });
 
 test('save writes bags and total quantities together under the existing revision without changing inventory', async (t) => {
+  t.mock.method(UniformPackout, 'findOne', () => chain({ revision: 4 }));
   t.mock.method(NowstaScheduleEntry, 'findOne', () => chain({ nowstaEventId: '42' }));
   t.mock.method(UniformItem, 'find', () => chain(catalog));
   t.mock.method(UniformItem, 'updateOne', () => assert.fail('Packing must not deduct inventory'));

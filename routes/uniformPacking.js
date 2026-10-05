@@ -12,6 +12,7 @@ import { eventUniformRequirements } from '../utils/uniformRequirements.js';
 import { fillMissingNowstaSizes } from '../utils/nowstaUniformSizes.js';
 import { validateUniformBags } from '../utils/uniformBags.js';
 import { findOrCreatePackingItem } from '../utils/uniformPackingCatalog.js';
+import { validateUniformEventItems, validateUniformEventPlan } from '../utils/uniformEventPlan.js';
 import { requireRoles } from '../middleware/auth.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import { createMemoryRateLimiter } from '../middleware/rateLimit.js';
@@ -100,7 +101,7 @@ router.get('/events/:id', async (req, res) => {
     if (!entry) return res.status(404).json({ message: 'Event is unavailable or cancelled' });
     const [packout, staff, catalog, event] = await Promise.all([
       UniformPackout.findOne({ nowstaEventId: entry.nowstaEventId }).lean(), Staff.find({}).select(staffFields).lean(),
-      UniformItem.find({ hidden: { $ne: true } }).select('name sizes color category image imageUrl location').sort({ name: 1 }).lean(),
+      UniformItem.find({ hidden: { $ne: true } }).select('name sizes sizeField color category image imageUrl location').sort({ name: 1 }).lean(),
       linkedEvent(entry),
     ]);
     const requirements = eventUniformRequirements(entry, event);
@@ -112,7 +113,7 @@ router.get('/events/:id', async (req, res) => {
         return { ...person, uniform: [...new Set(assigned.map((row) => row.uniform).filter(Boolean))].join(' / '),
           uniformSelfProvided: assigned.length > 0 && assigned.every((row) => row.selfProvided) };
       }),
-      packout: packout || blankPackout(entry.nowstaEventId), catalog });
+      packout: packout || blankPackout(entry.nowstaEventId), catalog: [...catalog, ...(packout?.eventItems || [])] });
   } catch (error) { return errorResponse(res, error); }
 });
 
@@ -120,14 +121,21 @@ router.put('/events/:id/packout', async (req, res) => {
   try {
     const entry = await getEntry(req.params.id);
     if (!entry) return res.status(404).json({ message: 'Event is unavailable or cancelled' });
-    const catalog = await UniformItem.find({ hidden: { $ne: true } }).select('name sizes hidden').lean();
+    const [globalCatalog, current] = await Promise.all([
+      UniformItem.find({}).select('name sizes hidden').lean(), UniformPackout.findOne({ nowstaEventId: entry.nowstaEventId }).lean(),
+    ]);
+    const eventItems = req.body?.eventItems === undefined ? current?.eventItems || [] : validateUniformEventItems(req.body.eventItems, globalCatalog);
+    const catalog = [...globalCatalog, ...eventItems];
     const lines = validateUniformLines(req.body?.lines, catalog);
     const notes = String(req.body?.notes || '').trim().slice(0, 3000);
     const changes = { lines, notes };
+    if (req.body?.eventItems !== undefined) changes.eventItems = eventItems;
+    const plan = req.body?.uniformPlan === undefined ? current?.uniformPlan ?? null : req.body.uniformPlan;
+    const uniformPlan = validateUniformEventPlan(plan, catalog);
+    if (req.body?.uniformPlan !== undefined) changes.uniformPlan = uniformPlan;
     if (req.body?.bags !== undefined) changes.bags = validateUniformBags(req.body.bags, lines, catalog);
     else {
       // An older client must not invalidate bags another packer has already saved.
-      const current = await UniformPackout.findOne({ nowstaEventId: entry.nowstaEventId }).select('bags').lean();
       if (current?.bags?.length) validateUniformBags(current.bags, lines, catalog);
     }
     const saved = await saveUniformPackout(entry.nowstaEventId, req.body?.expectedRevision, changes, req.auth.username || req.auth.userId);

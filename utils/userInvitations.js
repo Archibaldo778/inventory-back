@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { resolveUserInvitationSender } from './userInvitationSender.js';
 import { ACCOUNT_ROLES } from './departmentAccess.js';
 
 const clean = (value, max = 500) => String(value || '').trim().slice(0, max);
@@ -55,7 +56,8 @@ export const normalizeInviteCc = (value) => {
   return emails;
 };
 
-export const renderUserInviteEmail = ({ name, inviteUrl, role = 'captain', active = false }) => {
+export const renderUserInviteEmail = ({ name, inviteUrl, role = 'captain', active = false, sender }) => {
+  const identity = resolveUserInvitationSender(sender);
   const kitchenLead = role === 'kitchen lead';
   const barCaptain = role === 'bar captain';
   const uniformPacker = role === 'uniform packer';
@@ -106,25 +108,26 @@ export const renderUserInviteEmail = ({ name, inviteUrl, role = 'captain', activ
     : captain ? 'OCC — new event reporting system' : 'OCC — your workspace invitation';
   return {
     subject,
-    html: `<div style="font-family:Arial,sans-serif;color:#222;line-height:1.5;max-width:620px"><p>Hi ${escapeHtml(name || (kitchenLead ? 'Chef' : 'Captain'))},</p><p>${escapeHtml(introduction)}</p><p>${escapeHtml(registration)}</p><p><a href="${escapeHtml(inviteUrl)}">${active ? 'Sign in' : 'Create my account'}</a></p>${expiry ? `<p>${expiry}</p>` : ''}<ol>${steps.map((step) => `<li>${escapeHtml(step)}</li>`).join('')}</ol><p>Thank you,<br><strong>Ivan</strong><br>Oliver Cheng Catering &amp; Events</p></div>`,
+    html: `<div style="font-family:Arial,sans-serif;color:#222;line-height:1.5;max-width:620px"><p>Hi ${escapeHtml(name || (kitchenLead ? 'Chef' : 'Captain'))},</p><p>${escapeHtml(introduction)}</p><p>${escapeHtml(registration)}</p><p><a href="${escapeHtml(inviteUrl)}">${active ? 'Sign in' : 'Create my account'}</a></p>${expiry ? `<p>${expiry}</p>` : ''}<ol>${steps.map((step) => `<li>${escapeHtml(step)}</li>`).join('')}</ol><p>Thank you,<br><strong>${escapeHtml(identity.name)}</strong><br>Oliver Cheng Catering &amp; Events</p></div>`,
     text: [`Hi ${clean(name || (kitchenLead ? 'Chef' : 'Captain'), 200)},`, introduction, registration, inviteUrl, expiry,
       steps.map((step, index) => `${index + 1}. ${step}`).join('\n'),
-      'Thank you,\nIvan\nOliver Cheng Catering & Events'].filter(Boolean).join('\n\n'),
+      `Thank you,\n${identity.name}\nOliver Cheng Catering & Events`].filter(Boolean).join('\n\n'),
   };
 };
 
-export const sendUserInviteEmail = async ({ email, name, inviteUrl, role = 'captain', active = false, cc = [], fetchImpl = fetch }) => {
+export const sendUserInviteEmail = async ({ email, name, inviteUrl, role = 'captain', active = false, cc = [], sender, fetchImpl = fetch }) => {
   const apiKey = clean(process.env.RESEND_API_KEY, 1000);
   if (!apiKey) return { status: 'failed', error: 'RESEND_API_KEY is not configured' };
   const recipient = normalizeInviteEmail(email);
   const copies = normalizeInviteCc(cc).filter((address) => address !== recipient);
-  const message = renderUserInviteEmail({ name, inviteUrl, role, active });
+  const identity = resolveUserInvitationSender(sender);
+  const message = renderUserInviteEmail({ name, inviteUrl, role, active, sender });
   const response = await fetchImpl('https://api.resend.com/emails', {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      from: clean(process.env.USER_INVITE_FROM, 320) || 'Ivan at OCC <reports@reports.occdecks.com>',
-      reply_to: clean(process.env.USER_INVITE_REPLY_TO, 320) || 'ivan@ocnyc.com',
+      from: identity.from,
+      reply_to: identity.email,
       to: [recipient], ...(copies.length ? { cc: copies } : {}),
       subject: message.subject, html: message.html, text: message.text,
     }),

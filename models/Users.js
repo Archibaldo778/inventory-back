@@ -70,6 +70,10 @@ const userSchema = new mongoose.Schema(
     inviteReminderSentAt: { type: Date, default: null, select: false },
     inviteReminderError: { type: String, default: '', select: false },
     inviteExpiresAt: { type: Date, default: null },
+    inviteSender: {
+      type: new mongoose.Schema({ name: { type: String, trim: true }, email: { type: String, trim: true, lowercase: true } }, { _id: false }),
+      default: undefined,
+    },
     inviteSentAt: { type: Date, default: null },
     inviteAcceptedAt: { type: Date, default: null },
   },

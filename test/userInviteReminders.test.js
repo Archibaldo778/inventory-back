@@ -188,3 +188,17 @@ test('both invitation links can register once and activation revokes both tokens
     t.mock.restoreAll();
   }
 });
+
+test('scheduled invitation reminders preserve the original inviter without sending duplicates', async (t) => {
+  configured(t);
+  const user = pendingUser({ inviteSender: { name: 'Zia Sheikh', email: 'zia@example.com' } });
+  mockUsers(t, [user]);
+  const messages = [];
+  const fetchImpl = async (_url, options) => { messages.push(JSON.parse(options.body)); return delivered(); };
+  assert.deepEqual(await runUserInviteReminders({ now, fetchImpl }), { sent: 1, failed: 0, skipped: 0 });
+  assert.equal(messages[0].reply_to, 'zia@example.com');
+  assert.match(messages[0].from, /^"Zia Sheikh at OCC" </);
+  assert.match(messages[0].text, /Thank you,\nZia Sheikh\n/);
+  assert.deepEqual(await runUserInviteReminders({ now, fetchImpl }), { sent: 0, failed: 0, skipped: 0 });
+  assert.equal(messages.length, 1);
+});

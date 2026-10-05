@@ -4,6 +4,7 @@ import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
 import User from '../models/Users.js';
 import { sendApiError } from '../utils/apiErrors.js';
+import { resolveUserInvitationSender } from '../utils/userInvitationSender.js';
 import { userTeamProfile } from '../utils/userTeamProfile.js';
 import reportTeamRoutes from './reportTeams.js';
 import { invitationRolesFor, departmentUserFilter, canManageDepartmentUser, isDepartmentAdmin, departmentEmployeeRoles } from '../utils/departmentAccess.js';
@@ -387,7 +388,7 @@ router.post('/', async (req, res) => {
 router.get('/invite-templates', (req, res) => {
   res.json(invitationRolesFor(req.auth).map((role) => ({
     role,
-    ...renderUserInviteEmail({ name: '[Name]', inviteUrl: '[Personal registration link]', role }),
+    ...renderUserInviteEmail({ name: '[Name]', inviteUrl: '[Personal registration link]', role, sender: req.auth }),
   })));
 });
 
@@ -418,7 +419,9 @@ router.post('/invite', async (req, res) => {
       const temporaryPassword = await bcrypt.hash(`invite-${crypto.randomUUID()}-${crypto.randomUUID()}`, 10);
       user = await User.create({ username, email, nowstaName, role: inviteRole, password: temporaryPassword, isActive: false });
     }
+    const sender = resolveUserInvitationSender(req.auth);
     const invite = active ? null : createUserInviteToken();
+    user.inviteSender = { name: sender.name, email: sender.email };
     user.username = username;
     user.nowstaName = nowstaName;
     user.role = inviteRole;
@@ -435,7 +438,7 @@ router.post('/invite', async (req, res) => {
     }
     await user.save();
     const inviteUrl = active ? new URL('/login', userInviteUrl('')).href : userInviteUrl(invite.token);
-    const delivery = await sendUserInviteEmail({ email, name: username, inviteUrl, role: inviteRole, active, cc });
+    const delivery = await sendUserInviteEmail({ email, name: username, inviteUrl, role: inviteRole, active, cc, sender: req.auth });
     if (delivery.status !== 'sent') return res.status(502).json({ message: `Invitation was created but email failed: ${delivery.error}` });
     user.inviteSentAt = delivery.sentAt;
     await user.save();

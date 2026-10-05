@@ -1,4 +1,5 @@
 import User from '../models/Users.js';
+import { resolveUserInvitationSender } from './userInvitationSender.js';
 import { createUserInviteToken, INVITE_ROLES, isValidInviteEmail, userInviteUrl } from './userInvitations.js';
 import { fetchWithTimeout } from './fetchWithTimeout.js';
 
@@ -17,6 +18,7 @@ export const dueUserInviteRemindersQuery = (now) => ({
 });
 
 export const renderUserInviteReminder = ({ user, token }) => {
+  const sender = resolveUserInvitationSender(user.inviteSender);
   const deadline = new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/New_York', dateStyle: 'full', timeStyle: 'short',
   }).format(new Date(user.inviteExpiresAt));
@@ -24,12 +26,12 @@ export const renderUserInviteReminder = ({ user, token }) => {
   const name = clean(user.username || user.nowstaName) || 'there';
   const instruction = 'You have not finished setting up your OCC account. Please create your password before your invitation expires.';
   return {
-    from: clean(process.env.USER_INVITE_FROM) || 'Ivan at OCC <reports@reports.occdecks.com>',
-    reply_to: clean(process.env.USER_INVITE_REPLY_TO) || 'ivan@ocnyc.com',
+    from: sender.from,
+    reply_to: sender.email,
     to: [clean(user.email).toLowerCase()],
     subject: 'Reminder: your OCC account invitation expires soon',
-    text: `Hi ${name},\n\n${instruction}\n\nCreate my account: ${url}\n\nExpires: ${deadline} (New York time). Your original invitation link is also valid until this deadline.\n\nIf you need help, reply to this email.\n\nThank you,\nIvan\nOliver Cheng Catering & Events`,
-    html: `<div style="font-family:Arial,sans-serif;color:#222;line-height:1.5;max-width:620px"><p>Hi ${escapeHtml(name)},</p><p>${instruction}</p><p><a href="${escapeHtml(url)}">Create my account</a></p><p>Expires: <strong>${escapeHtml(deadline)} (New York time)</strong>.<br>Your original invitation link is also valid until this deadline.</p><p>If you need help, reply to this email.</p><p>Thank you,<br><strong>Ivan</strong><br>Oliver Cheng Catering &amp; Events</p></div>`,
+    text: `Hi ${name},\n\n${instruction}\n\nCreate my account: ${url}\n\nExpires: ${deadline} (New York time). Your original invitation link is also valid until this deadline.\n\nIf you need help, reply to this email.\n\nThank you,\n${sender.name}\nOliver Cheng Catering & Events`,
+    html: `<div style="font-family:Arial,sans-serif;color:#222;line-height:1.5;max-width:620px"><p>Hi ${escapeHtml(name)},</p><p>${instruction}</p><p><a href="${escapeHtml(url)}">Create my account</a></p><p>Expires: <strong>${escapeHtml(deadline)} (New York time)</strong>.<br>Your original invitation link is also valid until this deadline.</p><p>If you need help, reply to this email.</p><p>Thank you,<br><strong>${escapeHtml(sender.name)}</strong><br>Oliver Cheng Catering &amp; Events</p></div>`,
   };
 };
 
@@ -41,7 +43,7 @@ export const deliverUserInviteReminder = async ({ user, now = new Date(), fetchI
   const claimed = await User.findOneAndUpdate({
     ...dueUserInviteRemindersQuery(now), _id: user._id, inviteTokenHash: user.inviteTokenHash,
   }, { $set: { inviteReminderAttemptedAt: now, inviteReminderTokenHash: reminder.tokenHash, inviteReminderError: '' } }, { new: true })
-    .select('_id username nowstaName email inviteExpiresAt');
+    .select('_id username nowstaName email inviteExpiresAt inviteSender');
   if (!claimed) return 'skipped';
   const identity = { _id: user._id, inviteTokenHash: user.inviteTokenHash, inviteReminderTokenHash: reminder.tokenHash };
   // Registration or a replacement invitation while this job was claiming must stop delivery.

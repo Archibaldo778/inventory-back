@@ -11,6 +11,7 @@ import uniformWorkspaceRoutes, { UNIFORM_EVENT_FIELDS } from './uniformWorkspace
 import { eventUniformRequirements } from '../utils/uniformRequirements.js';
 import { fillMissingNowstaSizes } from '../utils/nowstaUniformSizes.js';
 import { validateUniformBags } from '../utils/uniformBags.js';
+import { findOrCreatePackingItem } from '../utils/uniformPackingCatalog.js';
 import { requireRoles } from '../middleware/auth.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import { createMemoryRateLimiter } from '../middleware/rateLimit.js';
@@ -43,6 +44,14 @@ const summary = (entry) => ({ id: entry.nowstaEventId, title: entry.title, date:
 const blankPackout = (id) => ({ nowstaEventId: id, revision: 0, lines: [], notes: '', rosterSizes: [], rosterImport: null });
 const staffFields = 'firstName lastName nowstaName nowstaCompanyUserId jacketSize shirtSize pantsSize shoeSize height';
 const errorResponse = (res, error) => sendApiError(res, error, { field: 'message', context: 'Uniform packing failed', fallbackMessage: 'Unable to load or save uniform packing' });
+
+// Packers can add zero-stock catalog entries here, but cannot edit inventory counts.
+router.post('/catalog-items', async (req, res) => {
+  try {
+    const { item, created } = await findOrCreatePackingItem(req.body, UniformItem);
+    return res.status(created ? 201 : 200).json(item);
+  } catch (error) { return errorResponse(res, error); }
+});
 
 export const saveUniformPackout = async (id, expectedRevision, changes, actor, Model = UniformPackout) => {
   if (!Number.isInteger(expectedRevision) || expectedRevision < 0) throw Object.assign(new Error('Reload the event before saving'), { statusCode: 400 });

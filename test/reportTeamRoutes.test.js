@@ -42,7 +42,7 @@ test('saving a team rejects aliases already belonging to another team', async (t
   assert.equal(res.code, 409);
 });
 
-test('user team changes are saved and returned without granting manager access', async (t) => {
+test('team-manager profile is returned with full financial access without rewriting its stored role', async (t) => {
   const user = { _id: memberId, username: 'Megan', email: 'megan@example.com', role: 'user', isActive: true, save: async () => {} };
   t.mock.method(User, 'findById', () => ({ select: async () => user }));
   t.mock.method(ReportTeam, 'exists', async () => ({ _id: teamId }));
@@ -53,7 +53,7 @@ test('user team changes are saved and returned without granting manager access',
   assert.equal(res.body.jobTitle, 'team manager');
   assert.equal(res.body.teamId, teamId);
   assert.equal(res.body.receivesTeamReports, true);
-  assert.equal(res.body.seeBarFinancials, false);
+  assert.equal(res.body.seeBarFinancials, true);
 });
 
 test('event routing audit identifies missing Sales and gives the exact configured team recipients', async (t) => {

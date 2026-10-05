@@ -6,6 +6,7 @@ import User from '../models/Users.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import { resolveUserInvitationSender } from '../utils/userInvitationSender.js';
 import { userTeamProfile } from '../utils/userTeamProfile.js';
+import { hasFullSalesAccess } from '../utils/salesAccess.js';
 import reportTeamRoutes from './reportTeams.js';
 import { invitationRolesFor, departmentUserFilter, canManageDepartmentUser, isDepartmentAdmin, departmentEmployeeRoles } from '../utils/departmentAccess.js';
 import {
@@ -102,10 +103,8 @@ const buildPermissionsPayload = (sourcePermissions, seeProposals, seeBarFinancia
 const serializeUser = (source, auth) => {
   if (!source) return null;
   const user = typeof source.toObject === 'function' ? source.toObject() : source;
-  const seeProposals =
-    typeof resolveSeeProposals(user) === 'boolean' ? resolveSeeProposals(user) : false;
-  const seeBarFinancials =
-    typeof resolveSeeBarFinancials(user) === 'boolean' ? resolveSeeBarFinancials(user) : false;
+  const seeProposals = hasFullSalesAccess(user) || resolveSeeProposals(user) === true;
+  const seeBarFinancials = hasFullSalesAccess(user) || resolveSeeBarFinancials(user) === true;
 
   return {
     id: user?._id || user?.id,
@@ -139,7 +138,7 @@ const serializeUser = (source, auth) => {
 const applyUserPayload = async (user, body, { allowPassword = false } = {}) => {
   const payload = body && typeof body === 'object' ? body : {};
   Object.assign(user, await userTeamProfile(payload, {
-    teamId: user.teamId, receivesTeamReports: user.receivesTeamReports,
+    _id: user._id, teamId: user.teamId, receivesTeamReports: user.receivesTeamReports,
   }));
 
   if (typeof payload.username !== 'undefined' || typeof payload.name !== 'undefined') {
@@ -289,7 +288,7 @@ const handleUpdateByBodyId = async (req, res) => {
 router.get('/options', async (req, res) => {
   try {
     const users = await User.find({
-      role: 'sales rep',
+      $or: [{ role: 'sales rep' }, { jobTitle: 'sales' }],
       isActive: { $ne: false },
     })
       .select('_id username email role')

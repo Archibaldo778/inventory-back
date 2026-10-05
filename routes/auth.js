@@ -6,6 +6,7 @@ import { getJwtSecret } from '../middleware/auth.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import { userInviteTokenQuery } from '../utils/userInvitations.js';
 import passwordResetRoutes from './passwordReset.js';
+import { hasFullSalesAccess } from '../utils/salesAccess.js';
 
 const router = Router();
 router.use(passwordResetRoutes);
@@ -90,13 +91,14 @@ function resolveSeeBarFinancials(source) {
 
 function buildUserResponse(source) {
   const user = typeof source?.toObject === 'function' ? source.toObject() : (source || {});
-  const seeProposals = resolveSeeProposals(user);
-  const seeBarFinancials = resolveSeeBarFinancials(user);
+  const seeProposals = hasFullSalesAccess(user) || resolveSeeProposals(user);
+  const seeBarFinancials = hasFullSalesAccess(user) || resolveSeeBarFinancials(user);
   return {
     id: String(user?._id || user?.id || ''),
     username: user?.username || '',
     email: user?.email || '',
     nowstaName: user?.nowstaName || '',
+    jobTitle: user?.jobTitle || '',
     role: String(user?.role || '').trim().toLowerCase(),
     seeProposals,
     seeBarFinancials,
@@ -117,6 +119,7 @@ function buildTokenPayload(source) {
     username: user.username,
     email: user.email,
     nowstaName: user.nowstaName,
+    jobTitle: user.jobTitle,
     seeProposals: user.seeProposals,
     seeBarFinancials: user.seeBarFinancials,
     permissions: user.permissions,
@@ -284,7 +287,7 @@ router.post('/refresh', async (req, res) => {
 
   try {
     const user = await User.findById(data?.sub)
-      .select('_id username email nowstaName role seeProposals seeBarFinancials permissions isActive +tokenVersion');
+      .select('_id username email nowstaName jobTitle role seeProposals seeBarFinancials permissions isActive +tokenVersion');
     if (!user) return res.status(401).json({ message: 'User not found' });
     if (user.isActive === false) return res.status(403).json({ message: 'User account is inactive' });
     if (Number(data?.tokenVersion || 0) !== Number(user.tokenVersion || 0)) {

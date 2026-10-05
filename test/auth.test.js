@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import jwt from 'jsonwebtoken';
 import User from '../models/Users.js';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requireAdmin, requireInventoryManager, canSeeBarFinancials } from '../middleware/auth.js';
 
 const userId = '507f1f77bcf86cd799439011';
 
@@ -93,4 +93,33 @@ test('requireAuth rejects refresh tokens and uses current database permissions',
     if (previousSecret === undefined) delete process.env.JWT_SECRET;
     else process.env.JWT_SECRET = previousSecret;
   }
+});
+
+test('existing sales and assistants get admin access from persisted identity without migrating accounts', async () => {
+  const previous = process.env.JWT_SECRET;
+  process.env.JWT_SECRET = 'sales-access-test-secret';
+  try {
+    const token = jwt.sign({ sub: userId, role: 'user', tokenType: 'access' }, process.env.JWT_SECRET);
+    for (const profile of [{ role: 'sales rep' }, { role: 'user', jobTitle: 'assistant' }, { role: 'manager', jobTitle: 'team manager' }, { role: 'admin', jobTitle: 'sales' }]) {
+      const stored = { _id: userId, ...profile, isActive: true, seeBarFinancials: false, seeProposals: false };
+      const before = structuredClone(stored);
+      const result = await runGuard(token, stored);
+      assert.equal(result.next, true);
+      assert.equal(result.auth.role, 'admin');
+      assert.equal(canSeeBarFinancials(result.auth), true);
+      assert.equal(result.auth.seeProposals, true);
+      for (const guard of [requireAdmin, requireInventoryManager]) {
+        let next = false;
+        guard({ auth: result.auth }, { status() { assert.fail('Sales must have access'); } }, () => { next = true; });
+        assert.equal(next, true);
+      }
+      assert.deepEqual(stored, before);
+    }
+    const staleSalesToken = jwt.sign({ sub: userId, role: 'sales rep', jobTitle: 'assistant', tokenType: 'access' }, process.env.JWT_SECRET);
+    const demoted = await runGuard(staleSalesToken, { _id: userId, role: 'user', jobTitle: '', isActive: true });
+    assert.equal(demoted.auth.role, 'user');
+    assert.equal(demoted.auth.seeBarFinancials, false);
+    const inactive = await runGuard(token, { _id: userId, role: 'sales rep', isActive: false });
+    assert.equal(inactive.status, 403);
+  } finally { if (previous === undefined) delete process.env.JWT_SECRET; else process.env.JWT_SECRET = previous; }
 });

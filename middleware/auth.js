@@ -3,6 +3,7 @@ import User from '../models/Users.js';
 import { eventStaffRequestAllowed } from '../utils/eventStaffAccess.js';
 import { uniformPackerRequestAllowed } from '../utils/uniformPacking.js';
 import { DEPARTMENT_ADMIN_ROLES, isDepartmentAdmin, departmentAdminRequestAllowed } from '../utils/departmentAccess.js';
+import { hasFullSalesAccess, effectiveAccessRole } from '../utils/salesAccess.js';
 
 export const ADMIN_ROLES = Object.freeze(['admin', 'super admin', ...DEPARTMENT_ADMIN_ROLES]);
 export const WORKSPACE_ROLES = Object.freeze([
@@ -47,6 +48,7 @@ const parseBoolean = (value) => {
 };
 
 export const resolveSeeProposals = (source) => {
+  if (hasFullSalesAccess(source)) return true;
   if (!source || typeof source !== 'object') return false;
   const candidates = [
     source?.seeProposals,
@@ -67,6 +69,7 @@ export const resolveSeeProposals = (source) => {
 };
 
 export const resolveSeeBarFinancials = (source) => {
+  if (hasFullSalesAccess(source)) return true;
   if (!source || typeof source !== 'object') return false;
   const candidates = [
     source?.seeBarFinancials,
@@ -112,7 +115,7 @@ const buildAuthContext = (payload) => {
     email: String(payload?.email || '').trim().toLowerCase(),
     nowstaName: String(payload?.nowstaName || '').trim(),
     jobTitle: String(payload?.jobTitle || '').trim().toLowerCase(),
-    role: normalizeRole(payload?.role),
+    role: normalizeRole(effectiveAccessRole(payload)),
     seeProposals,
     seeBarFinancials,
     permissions: {
@@ -124,9 +127,9 @@ const buildAuthContext = (payload) => {
   };
 };
 
-export const isAdminAuth = (auth) => ADMIN_ROLE_SET.has(normalizeRole(auth?.role));
+export const isAdminAuth = (auth) => ADMIN_ROLE_SET.has(normalizeRole(effectiveAccessRole(auth)));
 export const canAccessWorkspace = (auth) => WORKSPACE_ROLE_SET.has(normalizeRole(auth?.role));
-export const canManageInventory = (auth) => INVENTORY_MANAGER_ROLES.includes(normalizeRole(auth?.role));
+export const canManageInventory = (auth) => INVENTORY_MANAGER_ROLES.includes(normalizeRole(effectiveAccessRole(auth)));
 
 export const canAccessProposals = (auth) => isAdminAuth(auth) || resolveSeeProposals(auth);
 export const canSeeBarFinancials = (auth) => (

@@ -28,11 +28,13 @@ test('report-only captains can view assigned events but cannot operate Bar Retur
   assert.equal(canViewEvent(assignedEvent, { userId: 'captain-two', role: 'captain' }), false);
 });
 
-test('bar managers retain access while workspace viewers cannot modify bar events', () => {
+test('Sales and bar managers can modify bar events while ordinary workspace viewers cannot', () => {
   assert.equal(canViewEvent(assignedEvent, { role: 'bar admin' }), true);
   assert.equal(canOperateEvent(assignedEvent, { role: 'bar admin' }), true);
   assert.equal(canViewEvent(assignedEvent, { role: 'admin' }), true);
   assert.equal(canOperateEvent(assignedEvent, { role: 'admin' }), true);
   assert.equal(canViewEvent(assignedEvent, { role: 'sales rep' }), true);
-  assert.equal(canOperateEvent(assignedEvent, { role: 'sales rep' }), false);
+  assert.equal(canOperateEvent(assignedEvent, { role: 'sales rep' }), true);
+  assert.equal(canOperateEvent(assignedEvent, { role: 'manager' }), false);
+  assert.equal(canOperateEvent(assignedEvent, { role: 'user' }), false);
 });

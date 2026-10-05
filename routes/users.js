@@ -98,7 +98,7 @@ const buildPermissionsPayload = (sourcePermissions, seeProposals, seeBarFinancia
   };
 };
 
-const serializeUser = (source) => {
+const serializeUser = (source, auth) => {
   if (!source) return null;
   const user = typeof source.toObject === 'function' ? source.toObject() : source;
   const seeProposals =
@@ -113,7 +113,7 @@ const serializeUser = (source) => {
     name: user?.username || '',
     email: user?.email || '',
     nowstaName: user?.nowstaName || '',
-    role: normalizeRole(user?.role || 'user'),
+    role: isSuperAdminRole(user.role) && !isSuperAdminAuth(auth) ? 'admin' : normalizeRole(user.role),
     jobTitle: user?.jobTitle || '',
     teamId: user?.teamId ? String(user.teamId) : '',
     receivesTeamReports: user?.receivesTeamReports === true,
@@ -227,7 +227,7 @@ const updateAndReturn = async (id, body, auth, { allowPassword = false } = {}) =
     }
   }
   if (isSuperAdminRole(user.role) && !isSuperAdminAuth(auth)) {
-    return { status: 403, payload: { message: 'Only a super admin can modify this account' } };
+    return { status: 403, payload: { message: 'You do not have permission to manage this account' } };
   }
   if (isSuperAdminRole(body?.role) && !isSuperAdminAuth(auth)) {
     return { status: 403, payload: { message: 'Only a super admin can grant this role' } };
@@ -253,7 +253,7 @@ const updateAndReturn = async (id, body, auth, { allowPassword = false } = {}) =
   await user.save();
 
   const saved = await User.findById(user._id).select('-password');
-  return { status: 200, payload: serializeUser(saved) };
+  return { status: 200, payload: serializeUser(saved, auth) };
 };
 
 const handleUpdateByPathId = async (req, res) => {
@@ -315,7 +315,7 @@ router.get('/options', async (req, res) => {
 router.get('/', async (req, res) => {
   try {
     const users = await User.find(departmentUserFilter(req.auth)).select('-password');
-    res.json(users.map((user) => serializeUser(user)));
+    res.json(users.map((user) => serializeUser(user, req.auth)));
   } catch (e) {
     return sendApiError(res, e, {
       field: 'message',
@@ -377,7 +377,7 @@ router.post('/', async (req, res) => {
       isActive: typeof isActive === 'boolean' ? isActive : true,
     });
 
-    res.status(201).json(serializeUser(user));
+    res.status(201).json(serializeUser(user, req.auth));
   } catch (e) {
     return sendApiError(res, e, {
       field: 'message',
@@ -442,7 +442,7 @@ router.post('/invite', async (req, res) => {
     if (delivery.status !== 'sent') return res.status(502).json({ message: `Invitation was created but email failed: ${delivery.error}` });
     user.inviteSentAt = delivery.sentAt;
     await user.save();
-    return res.status(201).json({ user: serializeUser(user), delivery });
+    return res.status(201).json({ user: serializeUser(user, req.auth), delivery });
   } catch (e) {
     return sendApiError(res, e, { field: 'message', context: 'Invite user failed', fallbackMessage: 'Could not invite this user' });
   }
@@ -482,7 +482,7 @@ router.put('/:id/password', async (req, res) => {
     if (!target) return res.status(404).json({ message: 'Пользователь не найден' });
     if (String(req.auth?.userId || '') !== String(target._id) && !canManageDepartmentUser(req.auth, target)) return res.status(403).json({ message: 'You can manage only employees in your department' });
     if (isSuperAdminRole(target.role) && !isSuperAdminAuth(req.auth)) {
-      return res.status(403).json({ message: 'Only a super admin can reset this password' });
+      return res.status(403).json({ message: 'You do not have permission to manage this account' });
     }
     const hash = await bcrypt.hash(String(password), 10);
     await User.findByIdAndUpdate(req.params.id, {
@@ -510,7 +510,7 @@ router.delete('/:id', async (req, res) => {
     if (!canManageDepartmentUser(req.auth, target)) return res.status(403).json({ message: 'You can manage only employees in your department' });
     if (isSuperAdminRole(target.role)) {
       if (!isSuperAdminAuth(req.auth)) {
-        return res.status(403).json({ message: 'Only a super admin can delete this account' });
+        return res.status(403).json({ message: 'You do not have permission to manage this account' });
       }
       const superAdminCount = await User.countDocuments({
         role: { $in: ['super admin', 'super Admin'] },

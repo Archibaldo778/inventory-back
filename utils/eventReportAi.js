@@ -34,7 +34,7 @@ const reportSections = (report) => report?.reportType === 'kitchen'
   ? KITCHEN_REPORT_EMAIL_SECTIONS
   : EVENT_REPORT_EMAIL_SECTIONS;
 
-export const eventReportAnalysisInput = ({ event, reports = [] } = {}) => ({
+export const eventReportAnalysisInput = ({ event, reports = [], answerLimit = 2000 } = {}) => ({
   event: {
     title: clean(event?.title, 300),
     date: clean(event?.date, 40),
@@ -49,7 +49,7 @@ export const eventReportAnalysisInput = ({ event, reports = [] } = {}) => ({
       const raw = key === 'followUpRequired'
         ? (report?.answers?.[key] ? 'Yes' : 'No')
         : report?.answers?.[key];
-      return { section, question: label, answer: clean(raw, 2000) };
+      return { section, question: label, answer: clean(raw, answerLimit) };
     })).filter((entry) => entry.answer && entry.answer !== '—'),
   })),
 });

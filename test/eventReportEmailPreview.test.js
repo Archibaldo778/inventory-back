@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { generateEventReportEmailBrief, validateEmailBrief } from '../utils/eventReportEmailBrief.js';
 import { buildReportPreviewPayload, runEventReportEmailPreview } from '../utils/eventReportEmailPreviews.js';
 import { renderEventReportEmail, renderEventReportText } from '../utils/eventReportEmail.js';
+import { readinessReport } from './fixtures/eventReportBriefCases.js';
 
 const report = {
   _id: 'report-1', status: 'submitted', reportType: 'captain', eventTitle: 'Prada Day 1',
@@ -39,9 +40,43 @@ test('AI failures, refusals, drafts and oversized output cannot become an email 
   ]) {
     await assert.rejects(generateEventReportEmailBrief({ report, apiKey: 'test', fetchImpl: async () => response }));
   }
-  for (const value of [{}, { ...brief, summary: 'a'.repeat(501) }, { ...brief, summary: 'word '.repeat(81) }, { ...brief, attention: ['a', 'b', 'c'] }]) {
+  for (const value of [{}, { ...brief, summary: 'a'.repeat(1001) }, { ...brief, summary: 'word '.repeat(151) }, { ...brief, attention: ['a'.repeat(501)] }, { ...brief, attention: [''] }]) {
     assert.throws(() => validateEmailBrief(value));
   }
+});
+
+test('briefs can preserve more than two issues within a shared 150-word limit', () => {
+  const expanded = { summary: Array(90).fill('outcome').join(' '), attention: ['Setup required clearing.', 'Equipment needed replacement.', 'Food was excessive.'] };
+  assert.deepEqual(validateEmailBrief(expanded), expanded);
+  assert.deepEqual(validateEmailBrief({ summary: Array(147).fill('ok').join(' '), attention: ['one', 'two', 'three'] }).attention, ['one', 'two', 'three']);
+  assert.throws(() => validateEmailBrief({ summary: Array(148).fill('ok').join(' '), attention: ['one', 'two', 'three'] }));
+});
+
+test('kitchen brief receives all reported context and retains long staff comments through the email renderer', async () => {
+  const source = structuredClone(readinessReport);
+  source.answers.staffComments = `${'The staff worked together. '.repeat(85)}${source.answers.staffComments}`;
+  const before = structuredClone(source);
+  const expected = {
+    summary: 'Service was on time and guests were happy, although turnout was lower than planned. The chef reported no re-runs or overtime and 30 minutes of added prep.',
+    attention: [
+      'The work area was cluttered with bicycles and boxes on arrival; Alex organized clearing it and Jordan helped with heavy lifting.',
+      'Food, especially PIB, was excessive. The chef estimated day-one supplies could cover both days and noted the onsite refrigerator.',
+    ],
+  };
+  const output = await generateEventReportEmailBrief({ report: source, apiKey: 'test', fetchImpl: async (_url, options) => {
+    const request = JSON.parse(options.body);
+    const input = JSON.parse(request.input).reports[0];
+    for (const value of [source.answers.staffComments, source.answers.foodEnough, source.answers.overallEvaluation]) {
+      assert.ok(input.answers.some((entry) => entry.answer === value));
+    }
+    assert.equal(input.reruns.status, 'none_reported');
+    return { ok: true, json: async () => ({ output_text: JSON.stringify(expected) }) };
+  } });
+  assert.deepEqual(validateEmailBrief(output), expected);
+  const email = renderEventReportText(source, { emailBrief: output });
+  for (const item of expected.attention) assert.ok(email.includes(`Needs attention: ${item}`));
+  assert.ok(email.includes(source.answers.staffComments));
+  assert.deepEqual(source, before);
 });
 
 test('preview contains the brief and full report with exactly one recipient, no manager or captain copies', () => {

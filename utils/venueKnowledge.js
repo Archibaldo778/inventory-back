@@ -42,7 +42,7 @@ export const runVenueKnowledgeSync = ({ Reports = EventReport, Events = Event, i
   if (syncPromise) return syncPromise;
   syncPromise = (async () => {
     const reports = Reports.find({ reportType: 'captain', status: 'submitted' })
-      .select('_id eventId eventDate reporterName reportType status submittedAt answers').lean().cursor();
+      .select('_id eventId eventDate reporterName reportType status submittedAt answers templateSnapshot').lean().cursor();
     for await (const report of reports) {
       if (!captainVenueNotes(report).length) continue;
       const event = await Events.findById(report.eventId).select('_id meta catereaseOperations').lean();

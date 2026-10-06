@@ -11,47 +11,11 @@ import { EVENT_REPORT_CONTEXT_SELECT, resolveReportSalesRep } from '../utils/eve
 import { validateStaffKitchenReportAccess } from '../utils/staffKitchenReport.js';
 import { requiresEventReport } from '../utils/eventReportRequirement.js';
 import { reportCaptainStillAssigned } from '../utils/captainEventDuties.js';
+import { pinReportTemplate, reportTemplate, captainTemplateAnswers } from '../utils/captainReportTemplate.js';
 
 const router = Router();
 const limiter = createMemoryRateLimiter({ windowMs: 10 * 60 * 1000, max: 60, message: 'Too many event report requests' });
 const clean = (value, max = 5000) => String(value ?? '').trim().slice(0, max);
-const REPORT_STRING_FIELDS = [
-  'staffEnough', 'staffingResponsive', 'staffingComments', 'uniformsReturned', 'uniformCheckInOut',
-  'staffAppearance', 'staffAppearanceComments', 'positiveStaff', 'staffBelowStandards',
-  'foodProvidedByOcc', 'leadChefName', 'foodMetStandards', 'foodStandardsComments',
-  'leadChefCooperative', 'leadChefComments', 'kitchenPerformanceComments',
-  'barProductProvidedByOcc', 'barServiceMetStandards', 'barServiceComments', 'barProductEnough',
-  'beverageCountsCompleted', 'sanitationCaptainName', 'rentalEquipmentEnough', 'rentalEquipmentComments',
-  'sanitationCooperative', 'sanitationComments', 'venueAccessNotes', 'venueKitchenNotes', 'finalWalkthrough',
-  'actualGuestCount', 'rerunsOrPurchases', 'rerunsDetails', 'paperworkAccurate', 'paperworkComments',
-  'partyExtended', 'partyExtendedComments', 'staffStayedLate', 'staffStayedLateComments',
-  'prepWorkTimeAdded', 'prepWorkTimeComments', 'healthSafetyIssues', 'healthSafetyComments', 'overallFeedback',
-];
-const REPORT_REQUIRED_FIELDS = [
-  'staffEnough', 'staffingResponsive', 'uniformsReturned', 'staffAppearance', 'foodProvidedByOcc',
-  'foodMetStandards', 'leadChefCooperative', 'barProductProvidedByOcc', 'barServiceMetStandards',
-  'barProductEnough', 'beverageCountsCompleted', 'rentalEquipmentEnough', 'sanitationCooperative',
-  'finalWalkthrough', 'actualGuestCount', 'rerunsOrPurchases', 'paperworkAccurate', 'partyExtended',
-  'staffStayedLate', 'prepWorkTimeAdded', 'healthSafetyIssues', 'overallFeedback',
-];
-const KITCHEN_REPORT_STRING_FIELDS = [
-  'staffLate', 'staffLateWho', 'staffProperlyDressed', 'staffDressIssues', 'staffFollowedDirection',
-  'staffDirectionIssues', 'staffSizeAppropriate', 'staffSizeComments', 'staffBroughtTools',
-  'staffToolsMissing', 'staffComments', 'rentalsReceived', 'rentalsWorking', 'kitchenEquipmentReceived',
-  'choiceEntreeService', 'choiceEntreeDetails', 'foodEnough', 'foodQuality', 'foodOnTime',
-  'fohKitchenCommunication', 'otherIssues', 'paperworkLeadTime', 'paperworkAccurate',
-  'healthSafetyIssues', 'healthSafetyFeedback', 'concernsImprovements', 'rerunsOrPurchases',
-  'rerunsDetails', 'overtime', 'overtimeDetails', 'prepWorkTimeAdded', 'prepWorkTimeDetails',
-  'photoLinks', 'overallEvaluation',
-];
-const KITCHEN_REPORT_REQUIRED_FIELDS = [
-  'staffLate', 'staffProperlyDressed', 'staffFollowedDirection', 'staffSizeAppropriate',
-  'staffBroughtTools', 'staffComments', 'rentalsReceived', 'rentalsWorking', 'kitchenEquipmentReceived',
-  'choiceEntreeService', 'foodEnough', 'foodQuality', 'foodOnTime', 'fohKitchenCommunication',
-  'otherIssues', 'paperworkLeadTime', 'paperworkAccurate', 'healthSafetyIssues',
-  'healthSafetyFeedback', 'concernsImprovements', 'rerunsOrPurchases', 'overtime',
-  'prepWorkTimeAdded', 'overallEvaluation',
-];
 const loadAccess = (req, res) => {
   if (!mongoose.Types.ObjectId.isValid(String(req.params.eventId || ''))) {
     res.status(400).json({ message: 'Invalid event' });
@@ -71,17 +35,20 @@ const publicReport = (report) => ({
   eventEndsAt: report.eventEndsAt || null,
   position: report.position, salesRep: report.salesRep, reportType: report.reportType || 'captain',
   status: report.status, submittedAt: report.submittedAt, answers: report.answers || {}, emailDelivery: report.emailDelivery,
+  templateSnapshot: reportTemplate(report),
 });
 
 router.get('/:eventId', limiter, async (req, res) => {
   try {
     const access = loadAccess(req, res);
     if (!access) return undefined;
-    const report = await EventReport.findOne({ eventId: req.params.eventId, slackUserId: clean(access.subjectId, 100) });
+    let report = await EventReport.findOne({ eventId: req.params.eventId, slackUserId: clean(access.subjectId, 100) });
     if (!report) return res.status(404).json({ message: 'Event report was not found' });
     const kitchenIdentity = await validateStaffKitchenReportAccess(access, report);
     const event = await Event.findById(report.eventId).select(`title ${EVENT_REPORT_CONTEXT_SELECT}`).lean();
-    return res.json({ report: { ...publicReport(report), ...(report.status === 'pending' ? kitchenIdentity : {}), salesRep: resolveReportSalesRep(report, event), reportRequired: report.status !== 'cancelled' && requiresEventReport(event || { title: report.eventTitle }) && await reportCaptainStillAssigned(report, event) } });
+    const reportRequired = report.status !== 'cancelled' && requiresEventReport(event || { title: report.eventTitle }) && await reportCaptainStillAssigned(report, event);
+    if (reportRequired) report = await pinReportTemplate(report);
+    return res.json({ report: { ...publicReport(report), ...(report.status === 'pending' ? kitchenIdentity : {}), salesRep: resolveReportSalesRep(report, event), reportRequired: reportRequired && report.status !== 'cancelled' } });
   } catch (error) {
     return sendApiError(res, error, { context: 'Public event report load failed', fallbackMessage: 'Could not load this event report' });
   }
@@ -99,19 +66,17 @@ router.post('/:eventId', limiter, async (req, res) => {
     const event = await Event.findById(report.eventId).select(`title ${EVENT_REPORT_CONTEXT_SELECT}`).lean();
     if (!requiresEventReport(event || { title: report.eventTitle })) return res.status(403).json({ message: 'No report is required for this event' });
     if (!await reportCaptainStillAssigned(report, event)) return res.status(403).json({ message: 'No Captain report is required for your booking on this event' });
-    const kitchenReport = report.reportType === 'kitchen';
-    const stringFields = kitchenReport ? KITCHEN_REPORT_STRING_FIELDS : REPORT_STRING_FIELDS;
-    const requiredFields = kitchenReport ? KITCHEN_REPORT_REQUIRED_FIELDS : REPORT_REQUIRED_FIELDS;
-    const answers = Object.fromEntries(stringFields.map((key) => [key, clean(req.body?.answers?.[key])]));
-    if (!kitchenReport) answers.followUpRequired = req.body?.answers?.followUpRequired === true;
-    const missingRequired = requiredFields.filter((key) => !answers[key]);
-    if (missingRequired.length) return res.status(400).json({ message: `Complete all required questions (${missingRequired.length} remaining)` });
+    const templateSnapshot = reportTemplate(report);
+    if ((req.body?.templateRevision ?? 0) !== templateSnapshot.revision) return res.status(409).json({ message: 'The report form has changed. Reload it before submitting.' });
+    const answers = captainTemplateAnswers(templateSnapshot, req.body?.answers);
     const settings = await EventReportSettings.findOne({ key: 'default' }).lean();
     // Cancellation and submission compete for the same pending state. A stale
     // form cannot revive a cancelled request or send a second submission email.
-    report = await EventReport.findOneAndUpdate({ _id: report._id, status: 'pending' }, { $set: {
+    const templateGuard = report.templateSnapshot ? { 'templateSnapshot.revision': templateSnapshot.revision } : { templateSnapshot: null };
+    report = await EventReport.findOneAndUpdate({ _id: report._id, status: 'pending', ...templateGuard }, { $set: {
       ...kitchenIdentity,
       salesRep: resolveReportSalesRep(report, event), answers, status: 'submitted', submittedAt: new Date(),
+      templateSnapshot,
       nextReminderAt: null, emailDelivery: { status: 'pending', recipients: [], cc: [], error: '' },
     } }, { new: true, runValidators: true });
     if (!report) return res.status(409).json({ message: 'This report was submitted or cancelled. Reload the page.' });

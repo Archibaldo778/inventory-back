@@ -42,6 +42,9 @@ export const captainVenueNotes = (report) => [
   ['venueAccessNotes', 'access', 'Venue access'],
   ['venueKitchenNotes', 'boh', 'Kitchen / BOH'],
   ['rentalEquipmentComments', 'equipment', 'Rental equipment'],
+  ...(report?.templateSnapshot?.sections || []).filter((section) => section.key === 'venue')
+    .flatMap((section) => section.fields.filter((field) => field.key.startsWith('custom_') && ['text', 'textarea'].includes(field.type))
+      .map((field) => [field.key, 'other', field.label])),
 ].flatMap(([field, category, label]) => {
   const text = typeof report?.answers?.[field] === 'string' ? report.answers[field].trim() : '';
   if (!text || /^(?:n\/?a|none|—|-|no comments?)\.?$/i.test(text)) return [];

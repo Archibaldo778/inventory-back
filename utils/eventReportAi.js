@@ -1,5 +1,5 @@
 import { fetchWithTimeout } from './fetchWithTimeout.js';
-import { EVENT_REPORT_EMAIL_SECTIONS, KITCHEN_REPORT_EMAIL_SECTIONS } from './eventReportEmail.js';
+import { eventReportEmailSections, eventReportAnswer } from './eventReportEmail.js';
 import { EVENT_REPORT_RERUN_GUIDANCE, eventReportRerunContext } from './eventReportReruns.js';
 
 const clean = (value, max = 4000) => String(value ?? '').trim().slice(0, max);
@@ -30,10 +30,6 @@ const ANALYSIS_SCHEMA = {
   additionalProperties: false,
 };
 
-const reportSections = (report) => report?.reportType === 'kitchen'
-  ? KITCHEN_REPORT_EMAIL_SECTIONS
-  : EVENT_REPORT_EMAIL_SECTIONS;
-
 export const eventReportAnalysisInput = ({ event, reports = [], answerLimit = 2000 } = {}) => ({
   event: {
     title: clean(event?.title, 300),
@@ -45,10 +41,8 @@ export const eventReportAnalysisInput = ({ event, reports = [], answerLimit = 20
     reporter: clean(report?.reporterName, 200),
     position: clean(report?.position, 200),
     reruns: eventReportRerunContext(report),
-    answers: reportSections(report).flatMap(([section, fields]) => fields.map(([key, label]) => {
-      const raw = key === 'followUpRequired'
-        ? (report?.answers?.[key] ? 'Yes' : 'No')
-        : report?.answers?.[key];
+    answers: eventReportEmailSections(report).flatMap(([section, fields]) => fields.map(([key, label]) => {
+      const raw = eventReportAnswer(report, key);
       return { section, question: label, answer: clean(raw, answerLimit) };
     })).filter((entry) => entry.answer && entry.answer !== '—'),
   })),

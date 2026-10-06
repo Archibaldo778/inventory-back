@@ -22,6 +22,7 @@ const eventReportSchema = new mongoose.Schema({
   reminderCount: { type: Number, default: 0, min: 0 },
   submittedAt: { type: Date, default: null },
   answers: { type: mongoose.Schema.Types.Mixed, default: {} },
+  templateSnapshot: { type: mongoose.Schema.Types.Mixed, default: null },
   emailDelivery: {
     status: { type: String, enum: ['not_sent', 'pending', 'sent', 'failed'], default: 'not_sent' },
     providerId: { type: String, default: '', trim: true },

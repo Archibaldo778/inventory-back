@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import Event from '../models/Event.js';
 import EventReport from '../models/EventReport.js';
+import EventReportTemplate from '../models/EventReportTemplate.js';
+import { defaultReportTemplate, templateFields } from '../utils/captainReportTemplate.js';
 import EventReportSettings from '../models/EventReportSettings.js';
 import ReportTeam from '../models/ReportTeam.js';
 import User from '../models/Users.js';
@@ -109,6 +111,7 @@ test('Kitchen Report cannot be opened for an unassigned, archived or unlinked ev
 });
 
 test('a chef can open and submit an unfilled Kitchen Report 14 days after the event, but cannot submit twice', async (t) => {
+  t.mock.method(EventReportTemplate, 'findById', () => ({ lean: async () => null }));
   t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-10-15T16:00:00Z') });
   secret(t);
   const leadChef = { ...chef, role: 'kitchen lead', jobTitle: '', nowstaName: 'Executive Chef' };
@@ -137,9 +140,9 @@ test('a chef can open and submit an unfilled Kitchen Report 14 days after the ev
   const incomplete = response();
   await handler(publicRouter, '/:eventId', 'post')({ ...request, body: { answers: { overallFeedback: 'Captain answer' } } }, incomplete);
   assert.equal(incomplete.code, 400);
-  const fields = ['staffLate', 'staffProperlyDressed', 'staffFollowedDirection', 'staffSizeAppropriate', 'staffBroughtTools', 'staffComments', 'rentalsReceived', 'rentalsWorking', 'kitchenEquipmentReceived', 'choiceEntreeService', 'foodEnough', 'foodQuality', 'foodOnTime', 'fohKitchenCommunication', 'otherIssues', 'paperworkLeadTime', 'paperworkAccurate', 'healthSafetyIssues', 'healthSafetyFeedback', 'concernsImprovements', 'rerunsOrPurchases', 'overtime', 'prepWorkTimeAdded', 'overallEvaluation'];
+  const fields = templateFields(defaultReportTemplate('kitchen'));
   const submitted = response();
-  await handler(publicRouter, '/:eventId', 'post')({ ...request, body: { answers: Object.fromEntries(fields.map((field) => [field, 'N/A'])) } }, submitted);
+  await handler(publicRouter, '/:eventId', 'post')({ ...request, body: { answers: Object.fromEntries(fields.map((field) => [field.key, field.type === 'choice' ? field.options[0] : 'N/A'])) } }, submitted);
   assert.equal(submitted.code, 200);
   assert.equal(report.status, 'submitted');
   assert.equal(report.reporterName, 'Maye Lamonica');

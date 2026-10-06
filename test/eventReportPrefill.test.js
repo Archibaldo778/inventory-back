@@ -9,6 +9,7 @@ import EventReport from '../models/EventReport.js';
 import EventReportSettings from '../models/EventReportSettings.js';
 import ReportTeam from '../models/ReportTeam.js';
 import User from '../models/Users.js';
+import { defaultCaptainTemplate, templateFields } from '../utils/captainReportTemplate.js';
 import { issueEventGuestAccess, verifyEventGuestAccess } from '../utils/eventGuestAccess.js';
 
 const eventId = '507f1f77bcf86cd799439011';
@@ -69,7 +70,7 @@ test('captains and bar captains can reopen an unfilled report for a closed event
   env(t, 'JWT_SECRET', 'report-prefill-test-secret');
   t.mock.method(Event, 'findById', () => ({ select: () => ({ lean: async () => ({ _id: eventId, title: 'Past dinner', date: '2026-10-01' }) }) }));
   t.mock.method(BarEvent, 'findById', async () => ({ linkedEventId: eventId, eventDate: '2026-10-01', status: 'closed', assignedUserIds: ['captain1'], audit: [], save: async () => {} }));
-  const report = { _id: reportId, eventId, slackUserId: 'account:captain1', eventDate: '2026-10-01', status: 'pending', answers: { overallFeedback: 'Existing draft' } };
+  const report = { _id: reportId, eventId, slackUserId: 'account:captain1', eventDate: '2026-10-01', status: 'pending', templateSnapshot: defaultCaptainTemplate(), answers: { overallFeedback: 'Existing draft' } };
   t.mock.method(EventReport, 'findOneAndUpdate', async (filter, update) => {
     assert.deepEqual(filter, { eventId, slackUserId: 'account:captain1' });
     assert.deepEqual(Object.keys(update), ['$setOnInsert']);
@@ -92,7 +93,7 @@ test('captains and bar captains can reopen an unfilled report for a closed event
 test('opening an existing empty report prefills the account rep without writing or changing answers', async (t) => {
   const req = accessRequest(t);
   mockEvent(t);
-  const report = { _id: reportId, eventId, status: 'pending', salesRep: '', answers: { overallFeedback: 'Existing draft' } };
+  const report = { _id: reportId, eventId, status: 'pending', salesRep: '', templateSnapshot: defaultCaptainTemplate(), answers: { overallFeedback: 'Existing draft' } };
   t.mock.method(EventReport, 'findOne', async (filter) => {
     assert.deepEqual(filter, { eventId, slackUserId: 'account:captain1' });
     return report;
@@ -116,6 +117,7 @@ test('submitting a previously empty report saves its rep and sends to that repâ€
     'finalWalkthrough', 'actualGuestCount', 'rerunsOrPurchases', 'paperworkAccurate', 'partyExtended',
     'staffStayedLate', 'prepWorkTimeAdded', 'healthSafetyIssues', 'overallFeedback',
   ].map((field) => [field, 'N/A']));
+  for (const field of templateFields(defaultCaptainTemplate())) if (field.type === 'choice') answers[field.key] = field.options[0];
   const req = accessRequest(t, { answers });
   mockEvent(t);
   t.mock.method(EventReportSettings, 'findOne', () => ({ lean: async () => ({ emailEnabled: false }) }));
@@ -127,7 +129,7 @@ test('submitting a previously empty report saves its rep and sends to that repâ€
   t.mock.method(EventReport, 'findOne', async () => report);
   let sent;
   t.mock.method(EventReport, 'findOneAndUpdate', async (filter, update) => {
-    assert.deepEqual(filter, { _id: reportId, status: 'pending' });
+    assert.deepEqual(filter, { _id: reportId, status: 'pending', templateSnapshot: null });
     Object.assign(report, update.$set); return report;
   });
   t.mock.method(globalThis, 'fetch', async (_url, options) => {
@@ -180,6 +182,7 @@ test('a form opened before cancellation cannot revive the request or send its re
     'beverageCountsCompleted', 'rentalEquipmentEnough', 'sanitationCooperative', 'finalWalkthrough', 'actualGuestCount',
     'rerunsOrPurchases', 'paperworkAccurate', 'partyExtended', 'staffStayedLate', 'prepWorkTimeAdded', 'healthSafetyIssues', 'overallFeedback'];
   const req = accessRequest(t, { answers: Object.fromEntries(fields.map((field) => [field, 'N/A'])) }); mockEvent(t);
+  for (const field of templateFields(defaultCaptainTemplate())) if (field.type === 'choice') req.body.answers[field.key] = field.options[0];
   t.mock.method(EventReport, 'findOne', async () => ({ _id: reportId, eventId, status: 'pending', reportType: 'captain' }));
   t.mock.method(EventReportSettings, 'findOne', () => ({ lean: async () => null }));
   t.mock.method(EventReport, 'findOneAndUpdate', async (filter) => { assert.equal(filter.status, 'pending'); return null; });

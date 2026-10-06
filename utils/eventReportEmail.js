@@ -80,7 +80,12 @@ export const KITCHEN_REPORT_EMAIL_SECTIONS = [
   ]],
 ];
 
-const emailSections = (report) => report?.reportType === 'kitchen' ? KITCHEN_REPORT_EMAIL_SECTIONS : EVENT_REPORT_EMAIL_SECTIONS;
+export const eventReportEmailSections = (report) => report?.templateSnapshot?.sections?.map((section) => [section.title, section.fields.map((field) => [field.key, field.label])])
+  || (report?.reportType === 'kitchen' ? KITCHEN_REPORT_EMAIL_SECTIONS : EVENT_REPORT_EMAIL_SECTIONS);
+export const eventReportAnswer = (report, key) => {
+  const checkbox = key === 'followUpRequired' || report?.templateSnapshot?.sections?.some((section) => section.fields.some((field) => field.key === key && field.type === 'checkbox'));
+  return checkbox ? (report?.answers?.[key] ? 'Yes' : 'No') : report?.answers?.[key];
+};
 const emailReportTitle = (report) => report?.reportType === 'kitchen' ? 'Kitchen Report' : "Captain's Report";
 
 export const CAPTAIN_REPORT_RECIPIENTS = [
@@ -124,10 +129,9 @@ export const captainReportRecipients = (salesRep, configuredRecipients = [], sla
 };
 
 export const renderEventReportEmail = (report = {}, { emailBrief = null } = {}) => {
-  const answers = report.answers || {};
-  const sections = emailSections(report).map(([title, fields]) => {
+  const sections = eventReportEmailSections(report).map(([title, fields]) => {
     const rows = fields.map(([key, label], index) => {
-      const raw = key === 'followUpRequired' ? (answers[key] ? 'Yes' : 'No') : answers[key];
+      const raw = eventReportAnswer(report, key);
       const value = clean(raw) || '—';
       const color = value === 'Yes' ? '#176a43' : value === 'No' ? '#a33a35' : '#20272c';
       const background = index % 2 === 0 ? '#ffffff' : '#f7f6f2';
@@ -179,10 +183,9 @@ export const renderEventReportEmail = (report = {}, { emailBrief = null } = {}) 
 };
 
 export const renderEventReportText = (report = {}, { emailBrief = null } = {}) => {
-  const answers = report.answers || {};
-  const sections = emailSections(report).map(([title, fields]) => {
+  const sections = eventReportEmailSections(report).map(([title, fields]) => {
     const rows = fields.map(([key, label]) => {
-      const raw = key === 'followUpRequired' ? (answers[key] ? 'Yes' : 'No') : answers[key];
+      const raw = eventReportAnswer(report, key);
       return `${label}: ${clean(raw) || '—'}`;
     }).join('\n');
     return `${title}\n${rows}`;

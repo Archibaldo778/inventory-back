@@ -480,6 +480,7 @@ import { runSlackEventChannelSync, slackEventChannelsEnabled } from './utils/sla
 import { CAPTAIN_REPORT_EMAIL_REMINDERS_ENABLED, CAPTAIN_REPORT_REMINDERS_START_DATE, runCaptainReportEmailReminders } from './utils/captainReportReminders.js';
 import { runVenueReportNotifications } from './utils/venueReportNotifications.js';
 import venueRoutes from './routes/venues.js';
+import eventReportTemplateRoutes from './routes/eventReportTemplates.js';
 import { runVenueKnowledgeSync } from './utils/venueKnowledge.js';
 import { runUserInviteReminders } from './utils/userInviteReminders.js';
 import { runEventReportEmailPreview } from './utils/eventReportEmailPreviews.js';
@@ -520,6 +521,7 @@ app.use('/api/public/event-workspace', publicEventWorkspaceRoutes);
 app.use('/api/public/event-reports', publicEventReportsRoutes);
 app.use('/api/event-reports', requireAuth, requireAdmin, eventReportsRoutes);
 app.use('/api/venues', requireAuth, requireAdmin, venueRoutes);
+app.use('/api/event-report-templates', requireAuth, requireAdmin, eventReportTemplateRoutes);
 app.use('/api/automation-alerts', requireAuth, requireAdmin, automationAlertRoutes);
 app.use('/api/bar', requireAuth, barRoutes);
 app.use('/api/integrations/dropbox', dropboxIntegrationRoutes);

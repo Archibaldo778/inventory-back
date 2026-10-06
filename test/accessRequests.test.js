@@ -6,6 +6,8 @@ import User from '../models/Users.js';
 import router, { publicAccessRequestRoutes, accessRequestLimit } from '../routes/accessRequests.js';
 import { registrationDetails, requestRegistration, approveRegistration, activateRegistration, sendActivationEmail, reviewableRequests } from '../utils/accessRequests.js';
 import { departmentAdminRequestAllowed } from '../utils/departmentAccess.js';
+import { readRegistrationStatus } from '../utils/registrationStatus.js';
+import { requireAuth } from '../middleware/auth.js';
 
 const now = new Date('2026-10-06T15:00:00Z');
 const person = { name: 'Test Captain', email: 'captain@example.com', password: 'test-password-123' };
@@ -28,6 +30,10 @@ const memory = () => {
   const requests = new Map(); const users = new Map(); const mails = []; const notifications = [];
   const update = (row, change) => { Object.assign(row, change.$set || {}); for (const key of Object.keys(change.$unset || {})) delete row[key]; };
   const Requests = {
+    findOne(query) {
+      const result = structuredClone([...requests.values()].find((item) => matches(item, query)) || null);
+      return { select() { return this; }, lean: async () => result, then: (resolve, reject) => Promise.resolve(result).then(resolve, reject) };
+    },
     async updateOne(query, change, options = {}) {
       let row = [...requests.values()].find((item) => matches(item, query));
       const inserted = !row && options.upsert;
@@ -177,4 +183,52 @@ test('a notification failure never discards the registration and a review link k
   await handler(router, '/', 'get')({ auth, query: { email: ' CAPTAIN@EXAMPLE.COM ' } }, res);
   assert.equal(res.code, 200);
   assert.deepEqual(query, { ...reviewableRequests(auth), _id: person.email });
+});
+
+test('a registration session survives revisits, reads only its own status and cannot authenticate to the workspace', async (t) => {
+  const store = memory();
+  const session = await requestRegistration(person, store);
+  assert.match(session.token, /^[a-f0-9]{64}$/);
+  assert.notEqual(store.requests.get(person.email).statusTokenHash, session.token);
+  assert.equal(await readRegistrationStatus('bad', store), null);
+  assert.equal(await readRegistrationStatus('a'.repeat(64), store), null);
+  assert.deepEqual(await readRegistrationStatus(session.token, store), { name: person.name, email: person.email, status: 'pending', emailSent: false });
+  assert.equal(await readRegistrationStatus(session.token, { ...store, now: new Date(session.expiresAt) }), null);
+  const other = await requestRegistration({ ...person, name: 'Someone Else', email: 'else@example.com' }, store);
+  assert.equal((await readRegistrationStatus(other.token, store)).email, 'else@example.com');
+  const denied = response();
+  await requireAuth({ headers: { authorization: `Bearer ${session.token}` }, cookies: {} }, denied, () => assert.fail('status token cannot authenticate'));
+  assert.equal(denied.code, 401);
+  await approveRegistration({ email: person.email, role: 'captain', auth }, store);
+  assert.equal((await readRegistrationStatus(session.token, store)).status, 'approved');
+  assert.equal(store.users.size, 0);
+  await activateRegistration(store.mails[0].token, person.password, store);
+  assert.equal((await readRegistrationStatus(session.token, store)).status, 'completed');
+  t.mock.method(AccessRequest, 'findOne', store.Requests.findOne);
+  const checked = response();
+  // Exercise route serialization with a valid unexpired credential.
+  store.requests.get(person.email).statusExpiresAt = new Date(Date.now() + 60_000);
+  await handler(publicAccessRequestRoutes, '/registration-status', 'post')({ body: { token: session.token, email: 'else@example.com' } }, checked);
+  assert.equal(checked.code, 200); assert.equal(checked.body.email, person.email);
+  assert.equal(checked.headers['Cache-Control'], 'no-store');
+  assert.doesNotMatch(JSON.stringify(checked.body), /Hash|password|token|reviewedBy|notification/);
+  const invalid = response();
+  await handler(publicAccessRequestRoutes, '/registration-status', 'post')({ body: { email: person.email } }, invalid);
+  assert.equal(invalid.code, 410);
+});
+
+test('resuming requires the original password, rotates only the status credential, and never sends another review email', async (t) => {
+  const store = memory();
+  const original = await requestRegistration(person, store);
+  assert.equal(await requestRegistration({ ...person, password: 'wrong-password' }, store), null);
+  assert.equal((await readRegistrationStatus(original.token, store)).status, 'pending');
+  const resumed = await requestRegistration(person, store);
+  assert.notEqual(resumed.token, original.token);
+  assert.equal(await readRegistrationStatus(original.token, store), null);
+  assert.equal(store.notifications.length, 1); assert.equal(store.users.size, 0);
+  t.mock.method(AccessRequest, 'updateOne', store.Requests.updateOne);
+  await handler(router, '/:email/reject', 'post')({ params: { email: person.email }, auth }, response());
+  assert.equal((await readRegistrationStatus(resumed.token, store)).status, 'rejected');
+  assert.equal(await requestRegistration(person, store), null);
+  assert.equal(store.notifications.length, 1);
 });

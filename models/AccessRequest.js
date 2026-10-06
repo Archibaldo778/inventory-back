@@ -5,6 +5,8 @@ const schema = new mongoose.Schema({
   name: { type: String, required: true, maxlength: 240 },
   department: { type: String, enum: ['captain', 'kitchen', 'other'], default: 'other' },
   passwordHash: { type: String, select: false },
+  statusTokenHash: { type: String, select: false },
+  statusExpiresAt: { type: Date },
   status: { type: String, enum: ['pending', 'approved', 'rejected', 'activating', 'completed'], default: 'pending' },
   role: { type: String, default: '' },
   requestedAt: { type: Date, default: Date.now },

@@ -9,6 +9,7 @@ import { resolveUserInvitationSender } from './userInvitationSender.js';
 import { fetchWithTimeout } from './fetchWithTimeout.js';
 import { createApiError } from './apiErrors.js';
 import { registrationReviewEmail, deliverRegistrationNotification } from './registrationNotifications.js';
+import { issueRegistrationSession } from './registrationStatus.js';
 
 export const ACCESS_REQUEST_MESSAGE = 'Your registration request has been received. If you already have an account or invitation, use Login or the link in your invitation email.';
 export const registrationDetails = (body = {}) => {
@@ -24,6 +25,7 @@ export const registrationDetails = (body = {}) => {
 
 export const requestRegistration = async (body, { Requests = AccessRequest, Users = User,
   notify = (email) => deliverRegistrationNotification({ email, Requests }),
+  now = new Date(),
 } = {}) => {
   const { name, email, department, password } = registrationDetails(body);
   const passwordHash = await bcrypt.hash(password, 10);
@@ -38,6 +40,7 @@ export const requestRegistration = async (body, { Requests = AccessRequest, User
       catch { console.error('Registration review notification deferred for retry'); }
     }
   } catch (error) { if (error.code !== 11000) throw error; }
+  return issueRegistrationSession({ email, password }, { Requests, now });
 };
 
 export const sendActivationEmail = async ({ email, token, sender, fetchImpl = globalThis.fetch }) => {

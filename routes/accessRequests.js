@@ -5,6 +5,7 @@ import { createMemoryRateLimiter } from '../middleware/rateLimit.js';
 import { isValidInviteEmail } from '../utils/userInvitations.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import { ACCESS_REQUEST_MESSAGE, requestRegistration, approveRegistration, activateRegistration, reviewableRequests } from '../utils/accessRequests.js';
+import { readRegistrationStatus } from '../utils/registrationStatus.js';
 
 const emailFrom = (value) => typeof value === 'string' ? value.trim().toLowerCase() : '';
 const validEmail = (email) => email.length <= 320 && isValidInviteEmail(email);
@@ -13,13 +14,23 @@ export const accessRequestLimit = createMemoryRateLimiter({ windowMs: 60 * 60_00
 export const activationLimit = createMemoryRateLimiter({ windowMs: 15 * 60_000, max: 20,
   keyGenerator: (req) => req.ip || req.socket?.remoteAddress || 'unknown' });
 export const publicAccessRequestRoutes = Router();
+export const registrationStatusLimit = createMemoryRateLimiter({ windowMs: 60_000, max: 120,
+  keyGenerator: (req) => req.ip || req.socket?.remoteAddress || 'unknown' });
 
 publicAccessRequestRoutes.post('/request-access', accessRequestLimit, async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   try {
-    await requestRegistration(req.body);
-    return res.status(202).json({ message: ACCESS_REQUEST_MESSAGE });
+    const session = await requestRegistration(req.body);
+    return res.status(202).json({ message: ACCESS_REQUEST_MESSAGE, ...(session ? { session } : {}) });
   } catch (error) { return sendApiError(res, error, { context: 'Registration request failed', fallbackMessage: 'Could not submit your request. Please try again.' }); }
+});
+publicAccessRequestRoutes.post('/registration-status', registrationStatusLimit, async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    const status = await readRegistrationStatus(req.body?.token);
+    if (!status) return res.status(410).json({ message: 'Your registration session has expired. Submit the form with your original email and password to view your request again.' });
+    return res.json(status);
+  } catch (error) { return sendApiError(res, error, { context: 'Registration status failed', fallbackMessage: 'Could not check your registration status. Please try again.' }); }
 });
 publicAccessRequestRoutes.post('/activate-account', activationLimit, async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');

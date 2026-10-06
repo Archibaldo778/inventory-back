@@ -12,6 +12,11 @@ const schema = new mongoose.Schema({
   emailAttemptAt: { type: Date, default: null },
   emailSentAt: { type: Date, default: null },
   reviewedBy: { type: String, default: '' },
+  notificationStatus: { type: String, enum: ['queued', 'processing', 'sent', 'failed'] },
+  notificationPayload: { type: mongoose.Schema.Types.Mixed, select: false },
+  notificationFirstAttemptAt: { type: Date },
+  notificationLockedUntil: { type: Date },
+  notificationSentAt: { type: Date },
 });
 
 export default mongoose.model('AccessRequest', schema);

@@ -8,6 +8,7 @@ import { invitationRolesFor } from './departmentAccess.js';
 import { resolveUserInvitationSender } from './userInvitationSender.js';
 import { fetchWithTimeout } from './fetchWithTimeout.js';
 import { createApiError } from './apiErrors.js';
+import { registrationReviewEmail, deliverRegistrationNotification } from './registrationNotifications.js';
 
 export const ACCESS_REQUEST_MESSAGE = 'Your registration request has been received. If you already have an account or invitation, use Login or the link in your invitation email.';
 export const registrationDetails = (body = {}) => {
@@ -19,13 +20,21 @@ export const registrationDetails = (body = {}) => {
   return { name, email, password: body.password };
 };
 
-export const requestRegistration = async (body, { Requests = AccessRequest, Users = User } = {}) => {
+export const requestRegistration = async (body, { Requests = AccessRequest, Users = User,
+  notify = (email) => deliverRegistrationNotification({ email, Requests }),
+} = {}) => {
   const { name, email, password } = registrationDetails(body);
   const passwordHash = await bcrypt.hash(password, 10);
   if (await Users.exists({ email })) return;
   // One pending request per email. A duplicate never replaces the chosen password.
   try {
-    await Requests.updateOne({ _id: email }, { $setOnInsert: { name, passwordHash, status: 'pending', requestedAt: new Date() } }, { upsert: true });
+    const created = await Requests.updateOne({ _id: email }, { $setOnInsert: { name, passwordHash, status: 'pending', requestedAt: new Date(),
+      notificationStatus: 'queued', notificationPayload: registrationReviewEmail({ name, email }),
+    } }, { upsert: true });
+    if (created.upsertedCount) {
+      try { await notify(email); }
+      catch { console.error('Registration review notification deferred for retry'); }
+    }
   } catch (error) { if (error.code !== 11000) throw error; }
 };
 

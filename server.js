@@ -480,6 +480,7 @@ import { runSlackEventChannelSync, slackEventChannelsEnabled } from './utils/sla
 import { CAPTAIN_REPORT_EMAIL_REMINDERS_ENABLED, CAPTAIN_REPORT_REMINDERS_START_DATE, runCaptainReportEmailReminders } from './utils/captainReportReminders.js';
 import { runUserInviteReminders } from './utils/userInviteReminders.js';
 import { runEventReportEmailPreview } from './utils/eventReportEmailPreviews.js';
+import { runRegistrationNotifications } from './utils/registrationNotifications.js';
 import { ensureDropboxPoPolicy, runDropboxPoAlerts } from './utils/dropboxPoAlerts.js';
 import { getCatereaseConfig } from './utils/catereaseApi.js';
 
@@ -769,6 +770,11 @@ export const startServer = async () => {
   }, 60_000);
   reportPreviewTimer.unref?.();
 
+  const registrationNotificationTimer = setInterval(() => {
+    runRegistrationNotifications().catch((error) => console.error('Registration notifications failed:', error?.message));
+  }, 60_000);
+  registrationNotificationTimer.unref?.();
+
   const poAlertTimer = setInterval(() => {
     runDropboxPoAlerts().then((summary) => {
       if (summary.sent || summary.failed) console.log('Dropbox PO alerts processed', summary);
@@ -794,6 +800,7 @@ export const startServer = async () => {
     clearInterval(captainReportEmailTimer);
     clearInterval(userInviteReminderTimer);
     clearInterval(reportPreviewTimer);
+    clearInterval(registrationNotificationTimer);
     clearInterval(poAlertTimer);
 
     const forceExit = setTimeout(() => {

@@ -25,14 +25,15 @@ const matches = (row, query) => Boolean(row) && Object.entries(query).every(([ke
   return row[key] === value;
 });
 const memory = () => {
-  const requests = new Map(); const users = new Map(); const mails = [];
+  const requests = new Map(); const users = new Map(); const mails = []; const notifications = [];
   const update = (row, change) => { Object.assign(row, change.$set || {}); for (const key of Object.keys(change.$unset || {})) delete row[key]; };
   const Requests = {
     async updateOne(query, change, options = {}) {
       let row = [...requests.values()].find((item) => matches(item, query));
+      const inserted = !row && options.upsert;
       if (!row && options.upsert) { row = { _id: query._id, ...structuredClone(change.$setOnInsert) }; requests.set(row._id, row); }
       if (row) update(row, structuredClone(change));
-      return { matchedCount: row ? 1 : 0 };
+      return { matchedCount: row ? 1 : 0, upsertedCount: inserted ? 1 : 0 };
     },
     findOneAndUpdate(query, change) { return { select: async () => {
       const row = [...requests.values()].find((item) => matches(item, query));
@@ -43,7 +44,7 @@ const memory = () => {
     if (users.has(row.email)) throw Object.assign(Error('Duplicate email'), { code: 11000 });
     users.set(row.email, structuredClone(row)); return row;
   } };
-  return { Requests, Users, now, requests, users, mails, sendEmail: async (mail) => mails.push(mail) };
+  return { Requests, Users, now, requests, users, mails, notifications, notify: async (email) => notifications.push(email), sendEmail: async (mail) => mails.push(mail) };
 };
 const response = () => ({ code: 200, headers: {}, status(code) { this.code = code; return this; }, setHeader(k, v) { this.headers[k] = v; }, json(body) { this.body = body; return this; } });
 const handler = (r, path, method) => r.stack.find((layer) => layer.route?.path === path && layer.route.methods[method]).route.stack.at(-1).handle;
@@ -56,8 +57,12 @@ test('registration keeps a hashed password pending review and ignores public rol
   assert.equal(row.status, 'pending'); assert.equal(row.role, undefined); assert.equal(row.password, undefined);
   assert.equal(await bcrypt.compare(person.password, row.passwordHash), true);
   assert.equal(store.users.size, 0); assert.equal(store.mails.length, 0);
+  assert.deepEqual(store.notifications, [person.email]);
+  assert.equal(row.notificationStatus, 'queued');
+  assert.ok(!JSON.stringify(row.notificationPayload).includes(person.password));
   await requestRegistration({ ...person, name: 'Replacement', password: 'replacement-password' }, store);
   assert.deepEqual(store.requests.get(person.email), row);
+  assert.deepEqual(store.notifications, [person.email]);
   store.users.set('existing@example.com', { password: 'existing-hash', role: 'admin' });
   await requestRegistration({ ...person, email: 'existing@example.com' }, store);
   assert.equal(store.requests.has('existing@example.com'), false);
@@ -148,4 +153,17 @@ test('activation email goes only to the registrant, from the approving administr
   assert.match(body.from, /Staffing at OCC/); assert.equal(body.reply_to, auth.email);
   assert.ok(body.text.includes(`/activate-account#token=${token}`));
   assert.ok(!body.text.includes(person.password));
+});
+
+test('a notification failure never discards the registration and a review link keeps the normal role scope', async (t) => {
+  const store = memory();
+  t.mock.method(console, 'error', () => {});
+  await requestRegistration(person, { ...store, notify: async () => { throw Error('temporary outage'); } });
+  assert.equal(store.requests.get(person.email).notificationStatus, 'queued');
+  let query;
+  t.mock.method(AccessRequest, 'find', (filter) => { query = filter; return { sort() { return this; }, limit() { return this; }, lean: async () => [] }; });
+  const res = response();
+  await handler(router, '/', 'get')({ auth, query: { email: ' CAPTAIN@EXAMPLE.COM ' } }, res);
+  assert.equal(res.code, 200);
+  assert.deepEqual(query, { ...reviewableRequests(auth), _id: person.email });
 });

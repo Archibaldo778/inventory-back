@@ -35,7 +35,9 @@ router.use(requireRoles(['admin', 'super admin', 'staffing admin']));
 router.get('/', async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   try {
-    const rows = await AccessRequest.find(reviewableRequests(req.auth)).sort({ requestedAt: 1 }).limit(200).lean();
+    const email = emailFrom(req.query?.email);
+    if (email && !validEmail(email)) return res.status(400).json({ message: 'Choose a valid request.' });
+    const rows = await AccessRequest.find({ ...reviewableRequests(req.auth), ...(email ? { _id: email } : {}) }).sort({ requestedAt: 1 }).limit(200).lean();
     return res.json({ items: rows.map((row) => ({ email: row._id, name: row.name, requestedAt: row.requestedAt,
       status: row.status, role: row.role, emailSentAt: row.emailSentAt })) });
   } catch (error) { return sendApiError(res, error, { context: 'Registration request list failed', fallbackMessage: 'Could not load registration requests' }); }

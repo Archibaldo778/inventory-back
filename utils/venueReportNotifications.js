@@ -6,19 +6,16 @@ import { analyzeEventReports, eventReportAnalysisInput } from './eventReportAi.j
 import { loadReportTeamDirectory, resolveTeamRouting } from './reportTeams.js';
 import { userInviteUrl } from './userInvitations.js';
 import { fetchWithTimeout } from './fetchWithTimeout.js';
+import { loadVenueKnowledgeReports, venueNotificationNotesCurrent } from './venueKnowledge.js';
+import { eventVenue, normalizeVenuePart, usableVenueName } from './venues.js';
+export { eventVenue } from './venues.js';
 
 // October 6, 2026 at midnight in New York. This is a creation cutoff, not an event-date cutoff.
 export const VENUE_REPORT_START = new Date('2026-10-06T04:00:00.000Z');
 const clean = (value) => String(value || '').trim();
-const normalize = (value) => clean(value).normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
-  .toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+const normalize = normalizeVenuePart;
 const escapeHtml = (value) => clean(value).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const todayInNewYork = (now) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
-const usableVenueName = (name) => Boolean(normalize(name)) && !['tbd', 'n a', 'na', 'none', 'unknown', 'off site', 'private residence'].includes(normalize(name));
-export const eventVenue = (event) => ({
-  name: clean(event?.meta?.venue || event?.meta?.nowsta?.venue || event?.catereaseOperations?.eventVenue),
-  address: clean(event?.meta?.address || event?.meta?.nowsta?.address),
-});
 export const sameReportVenue = (first, second) => {
   const a = eventVenue(first); const b = eventVenue(second);
   const name = normalize(a.name);
@@ -40,7 +37,8 @@ export const supportedVenueNotes = (analysis, reports) => {
       const answers = eventReportAnalysisInput({ reports: [report] }).reports[0].answers.map((answer) => answer.answer);
       const quote = (problem.evidence || []).find((evidence) => clean(evidence).length >= 12 && answers.includes(clean(evidence)));
       if (quote) notes.push({ title: problem.title, recommendation: problem.detail, quote,
-        reportId: String(report._id), eventId: String(report.eventId), date: report.eventDate, reporter: report.reporterName });
+        reportId: String(report.sourceReportId || report._id), eventId: String(report.eventId), date: report.eventDate, reporter: report.reporterName,
+        venueId: report.venueId, venueNoteId: report.venueNoteId, venueNoteRevision: report.venueNoteRevision, source: report.source });
     }
   }
   return notes.filter((note, index) => notes.findIndex((other) => other.reportId === note.reportId && other.quote === note.quote) === index);
@@ -49,13 +47,15 @@ export const supportedVenueNotes = (analysis, reports) => {
 export const venuePlanningEmail = ({ event, notes, recipients }) => {
   const venue = eventVenue(event);
   const link = (id) => new URL(`/events/${encodeURIComponent(String(id))}?view=reports`, userInviteUrl('')).href;
+  const sourceLink = (note) => note.venueId
+    ? new URL(`/admin-venues?venue=${encodeURIComponent(note.venueId)}&note=${encodeURIComponent(note.venueNoteId)}`, userInviteUrl('')).href : link(note.eventId);
   const heading = `Venue planning notes — ${venue.name} — ${event.date}`;
-  const introduction = `A new event, ${event.title}, is scheduled at ${venue.name} (${venue.address}) on ${event.date}. Previous captain's reports noted the following venue constraints. These are historical observations; confirm current conditions before making arrangements.`;
+  const introduction = `A new event, ${event.title}, is scheduled at ${venue.name} (${venue.address}) on ${event.date}. Venue records and previous captain's reports noted the following constraints. These are historical observations; confirm current conditions before making arrangements.`;
   return {
     from: clean(process.env.EVENT_REPORT_FROM) || 'Staffing and Service Department <reports@reports.occdecks.com>',
     to: recipients, subject: heading,
-    text: `${heading}\n\n${introduction}\n\n${notes.map((note) => `${note.title}\nReported: ${note.quote}\nPlanning recommendation: ${note.recommendation}\nSource: ${note.date}, ${note.reporter}, report ${note.reportId}\n${link(note.eventId)}`).join('\n\n')}\n\nUpcoming event: ${link(event._id)}`,
-    html: `<div style="font-family:Arial,sans-serif;line-height:1.6;color:#222"><h2>${escapeHtml(heading)}</h2><p>${escapeHtml(introduction)}</p>${notes.map((note) => `<h3>${escapeHtml(note.title)}</h3><p><strong>Reported:</strong> ${escapeHtml(note.quote)}</p><p><strong>Planning recommendation:</strong> ${escapeHtml(note.recommendation)}</p><p>Source: ${escapeHtml(note.date)}, ${escapeHtml(note.reporter)} — <a href="${escapeHtml(link(note.eventId))}">View captain's reports</a> (report ${escapeHtml(note.reportId)})</p>`).join('')}<p><a href="${escapeHtml(link(event._id))}">View upcoming event</a></p></div>`,
+    text: `${heading}\n\n${introduction}\n\n${notes.map((note) => `${note.title}\nReported: ${note.quote}\nPlanning recommendation: ${note.recommendation}\nSource: ${note.date}, ${note.reporter}, ${note.venueNoteId ? `venue note ${note.venueNoteId}` : `report ${note.reportId}`}\n${sourceLink(note)}`).join('\n\n')}\n\nUpcoming event: ${link(event._id)}`,
+    html: `<div style="font-family:Arial,sans-serif;line-height:1.6;color:#222"><h2>${escapeHtml(heading)}</h2><p>${escapeHtml(introduction)}</p>${notes.map((note) => `<h3>${escapeHtml(note.title)}</h3><p><strong>Reported:</strong> ${escapeHtml(note.quote)}</p><p><strong>Planning recommendation:</strong> ${escapeHtml(note.recommendation)}</p><p>Source: ${escapeHtml(note.date)}, ${escapeHtml(note.reporter)} — <a href="${escapeHtml(sourceLink(note))}">View source</a></p>`).join('')}<p><a href="${escapeHtml(link(event._id))}">View upcoming event</a></p></div>`,
   };
 };
 
@@ -70,14 +70,15 @@ export const loadVenueReports = async (event, { Events = Event, Reports = EventR
 };
 
 export const processVenueNotification = async ({ event, now = new Date(), Jobs = VenueReportNotification,
-  loadReports = loadVenueReports, loadTeams = loadReportTeamDirectory, analyze = analyzeEventReports,
+  loadReports = loadVenueKnowledgeReports, loadTeams = loadReportTeamDirectory, analyze = analyzeEventReports,
+  notesCurrent = venueNotificationNotesCurrent,
   fetchImpl = globalThis.fetch, apiKey = process.env.RESEND_API_KEY,
 } = {}) => {
   if (!apiKey || !venueNotificationEligible(event, now)) return 'skipped';
   const startedAt = Date.now();
   const clock = () => new Date(+now + Date.now() - startedAt);
   const venue = eventVenue(event);
-  const venueKey = `${normalize(venue.name)}|${normalize(venue.address)}`;
+  const venueKey = `knowledge-v1|${normalize(venue.name)}|${normalize(venue.address)}`;
   try {
     await Jobs.updateOne({ _id: event._id }, { $setOnInsert: { status: 'waiting', nextAttemptAt: now } }, { upsert: true });
   } catch (error) { if (error.code !== 11000) throw error; }
@@ -118,9 +119,19 @@ export const processVenueNotification = async ({ event, now = new Date(), Jobs =
         return 'no_notes';
       }
       job.payload = venuePlanningEmail({ event, notes, recipients: routing.recipients });
+      job.noteReferences = notes.filter((note) => note.venueNoteId).map((note) => ({ id: note.venueNoteId, revision: note.venueNoteRevision }));
       // Freeze body and recipients before contacting the provider; every retry uses the same key/body.
-      const persisted = await save({ payload: job.payload, status: 'queued' });
+      const persisted = await save({ payload: job.payload, noteReferences: job.noteReferences, status: 'queued' });
       if (!persisted.matchedCount) return 'idle';
+    }
+    if (!await notesCurrent(job.noteReferences)) {
+      if (!job.firstAttemptAt) {
+        await save({ status: 'waiting', payload: null, noteReferences: [], nextAttemptAt: clock(), lockedUntil: null,
+          error: 'Source notes changed. Rebuild from current unresolved notes.' });
+        return 'waiting';
+      }
+      await save({ status: 'suppressed', lockedUntil: null, error: 'Source notes changed or were resolved before delivery.' });
+      return 'suppressed';
     }
     const sending = await save({ status: 'processing', firstAttemptAt: job.firstAttemptAt || clock(), lockedUntil: new Date(+clock() + 15 * 60_000) });
     if (!sending.matchedCount) return 'idle';

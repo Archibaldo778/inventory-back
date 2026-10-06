@@ -479,6 +479,8 @@ import slackIntegrationRoutes from './routes/slackIntegration.js';
 import { runSlackEventChannelSync, slackEventChannelsEnabled } from './utils/slackEventChannels.js';
 import { CAPTAIN_REPORT_EMAIL_REMINDERS_ENABLED, CAPTAIN_REPORT_REMINDERS_START_DATE, runCaptainReportEmailReminders } from './utils/captainReportReminders.js';
 import { runVenueReportNotifications } from './utils/venueReportNotifications.js';
+import venueRoutes from './routes/venues.js';
+import { runVenueKnowledgeSync } from './utils/venueKnowledge.js';
 import { runUserInviteReminders } from './utils/userInviteReminders.js';
 import { runEventReportEmailPreview } from './utils/eventReportEmailPreviews.js';
 import { runRegistrationNotifications } from './utils/registrationNotifications.js';
@@ -517,6 +519,7 @@ app.use('/api/public/bar-returns', publicBarReturnsRoutes);
 app.use('/api/public/event-workspace', publicEventWorkspaceRoutes);
 app.use('/api/public/event-reports', publicEventReportsRoutes);
 app.use('/api/event-reports', requireAuth, requireAdmin, eventReportsRoutes);
+app.use('/api/venues', requireAuth, requireAdmin, venueRoutes);
 app.use('/api/automation-alerts', requireAuth, requireAdmin, automationAlertRoutes);
 app.use('/api/bar', requireAuth, barRoutes);
 app.use('/api/integrations/dropbox', dropboxIntegrationRoutes);
@@ -760,7 +763,7 @@ export const startServer = async () => {
   console.log(`Captain report email reminders enabled for events from ${CAPTAIN_REPORT_REMINDERS_START_DATE}`);
 
   const venueReportTimer = setInterval(() => {
-    runVenueReportNotifications().catch((error) => console.error('Venue report notifications failed:', error?.message));
+    runVenueKnowledgeSync().then(() => runVenueReportNotifications()).catch((error) => console.error('Venue report notifications failed:', error?.message));
   }, 60_000);
   venueReportTimer.unref?.();
 

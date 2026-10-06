@@ -113,6 +113,7 @@ export const analyzeEventReports = async ({ event, reports = [], files = [], ven
         EVENT_REPORT_RERUN_GUIDANCE,
         ...(venuePlanning ? [
           'This analysis is for planning a future event at the same venue. Include ONLY reusable venue-specific constraints in problems: BOH space, access, loading, elevators, utilities, venue equipment or venue rules. Exclude one-time staffing, food, guest, weather or service incidents.',
+          'Positive feedback, ordinary descriptions and statements that there were no problems must never become problems or planning warnings.',
           'For each problem, evidence must contain exact, complete answer text copied from a supplied form response, without quotation marks or reporter prefixes. Put a cautious, practical planning recommendation in detail, clearly distinguishing it from the historical observation. Do not claim the condition still exists. If there are no relevant venue constraints, return an empty problems array.',
         ] : []),
         'Attached PDFs are event reports, including scanned pages. Read them alongside the form responses. Cite PDF filenames and page numbers in evidence. If pages are unreadable, state that limitation rather than inventing their contents.',

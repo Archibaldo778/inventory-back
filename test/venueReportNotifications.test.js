@@ -200,6 +200,23 @@ test('worker recovers an abandoned claim and does not steal a live claim', async
   }
 });
 
+test('a note resolved during analysis is removed before any email can leave and the pending body is rebuilt', async () => {
+  const store = memory();
+  const referenceReport = { ...report, venueId: 'venue-1', venueNoteId: 'note-1', venueNoteRevision: 0 };
+  assert.equal(await processVenueNotification({ ...store, loadReports: async () => [referenceReport], notesCurrent: async (refs) => {
+    assert.deepEqual(refs, [{ id: 'note-1', revision: 0 }]); return false;
+  } }), 'waiting');
+  assert.equal(store.calls.length, 0); assert.equal(store.row().payload, null);
+  assert.equal(await processVenueNotification({ ...store, now: new Date(+now + 60_000), loadReports: async () => [] }), 'no_notes');
+});
+
+test('an uncertain provider delivery is not retried after its source note is resolved', async () => {
+  const store = memory({ _id: event._id, status: 'processing', payload: { text: 'Old concern' }, noteReferences: [{ id: 'note-1', revision: 0 }],
+    firstAttemptAt: new Date(+now - 60_000), nextAttemptAt: now, lockedUntil: null });
+  assert.equal(await processVenueNotification({ ...store, notesCurrent: async () => false }), 'suppressed');
+  assert.equal(store.calls.length, 0);
+});
+
 test('scheduled scanner queries the creation cutoff and does not run without configured providers', async () => {
   let query; const processed = [];
   const Events = { find: (filter) => { query = filter; return { select: () => ({ sort: () => ({ lean: () => ({ cursor: async function* () { yield event; } }) }) }) }; } };

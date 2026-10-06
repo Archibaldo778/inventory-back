@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 
 const schema = new mongoose.Schema({
   _id: { type: mongoose.Schema.Types.ObjectId, ref: 'Event' },
-  status: { type: String, enum: ['waiting', 'queued', 'processing', 'sent', 'no_notes', 'expired'], default: 'waiting' },
+  status: { type: String, enum: ['waiting', 'queued', 'processing', 'sent', 'no_notes', 'expired', 'suppressed'], default: 'waiting' },
   nextAttemptAt: { type: Date, default: Date.now, index: true },
   lockToken: { type: String, default: '' },
   lockedUntil: { type: Date, default: null },
@@ -11,6 +11,7 @@ const schema = new mongoose.Schema({
   sentAt: { type: Date, default: null },
   error: { type: String, default: '' },
   venueKey: { type: String, default: '' },
+  noteReferences: { type: [mongoose.Schema.Types.Mixed], default: [] },
 }, { timestamps: true });
 
 export default mongoose.model('VenueReportNotification', schema);

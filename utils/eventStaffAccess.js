@@ -1,3 +1,4 @@
+import { permissionValue } from './accessRolePolicy.js';
 export const KITCHEN_PORTAL_ROLES = ['event staff', 'kitchen lead'];
 const roleOf = (auth) => String(auth?.role || '').trim().toLowerCase();
 
@@ -8,10 +9,10 @@ export const kitchenReportPosition = (_auth, assignedShifts = []) => {
 export const canUseKitchenReport = (auth, assignedShifts = []) => KITCHEN_PORTAL_ROLES.includes(roleOf(auth))
   && Boolean(kitchenReportPosition(auth, assignedShifts));
 
-export const canReadStaffInventory = (auth) => (
+export const canReadStaffInventory = (auth) => permissionValue(auth, 'inventory.view', (
   ['event staff', 'captain', 'bar captain'].includes(roleOf(auth))
   && auth?.permissions?.inventoryRead === true
-);
+));
 
 // Event Staff has no general workspace access, even through an authenticated integration URL.
 export const eventStaffRequestAllowed = (auth, req) => {

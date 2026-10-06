@@ -4,6 +4,7 @@ import { eventStaffRequestAllowed } from '../utils/eventStaffAccess.js';
 import { uniformPackerRequestAllowed } from '../utils/uniformPacking.js';
 import { DEPARTMENT_ADMIN_ROLES, isDepartmentAdmin, departmentAdminRequestAllowed } from '../utils/departmentAccess.js';
 import { hasFullSalesAccess, effectiveAccessRole } from '../utils/salesAccess.js';
+import { loadAccessRole, requestPermission, requestAccessKeys, permissionValue } from '../utils/accessRolePolicy.js';
 
 export const ADMIN_ROLES = Object.freeze(['admin', 'super admin', ...DEPARTMENT_ADMIN_ROLES]);
 export const WORKSPACE_ROLES = Object.freeze([
@@ -127,14 +128,14 @@ const buildAuthContext = (payload) => {
   };
 };
 
-export const isAdminAuth = (auth) => ADMIN_ROLE_SET.has(normalizeRole(effectiveAccessRole(auth)));
+export const isAdminAuth = (auth) => auth?.sectionAccess === true || ADMIN_ROLE_SET.has(normalizeRole(effectiveAccessRole(auth)));
 export const canAccessWorkspace = (auth) => WORKSPACE_ROLE_SET.has(normalizeRole(auth?.role));
 export const canManageInventory = (auth) => INVENTORY_MANAGER_ROLES.includes(normalizeRole(effectiveAccessRole(auth)));
 
-export const canAccessProposals = (auth) => isAdminAuth(auth) || resolveSeeProposals(auth);
-export const canSeeBarFinancials = (auth) => (
+export const canAccessProposals = (auth) => permissionValue(auth, 'proposals.view', isAdminAuth(auth) || resolveSeeProposals(auth));
+export const canSeeBarFinancials = (auth) => permissionValue(auth, 'bar.financials', (
   !isDepartmentAdmin(auth) && (normalizeRole(auth?.role) === 'super admin' || resolveSeeBarFinancials(auth))
-);
+));
 
 export const requireAuth = async (req, res, next) => {
   res.setHeader?.('Cache-Control', 'private, no-store');
@@ -160,7 +161,7 @@ export const requireAuth = async (req, res, next) => {
 
   try {
     const persistedUser = await User.findById(tokenAuth.userId)
-      .select('_id username email nowstaName jobTitle role seeProposals seeBarFinancials permissions isActive +tokenVersion')
+      .select('_id username email nowstaName jobTitle role accessRoleId seeProposals seeBarFinancials permissions isActive +tokenVersion')
       .lean();
     if (!persistedUser) {
       return res.status(401).json({ message: 'User not found' });
@@ -184,9 +185,16 @@ export const requireAuth = async (req, res, next) => {
       seeBarFinancials: persistedUser.seeBarFinancials,
       permissions: persistedUser.permissions,
     });
-    if (!departmentAdminRequestAllowed(auth, req)) return res.status(403).json({ message: 'This action requires a full administrator' });
-    if (!eventStaffRequestAllowed(auth, req)) return res.status(403).json({ message: 'Event Staff can only view assigned events and permitted inventory' });
-    if (!uniformPackerRequestAllowed(auth, req)) return res.status(403).json({ message: 'Uniform packers can access uniform packing, decor and uniform inventory only' });
+    Object.assign(auth, await loadAccessRole(persistedUser));
+    if (auth.roleKey.startsWith('custom-')) auth.role = auth.baseRole;
+    const decision = requestPermission(auth, req);
+    auth.sectionAccess = decision === true && !requestAccessKeys(req, auth).some((key) => key.startsWith('myEvents.'));
+    if (decision === false) return res.status(403).json({ message: 'Your role does not allow this action' });
+    if (decision !== true && String(req.originalUrl || '').split('?')[0] !== '/api/access-profile') {
+      if (!departmentAdminRequestAllowed(auth, req)) return res.status(403).json({ message: 'This action requires a full administrator' });
+      if (!eventStaffRequestAllowed(auth, req)) return res.status(403).json({ message: 'Event Staff can only view assigned events and permitted inventory' });
+      if (!uniformPackerRequestAllowed(auth, req)) return res.status(403).json({ message: 'Uniform packers can access uniform packing, decor and uniform inventory only' });
+    }
     req.auth = auth;
     req.user = auth;
     return next();
@@ -200,7 +208,8 @@ const createAccessGuard = (predicate, message) => (req, res, next) => {
   if (!req.auth) {
     return res.status(401).json({ message: 'Authentication required' });
   }
-  if (!predicate(req.auth, req)) {
+  const decision = requestPermission(req.auth, req);
+  if (decision === false || (decision !== true && !predicate(req.auth, req))) {
     return res.status(403).json({ message });
   }
   return next();

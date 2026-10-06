@@ -487,6 +487,25 @@ import { runEventReportEmailPreview } from './utils/eventReportEmailPreviews.js'
 import { runRegistrationNotifications } from './utils/registrationNotifications.js';
 import { ensureDropboxPoPolicy, runDropboxPoAlerts } from './utils/dropboxPoAlerts.js';
 import { getCatereaseConfig } from './utils/catereaseApi.js';
+import accessRoleRoutes from './routes/accessRoles.js';
+import AccessRole from './models/AccessRole.js';
+import { BUILTIN_ROLES } from './utils/accessRoleCatalog.js';
+import { ACCESS_RESOURCES } from './utils/accessRolePolicy.js';
+
+app.get('/api/access-profile', requireAuth, (req, res) => res.json({
+  role: req.auth.role, roleKey: req.auth.roleKey, permissions: req.auth.accessPermissions,
+  canManageRoles: req.auth.canManageRoles,
+  resources: ACCESS_RESOURCES,
+}));
+app.get('/api/role-options', requireAuth, requireAdmin, async (_req, res, next) => {
+  try {
+    const saved = await AccessRole.find({}).select('_id name baseRole jobTitle').lean();
+    const roles = new Map(BUILTIN_ROLES.map((role) => [role._id, { _id: role._id, name: role.name, baseRole: role.baseRole, jobTitle: role.jobTitle }]));
+    for (const role of saved) roles.set(role._id, role);
+    res.json([...roles.values()]);
+  } catch (error) { next(error); }
+});
+app.use('/api/access-roles', requireAuth, accessRoleRoutes);
 
 app.use('/api/auth', authRoutes);
 app.use('/api/staff-portal', requireAuth, staffPortalRoutes);

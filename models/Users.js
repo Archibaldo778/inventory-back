@@ -13,6 +13,7 @@ const userSchema = new mongoose.Schema(
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
     nowstaName: { type: String, default: '', trim: true },
     jobTitle: { type: String, enum: ['', 'sales', 'team manager', 'assistant', 'executive chef'], default: '' },
+    accessRoleId: { type: String, default: '', trim: true },
     teamId: { type: mongoose.Schema.Types.ObjectId, ref: 'ReportTeam', default: null },
     receivesTeamReports: { type: Boolean, default: false },
     role: {
@@ -38,6 +39,7 @@ const userSchema = new mongoose.Schema(
       default: 'user',
     },
     seeProposals: { type: Boolean, default: false },
+    accessAudit: { type: [mongoose.Schema.Types.Mixed], default: undefined, select: false },
     seeBarFinancials: { type: Boolean, default: false },
     permissions: {
       inventoryRead: { type: Boolean, default: false },

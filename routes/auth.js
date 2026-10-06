@@ -101,6 +101,7 @@ function buildUserResponse(source) {
     email: user?.email || '',
     nowstaName: user?.nowstaName || '',
     jobTitle: user?.jobTitle || '',
+    accessRoleId: user?.accessRoleId || '',
     role: String(user?.role || '').trim().toLowerCase(),
     seeProposals,
     seeBarFinancials,
@@ -289,7 +290,7 @@ router.post('/refresh', async (req, res) => {
 
   try {
     const user = await User.findById(data?.sub)
-      .select('_id username email nowstaName jobTitle role seeProposals seeBarFinancials permissions isActive +tokenVersion');
+      .select('_id username email nowstaName jobTitle role accessRoleId seeProposals seeBarFinancials permissions isActive +tokenVersion');
     if (!user) return res.status(401).json({ message: 'User not found' });
     if (user.isActive === false) return res.status(403).json({ message: 'User account is inactive' });
     if (Number(data?.tokenVersion || 0) !== Number(user.tokenVersion || 0)) {

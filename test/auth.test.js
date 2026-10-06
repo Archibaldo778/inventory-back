@@ -1,3 +1,5 @@
+import AccessRole from '../models/AccessRole.js';
+AccessRole.findById = () => ({ select: () => ({ lean: async () => null }) });
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import jwt from 'jsonwebtoken';

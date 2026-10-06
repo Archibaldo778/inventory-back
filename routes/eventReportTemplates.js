@@ -2,10 +2,11 @@ import { Router } from 'express';
 import EventReportTemplate from '../models/EventReportTemplate.js';
 import { defaultReportTemplate, loadReportTemplate, validateReportTemplate } from '../utils/captainReportTemplate.js';
 import { effectiveAccessRole } from '../utils/salesAccess.js';
+import { permissionValue } from '../utils/accessRolePolicy.js';
 import { createApiError, sendApiError } from '../utils/apiErrors.js';
 
 const router = Router();
-export const canEditReportTemplate = (auth, type) => ['admin', 'super admin', type === 'kitchen' ? 'kitchen admin' : 'staffing admin'].includes(effectiveAccessRole(auth));
+export const canEditReportTemplate = (auth, type) => permissionValue(auth, `${type}Template.edit`, ['admin', 'super admin', type === 'kitchen' ? 'kitchen admin' : 'staffing admin'].includes(effectiveAccessRole(auth)));
 export const canEditCaptainTemplate = (auth) => canEditReportTemplate(auth, 'captain');
 for (const type of ['captain', 'kitchen']) {
 router.get(`/${type}`, async (req, res) => {

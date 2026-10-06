@@ -4,6 +4,8 @@ import jwt from 'jsonwebtoken';
 import JSZip from 'jszip';
 import router from '../routes/dropboxIntegration.js';
 import User from '../models/Users.js';
+import AccessRole from '../models/AccessRole.js';
+AccessRole.findById = () => ({ select: () => ({ lean: async () => null }) });
 import DropboxDocument from '../models/DropboxDocument.js';
 import DropboxIntegration from '../models/DropboxIntegration.js';
 import Event from '../models/Event.js';

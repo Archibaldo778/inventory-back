@@ -3,6 +3,9 @@ import express from 'express';
 import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
 import User from '../models/Users.js';
+import AccessRole from '../models/AccessRole.js';
+import { isRoleOwner, protectedAccountChange } from '../utils/roleOwners.js';
+import { permissionValue } from '../utils/accessRolePolicy.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import { resolveUserInvitationSender } from '../utils/userInvitationSender.js';
 import { userTeamProfile } from '../utils/userTeamProfile.js';
@@ -89,6 +92,7 @@ const resolveSeeBarFinancials = (source) => {
 const normalizeEmail = (value) => String(value || '').trim().toLowerCase();
 const isSuperAdminRole = (value) => normalizeRole(value) === 'super admin';
 const isSuperAdminAuth = (auth) => isSuperAdminRole(auth?.role);
+const canAssignUserAccess = (auth) => permissionValue(auth, 'users.assignRoles', ['admin', 'super admin', 'kitchen admin', 'staffing admin'].includes(auth?.role));
 
 const buildPermissionsPayload = (sourcePermissions, seeProposals, seeBarFinancials) => {
   const base =
@@ -117,6 +121,7 @@ const serializeUser = (source, auth) => {
     nowstaName: user?.nowstaName || '',
     role: isSuperAdminRole(user.role) && !isSuperAdminAuth(auth) ? 'admin' : normalizeRole(user.role),
     jobTitle: user?.jobTitle || '',
+    accessRoleId: user?.accessRoleId || '',
     teamId: user?.teamId ? String(user.teamId) : '',
     receivesTeamReports: user?.receivesTeamReports === true,
     seeProposals,
@@ -158,7 +163,11 @@ const applyUserPayload = async (user, body, { allowPassword = false } = {}) => {
   }
 
   if (typeof payload.role !== 'undefined') {
-    user.role = normalizeRole(payload.role);
+    const custom = String(payload.role).startsWith('custom-') ? await AccessRole.findById(payload.role).lean() : null;
+    if (String(payload.role).startsWith('custom-') && !custom) throw Object.assign(new Error('Choose an existing role'), { statusCode: 400 });
+    user.role = custom ? custom.baseRole : normalizeRole(payload.role);
+    user.accessRoleId = custom ? custom._id : '';
+    if (custom) user.jobTitle = custom.jobTitle || '';
   }
 
   if (payload.permissions?.inventoryRead !== undefined) {
@@ -216,8 +225,19 @@ const updateAndReturn = async (id, body, auth, { allowPassword = false } = {}) =
   const userId = String(id || '').trim();
   if (!userId) return { status: 400, payload: { message: 'id обязателен' } };
 
-  const user = await User.findById(userId).select('+password +tokenVersion');
+  const user = await User.findById(userId).select('+password +tokenVersion +accessAudit');
   if (!user) return { status: 404, payload: { message: 'Пользователь не найден' } };
+  if (body.role !== undefined && (String(body.role).startsWith('custom-') || user.accessRoleId) && body.role !== (user.accessRoleId || user.role) && !isRoleOwner(auth)) {
+    return { status: 403, payload: { message: 'Only role owners can assign custom roles' } };
+  }
+  const protectedError = protectedAccountChange(user, body, auth);
+  if (protectedError) return { status: 403, payload: { message: protectedError } };
+  const changesAccess = (body.role !== undefined && normalizeRole(body.role) !== normalizeRole(user.accessRoleId || user.role))
+    || (body.jobTitle !== undefined && body.jobTitle !== (user.jobTitle || ''))
+    || (resolveSeeProposals(body) !== undefined && resolveSeeProposals(body) !== (hasFullSalesAccess(user) || resolveSeeProposals(user) === true))
+    || (resolveSeeBarFinancials(body) !== undefined && resolveSeeBarFinancials(body) !== (hasFullSalesAccess(user) || resolveSeeBarFinancials(user) === true))
+    || (body.permissions?.inventoryRead !== undefined && body.permissions.inventoryRead !== (user.permissions?.inventoryRead === true));
+  if (changesAccess && !canAssignUserAccess(auth)) return { status: 403, payload: { message: 'Your role cannot change user access' } };
   if (!canManageDepartmentUser(auth, user)) return { status: 403, payload: { message: 'You can manage only employees in your department' } };
   if (isDepartmentAdmin(auth)) {
     if (body.role !== undefined && !departmentEmployeeRoles(auth).includes(normalizeRole(body.role))) {
@@ -233,6 +253,10 @@ const updateAndReturn = async (id, body, auth, { allowPassword = false } = {}) =
   }
   if (isSuperAdminRole(body?.role) && !isSuperAdminAuth(auth)) {
     return { status: 403, payload: { message: 'Only a super admin can grant this role' } };
+  }
+  if (String(body.role || '').startsWith('custom-') && !isSuperAdminAuth(auth)) {
+    const proposedRole = await AccessRole.findById(body.role).lean();
+    if (proposedRole?.baseRole === 'super admin') return { status: 403, payload: { message: 'Only a super admin can grant this role' } };
   }
   if (
     String(auth?.userId || '') === String(user._id)
@@ -251,7 +275,15 @@ const updateAndReturn = async (id, body, auth, { allowPassword = false } = {}) =
     return { status: 400, payload: { message: 'You cannot deactivate your own super admin account' } };
   }
 
+  const accessSnapshot = () => ({ role: user.role, accessRoleId: user.accessRoleId || '', jobTitle: user.jobTitle || '', seeProposals: user.seeProposals, seeBarFinancials: user.seeBarFinancials,
+    inventoryRead: user.permissions?.inventoryRead });
+  const beforeAccess = accessSnapshot();
   await applyUserPayload(user, body, { allowPassword });
+  const afterAccess = accessSnapshot();
+  if (JSON.stringify(beforeAccess) !== JSON.stringify(afterAccess)) {
+    user.accessAudit ||= [];
+    user.accessAudit.push({ actorId: auth.userId, at: new Date(), before: beforeAccess, after: afterAccess });
+  }
   await user.save();
 
   const saved = await User.findById(user._id).select('-password');
@@ -335,7 +367,12 @@ router.post('/', async (req, res) => {
     const username = String(body.username ?? body.name ?? '').trim();
     const email = normalizeEmail(body.email);
     const password = String(body.password || '');
-    const role = normalizeRole(body.role || 'user');
+    let role = normalizeRole(body.role || 'user');
+    if (!canAssignUserAccess(req.auth)) return res.status(403).json({ message: 'Your role cannot assign user access' });
+    if (role.startsWith('custom-') && !isRoleOwner(req.auth)) return res.status(403).json({ message: 'Only role owners can assign custom roles' });
+    const custom = role.startsWith('custom-') ? await AccessRole.findById(role).lean() : null;
+    if (role.startsWith('custom-') && !custom) return res.status(400).json({ message: 'Choose an existing role' });
+    if (custom) role = custom.baseRole;
     const isActive = toBool(body.isActive ?? body.active);
 
     if (!username || !email || !password) {
@@ -360,6 +397,7 @@ router.post('/', async (req, res) => {
       typeof resolveSeeBarFinancials(body) === 'boolean' ? resolveSeeBarFinancials(body) : false;
 
     const teamProfile = await userTeamProfile(body);
+    if (custom) teamProfile.jobTitle = custom.jobTitle || '';
     if (body.permissions?.inventoryRead !== undefined && typeof body.permissions.inventoryRead !== 'boolean') {
       return res.status(400).json({ message: 'Inventory viewing permission must be on or off' });
     }
@@ -368,10 +406,13 @@ router.post('/', async (req, res) => {
       email,
       nowstaName: String(body.nowstaName || '').trim().slice(0, 240),
       role,
+      accessRoleId: custom?._id || '',
       ...teamProfile,
       seeProposals: nextSeeProposals,
       seeBarFinancials: nextSeeBarFinancials,
       permissions: buildPermissionsPayload(body?.permissions, nextSeeProposals, nextSeeBarFinancials),
+      accessAudit: [{ actorId: req.auth.userId, at: new Date(), before: null,
+        after: { role, accessRoleId: custom?._id || '', jobTitle: teamProfile.jobTitle || '', seeProposals: nextSeeProposals, seeBarFinancials: nextSeeBarFinancials, inventoryRead: body.permissions?.inventoryRead === true } }],
       password: hash,
       isActive: typeof isActive === 'boolean' ? isActive : true,
     });
@@ -411,8 +452,11 @@ router.post('/invite', async (req, res) => {
     if (!username || !email || !isValidInviteEmail(email)) {
       return res.status(400).json({ message: 'A name and valid email are required' });
     }
-    let user = await User.findOne({ email }).select('+inviteTokenHash +tokenVersion');
+    let user = await User.findOne({ email }).select('+inviteTokenHash +tokenVersion +accessAudit');
     const changeRole = body.changeRole === true;
+    if (user?.accessRoleId && changeRole && !isRoleOwner(req.auth)) return res.status(403).json({ message: 'Only role owners can replace custom roles' });
+    if ((!user || changeRole) && !canAssignUserAccess(req.auth)) return res.status(403).json({ message: 'Your role cannot assign user access' });
+    if (user && isRoleOwner(user)) return res.status(403).json({ message: 'Protected owner accounts cannot be changed through invitations' });
     if (user && (!canManageDepartmentUser(req.auth, user) || (isSuperAdminRole(user.role) && !isSuperAdminAuth(req.auth)))) {
       return res.status(403).json({ message: 'You do not have permission to manage this account' });
     }
@@ -430,8 +474,11 @@ router.post('/invite', async (req, res) => {
     const sender = resolveUserInvitationSender(req.auth);
     const invite = active ? null : createUserInviteToken();
     user.inviteSender = { name: sender.name, email: sender.email };
-    if (changeRole && normalizeRole(user.role) !== inviteRole) {
+    if (changeRole && (normalizeRole(user.role) !== inviteRole || user.accessRoleId)) {
+      user.accessAudit ||= [];
+      user.accessAudit.push({ actorId: req.auth.userId, at: new Date(), before: { role: user.role, accessRoleId: user.accessRoleId || '' }, after: { role: inviteRole, accessRoleId: '' } });
       user.role = inviteRole;
+      user.accessRoleId = '';
       user.tokenVersion = Number(user.tokenVersion || 0) + 1;
     }
     if (invite) {
@@ -489,6 +536,7 @@ router.put('/:id/password', async (req, res) => {
     }
     const target = await User.findById(req.params.id).select('_id role');
     if (!target) return res.status(404).json({ message: 'Пользователь не найден' });
+    if (isRoleOwner(target) && !isRoleOwner(req.auth)) return res.status(403).json({ message: 'This account is protected' });
     if (String(req.auth?.userId || '') !== String(target._id) && !canManageDepartmentUser(req.auth, target)) return res.status(403).json({ message: 'You can manage only employees in your department' });
     if (isSuperAdminRole(target.role) && !isSuperAdminAuth(req.auth)) {
       return res.status(403).json({ message: 'You do not have permission to manage this account' });
@@ -511,6 +559,7 @@ router.put('/:id/password', async (req, res) => {
 // Удаление
 router.delete('/:id', async (req, res) => {
   try {
+    if (isRoleOwner({ _id: req.params.id })) return res.status(403).json({ message: 'Role owner accounts cannot be deleted' });
     if (String(req.auth?.userId || '') === String(req.params.id)) {
       return res.status(400).json({ message: 'You cannot delete your own account' });
     }

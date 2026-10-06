@@ -29,12 +29,12 @@ const memory = (initial = [job]) => {
   return { rows, calls, Requests, fetchImpl, apiKey: 'test-key', now };
 };
 
-test('owner email contains escaped applicant details and an authenticated review link, never a password or activation token', (t) => {
+test('review email contains escaped applicant details and an authenticated review link, never a password or activation token', (t) => {
   const before = process.env.REGISTRATION_REVIEW_EMAIL;
   process.env.REGISTRATION_REVIEW_EMAIL = 'owner@example.com';
   t.after(() => { if (before === undefined) delete process.env.REGISTRATION_REVIEW_EMAIL; else process.env.REGISTRATION_REVIEW_EMAIL = before; });
   const message = registrationReviewEmail({ name: '<img src=x onerror=alert(1)>', email: 'person+test@example.com', password: 'private-password', token: 'private-token' });
-  assert.deepEqual(message.to, ['owner@example.com']); assert.equal(message.cc, undefined); assert.equal(message.bcc, undefined);
+  assert.deepEqual(message.to, ['owner@example.com', 'iurie@ocnyc.com']); assert.equal(message.cc, undefined); assert.equal(message.bcc, undefined);
   assert.match(message.html, /&lt;img/); assert.doesNotMatch(message.html, /<img/);
   const link = new URL(message.text.split('\n').find((line) => line.startsWith('https://') || line.startsWith('http://')));
   assert.equal(link.pathname, '/admin-users');
@@ -42,6 +42,24 @@ test('owner email contains escaped applicant details and an authenticated review
   assert.doesNotMatch(JSON.stringify(message), /private-password|private-token/);
   process.env.REGISTRATION_REVIEW_EMAIL = 'one@example.com,two@example.com';
   assert.throws(() => registrationReviewEmail({ name: 'Person', email: job._id }), /One.*recipient/);
+});
+
+test('captain and kitchen requests notify both reviewers and copy only the selected department, without activation credentials', (t) => {
+  const settings = { REGISTRATION_REVIEW_EMAIL: 'ivan@ocnyc.com', REGISTRATION_REVIEW_SECOND_EMAIL: 'iurie@ocnyc.com', REGISTRATION_REVIEW_STAFFING_EMAIL: 'staffing@ocnyc.com', REGISTRATION_REVIEW_KITCHEN_EMAIL: 'jerome@ocnyc.com' };
+  for (const [key, value] of Object.entries(settings)) {
+    const before = process.env[key]; process.env[key] = value;
+    t.after(() => { if (before === undefined) delete process.env[key]; else process.env[key] = before; });
+  }
+  for (const [department, copy] of [['captain', 'staffing@ocnyc.com'], ['kitchen', 'jerome@ocnyc.com'], ['other', null]]) {
+    const message = registrationReviewEmail({ name: 'Person', email: job._id, department, password: 'private-password', token: 'private-token' });
+    assert.deepEqual(message.to, ['ivan@ocnyc.com', 'iurie@ocnyc.com']);
+    assert.deepEqual(message.cc, copy ? [copy] : undefined);
+    assert.doesNotMatch(JSON.stringify(message), /private-password|private-token|activate-account/);
+  }
+  process.env.REGISTRATION_REVIEW_SECOND_EMAIL = 'IVAN@ocnyc.com';
+  process.env.REGISTRATION_REVIEW_STAFFING_EMAIL = 'ivan@ocnyc.com';
+  const unique = registrationReviewEmail({ name: 'Person', email: job._id, department: 'captain' });
+  assert.deepEqual(unique.to, ['ivan@ocnyc.com']); assert.equal(unique.cc, undefined);
 });
 
 test('concurrent notification attempts send once and a repeated request never re-mails a delivered notification', async () => {

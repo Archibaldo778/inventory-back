@@ -5,17 +5,25 @@ import { userInviteUrl } from './userInvitations.js';
 import { fetchWithTimeout } from './fetchWithTimeout.js';
 
 const escapeHtml = (value) => String(value || '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-export const registrationReviewEmail = ({ name, email }) => {
+export const registrationReviewEmail = ({ name, email, department = 'other' }) => {
   const identity = resolveUserInvitationSender();
-  const recipient = String(process.env.REGISTRATION_REVIEW_EMAIL || identity.email).trim().toLowerCase();
-  if (!/^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/.test(recipient)) throw new Error('One registration review recipient is required');
+  const mailbox = (value) => {
+    const address = String(value).trim().toLowerCase();
+    if (!/^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/.test(address)) throw new Error('One email address per review recipient is required');
+    return address;
+  };
+  const to = [...new Set([mailbox(process.env.REGISTRATION_REVIEW_EMAIL || identity.email), mailbox(process.env.REGISTRATION_REVIEW_SECOND_EMAIL || 'iurie@ocnyc.com')])];
+  const copy = department === 'captain' ? process.env.REGISTRATION_REVIEW_STAFFING_EMAIL || 'staffing@ocnyc.com'
+    : department === 'kitchen' ? process.env.REGISTRATION_REVIEW_KITCHEN_EMAIL || 'jerome@ocnyc.com' : '';
+  const cc = copy ? [mailbox(copy)].filter((address) => !to.includes(address)) : [];
+  const label = { captain: 'Captain', kitchen: 'Kitchen', other: 'Other' }[department] || 'Other';
   const url = new URL('/admin-users', userInviteUrl(''));
   url.hash = new URLSearchParams({ registration: email }).toString();
   return {
-    from: identity.from, to: [recipient],
+    from: identity.from, to, ...(cc.length ? { cc } : {}),
     subject: 'OCC Decks — new registration request',
-    text: `New registration request\n\nName: ${name}\nEmail: ${email}\n\nReview and approve or reject this request:\n${url.href}\n\nThe account has no access until you approve it and the person confirms their email.`,
-    html: `<div style="font-family:Arial,sans-serif;line-height:1.6;color:#222"><h2>New registration request</h2><p><strong>${escapeHtml(name)}</strong><br>${escapeHtml(email)}</p><p><a href="${escapeHtml(url.href)}" style="display:inline-block;padding:12px 20px;background:#202b32;color:#fff;border-radius:8px;text-decoration:none">Review registration</a></p><p>Choose the position, then approve or reject. The account has no access until approved and the email is confirmed.</p></div>`,
+    text: `New registration request\n\nName: ${name}\nEmail: ${email}\nDepartment: ${label}\n\nReview and approve or reject this request:\n${url.href}\n\nThe account has no access until you approve it and the person confirms their email.`,
+    html: `<div style="font-family:Arial,sans-serif;line-height:1.6;color:#222"><h2>New registration request</h2><p><strong>${escapeHtml(name)}</strong><br>${escapeHtml(email)}<br>${label}</p><p><a href="${escapeHtml(url.href)}" style="display:inline-block;padding:12px 20px;background:#202b32;color:#fff;border-radius:8px;text-decoration:none">Review registration</a></p><p>Choose the position, then approve or reject. The account has no access until approved and the email is confirmed.</p></div>`,
   };
 };
 

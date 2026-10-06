@@ -89,6 +89,17 @@ test('approval and email possession are both required; activation uses the origi
   assert.equal(await activateRegistration(mail.token, person.password, store), false);
 });
 
+test('self-selected department routes review email but never assigns access or changes an existing request', async () => {
+  const store = memory();
+  await requestRegistration({ ...person, department: 'kitchen', role: 'admin' }, store);
+  const request = store.requests.get(person.email);
+  assert.equal(request.department, 'kitchen'); assert.equal(request.role, undefined);
+  assert.deepEqual(request.notificationPayload.cc, ['jerome@ocnyc.com']);
+  await requestRegistration({ ...person, department: 'captain' }, store);
+  assert.equal(request.department, 'kitchen'); assert.equal(store.notifications.length, 1);
+  assert.throws(() => registrationDetails({ ...person, department: 'admin' }), /Choose Captain/);
+});
+
 test('approval cannot escalate department roles, reapprove immediately or replace an existing account', async () => {
   const store = memory(); await requestRegistration(person, store);
   await assert.rejects(approveRegistration({ email: person.email, role: 'admin', auth }, store), /cannot approve/);

@@ -14,22 +14,24 @@ export const ACCESS_REQUEST_MESSAGE = 'Your registration request has been receiv
 export const registrationDetails = (body = {}) => {
   const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
   const name = typeof body.name === 'string' ? body.name.trim() : '';
+  const department = body.department || 'other';
+  if (!['captain', 'kitchen', 'other'].includes(department)) throw createApiError(400, 'Choose Captain, Kitchen or Other.');
   if (!name || name.length > 240 || email.length > 320 || !isValidInviteEmail(email)) throw createApiError(400, 'Enter your full name and a valid email address.');
   const error = passwordResetValidation(body.password);
   if (error) throw createApiError(400, error);
-  return { name, email, password: body.password };
+  return { name, email, department, password: body.password };
 };
 
 export const requestRegistration = async (body, { Requests = AccessRequest, Users = User,
   notify = (email) => deliverRegistrationNotification({ email, Requests }),
 } = {}) => {
-  const { name, email, password } = registrationDetails(body);
+  const { name, email, department, password } = registrationDetails(body);
   const passwordHash = await bcrypt.hash(password, 10);
   if (await Users.exists({ email })) return;
   // One pending request per email. A duplicate never replaces the chosen password.
   try {
-    const created = await Requests.updateOne({ _id: email }, { $setOnInsert: { name, passwordHash, status: 'pending', requestedAt: new Date(),
-      notificationStatus: 'queued', notificationPayload: registrationReviewEmail({ name, email }),
+    const created = await Requests.updateOne({ _id: email }, { $setOnInsert: { name, department, passwordHash, status: 'pending', requestedAt: new Date(),
+      notificationStatus: 'queued', notificationPayload: registrationReviewEmail({ name, email, department }),
     } }, { upsert: true });
     if (created.upsertedCount) {
       try { await notify(email); }

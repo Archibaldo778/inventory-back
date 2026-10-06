@@ -39,7 +39,7 @@ router.get('/', async (req, res) => {
     if (email && !validEmail(email)) return res.status(400).json({ message: 'Choose a valid request.' });
     const rows = await AccessRequest.find({ ...reviewableRequests(req.auth), ...(email ? { _id: email } : {}) }).sort({ requestedAt: 1 }).limit(200).lean();
     return res.json({ items: rows.map((row) => ({ email: row._id, name: row.name, requestedAt: row.requestedAt,
-      status: row.status, role: row.role, emailSentAt: row.emailSentAt })) });
+      status: row.status, department: row.department || 'other', role: row.role, emailSentAt: row.emailSentAt })) });
   } catch (error) { return sendApiError(res, error, { context: 'Registration request list failed', fallbackMessage: 'Could not load registration requests' }); }
 });
 router.post('/:email/approve', async (req, res) => {

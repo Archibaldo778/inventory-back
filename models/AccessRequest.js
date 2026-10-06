@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 const schema = new mongoose.Schema({
   _id: { type: String, required: true }, // Normalized email: one request per address.
   name: { type: String, required: true, maxlength: 240 },
+  department: { type: String, enum: ['captain', 'kitchen', 'other'], default: 'other' },
   passwordHash: { type: String, select: false },
   status: { type: String, enum: ['pending', 'approved', 'rejected', 'activating', 'completed'], default: 'pending' },
   role: { type: String, default: '' },

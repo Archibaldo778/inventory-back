@@ -58,6 +58,7 @@ export const normalizeInviteCc = (value) => {
 
 export const renderUserInviteEmail = ({ name, inviteUrl, role = 'captain', active = false, sender }) => {
   const identity = resolveUserInvitationSender(sender);
+  const contact = identity.name === 'OCC Decks' ? 'contact the Staffing and Service Department.' : 'contact me directly.';
   const kitchenLead = role === 'kitchen lead';
   const barCaptain = role === 'bar captain';
   const uniformPacker = role === 'uniform packer';
@@ -76,7 +77,7 @@ export const renderUserInviteEmail = ({ name, inviteUrl, role = 'captain', activ
     'Open the event where you are booked as Lead Chef, Kitchen Lead, Proofer Lead or Executive Chef, then select Kitchen Report.',
     'Complete the report within 48 hours after the event. Include any staffing, food, equipment or service issues and submit it when finished.',
     'If you forget your password, use Forgot password on the login page.',
-    'If an assigned event is missing or you need help registering, contact me directly.',
+    `If an assigned event is missing or you need help registering, ${contact}`,
   ] : uniformPacker ? [
     'Sign in and open Events. Select the event you are preparing.',
     'Check the booked staff, open positions and sizes in Staff & Uniform. Saved staff sizes are used first, then sizes supplied by Nowsta.',
@@ -91,7 +92,7 @@ export const renderUserInviteEmail = ({ name, inviteUrl, role = 'captain', activ
       'Use Save quantities to save your progress. Add any unlisted alcohol and notes for missing or damaged items.',
       'Submit final Bar Returns before leaving the venue or immediately after returning to the shop. Submit Captain’s Report separately; completing one does not submit the other.',
     ] : []),
-    'If an assigned event is missing or you need help registering, contact me directly.',
+    `If an assigned event is missing or you need help registering, ${contact}`,
   ] : [
     role === 'bartender' ? 'Sign in and open My Events to view your bar assignments.'
       : role === 'packer' ? 'Sign in and open the Packing Station to prepare event inventory.'

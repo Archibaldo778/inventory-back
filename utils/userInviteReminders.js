@@ -1,5 +1,5 @@
 import User from '../models/Users.js';
-import { resolveUserInvitationSender } from './userInvitationSender.js';
+import { resolveAutomaticEmailSender } from './userInvitationSender.js';
 import { createUserInviteToken, INVITE_ROLES, isValidInviteEmail, userInviteUrl } from './userInvitations.js';
 import { fetchWithTimeout } from './fetchWithTimeout.js';
 
@@ -18,7 +18,7 @@ export const dueUserInviteRemindersQuery = (now) => ({
 });
 
 export const renderUserInviteReminder = ({ user, token }) => {
-  const sender = resolveUserInvitationSender(user.inviteSender);
+  const sender = resolveAutomaticEmailSender();
   const deadline = new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/New_York', dateStyle: 'full', timeStyle: 'short',
   }).format(new Date(user.inviteExpiresAt));

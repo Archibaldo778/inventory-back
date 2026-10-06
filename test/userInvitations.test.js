@@ -57,7 +57,8 @@ test('bar captain invitation explains registration, reports and beverage returns
   assert.match(email.text, /Sent, Received and Returned quantities/);
   assert.match(email.text, /Captain’s Report/);
   assert.match(email.text, /Submit Captain’s Report separately/);
-  assert.match(email.text, /Ivan/);
+  assert.match(email.text, /OCC Decks/);
+  assert.doesNotMatch(email.text, /Ivan/);
 });
 
 test('report-only captain instructions never ask for bar returns', () => {
@@ -115,6 +116,7 @@ test('captain invitation email is sent from Ivan with a reply address', async ()
       name: 'Test Captain',
       role: 'captain',
       cc: ['copy@example.com', 'itsupport@ocnyc.com'],
+      sender: { username: 'Ivan', email: 'ivan@ocnyc.com' },
       inviteUrl: 'https://occdecks.com/accept-invite?token=test',
       fetchImpl: async (url, options) => {
         requests.push({ url, body: JSON.parse(options.body) });
@@ -123,7 +125,7 @@ test('captain invitation email is sent from Ivan with a reply address', async ()
       },
     });
     assert.equal(result.status, 'sent');
-    assert.equal(request.body.from, 'Ivan at OCC <reports@reports.occdecks.com>');
+    assert.equal(request.body.from, '"Ivan at OCC" <reports@reports.occdecks.com>');
     assert.equal(request.body.reply_to, 'ivan@ocnyc.com');
     assert.deepEqual(request.body.to, ['itsupport@ocnyc.com']);
     assert.equal(request.body.cc, undefined);

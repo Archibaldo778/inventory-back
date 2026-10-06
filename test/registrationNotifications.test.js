@@ -62,6 +62,28 @@ test('captain and kitchen requests notify both reviewers and copy only the selec
   assert.deepEqual(unique.to, ['ivan@ocnyc.com']); assert.equal(unique.cc, undefined);
 });
 
+test('new registration alerts use the company sender while retaining Ivan and Iurie as reviewers', (t) => {
+  for (const [key, value] of Object.entries({ USER_INVITE_FROM: 'Ivan at OCC <reports@reports.occdecks.com>', USER_INVITE_REPLY_TO: 'ivan@ocnyc.com', REGISTRATION_REVIEW_EMAIL: '', REGISTRATION_REVIEW_SECOND_EMAIL: 'iurie@ocnyc.com' })) {
+    const previous = process.env[key]; process.env[key] = value;
+    t.after(() => { if (previous === undefined) delete process.env[key]; else process.env[key] = previous; });
+  }
+  const message = registrationReviewEmail({ name: 'New Captain', email: 'new@example.com' });
+  assert.equal(message.from, 'OCC Decks <reports@reports.occdecks.com>');
+  assert.deepEqual(message.to, ['ivan@ocnyc.com', 'iurie@ocnyc.com']);
+  assert.doesNotMatch(`${message.text} ${message.html}`, /ivan/i);
+});
+
+test('previously queued personal sender names are corrected without changing recipients or issuing a new delivery key', async () => {
+  const original = { ...payload, from: 'Ivan at OCC <reports@example.com>' };
+  const store = memory([{ ...job, notificationPayload: original }]);
+  assert.equal(await deliverRegistrationNotification({ ...store, fetchImpl: async (...args) => { await store.fetchImpl(...args); throw Error('uncertain response'); } }), 'failed');
+  assert.equal(JSON.parse(store.calls[0].body).from, 'OCC Decks <reports@example.com>');
+  assert.deepEqual(JSON.parse(store.calls[0].body).to, original.to);
+  assert.equal(await deliverRegistrationNotification({ ...store, now: new Date(+now + 6 * 60_000) }), 'sent');
+  assert.deepEqual(store.calls[0], store.calls[1]);
+  assert.equal(store.rows[0].notificationPayload.from, original.from);
+});
+
 test('concurrent notification attempts send once and a repeated request never re-mails a delivered notification', async () => {
   const store = memory();
   const statuses = await Promise.all([deliverRegistrationNotification(store), deliverRegistrationNotification(store)]);

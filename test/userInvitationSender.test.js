@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import User from '../models/Users.js';
 import router from '../routes/users.js';
-import { resolveUserInvitationSender } from '../utils/userInvitationSender.js';
+import { resolveUserInvitationSender, resolveAutomaticEmailSender } from '../utils/userInvitationSender.js';
 import { renderUserInviteEmail } from '../utils/userInvitations.js';
 import { renderUserInviteReminder } from '../utils/userInviteReminders.js';
 
@@ -62,17 +62,30 @@ test('sender display names are quoted, header-safe and HTML-escaped while the ve
   assert.match(rendered.html, /Zia &quot;Chef&quot;, A&amp;B Team/);
 });
 
-test('reminders use the stored inviter and old invitations without sender metadata retain the legacy sender', (t) => {
+test('automated reminders use OCC Decks even when the original invitation was sent personally', (t) => {
   env(t, 'USER_INVITE_FROM', undefined);
   env(t, 'USER_INVITE_REPLY_TO', undefined);
   const user = { username: 'Employee', email: 'employee@example.com', inviteExpiresAt: new Date('2026-11-01T12:00:00Z') };
   const legacy = renderUserInviteReminder({ user, token: 'test-token' });
-  assert.equal(legacy.from, 'Ivan at OCC <reports@reports.occdecks.com>');
-  assert.equal(legacy.reply_to, 'ivan@ocnyc.com');
-  user.inviteSender = { name: 'Zia Sheikh', email: 'zia@example.com' };
+  assert.equal(legacy.from, 'OCC Decks <reports@reports.occdecks.com>');
+  assert.equal(legacy.reply_to, 'staffing@ocnyc.com');
+  user.inviteSender = { name: 'Ivan', email: 'ivan@example.com' };
   const current = renderUserInviteReminder({ user, token: 'test-token' });
-  assert.equal(current.from, '"Zia Sheikh at OCC" <reports@reports.occdecks.com>');
-  assert.equal(current.reply_to, 'zia@example.com');
-  assert.match(current.text, /Thank you,\nZia Sheikh\n/);
-  assert.doesNotMatch(current.html, /<strong>Ivan<\/strong>/);
+  assert.equal(current.from, 'OCC Decks <reports@reports.occdecks.com>');
+  assert.equal(current.reply_to, 'staffing@ocnyc.com');
+  assert.match(current.text, /Thank you,\nOCC Decks\n/);
+  assert.doesNotMatch(JSON.stringify(current), /ivan/i);
+});
+
+test('old personal sender configuration cannot brand system mail or fallback signatures as Ivan', (t) => {
+  env(t, 'USER_INVITE_FROM', 'Ivan at OCC <invites@verified.example>');
+  env(t, 'USER_INVITE_REPLY_TO', 'ivan@example.com');
+  const sender = resolveAutomaticEmailSender();
+  assert.equal(sender.from, 'OCC Decks <invites@verified.example>');
+  assert.equal(sender.name, 'OCC Decks'); assert.equal(sender.email, 'staffing@ocnyc.com');
+  assert.deepEqual(resolveUserInvitationSender(), sender);
+  const message = renderUserInviteEmail({ name: 'Captain', inviteUrl: 'https://example.com/invite' });
+  assert.doesNotMatch(JSON.stringify(message), /ivan/i); assert.doesNotMatch(message.text, /contact me directly/);
+  const personal = resolveUserInvitationSender({ username: 'Ivan', email: 'ivan@example.com' });
+  assert.equal(personal.from, '"Ivan at OCC" <invites@verified.example>'); assert.equal(personal.email, 'ivan@example.com');
 });

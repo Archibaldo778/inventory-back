@@ -1,18 +1,18 @@
 import crypto from 'node:crypto';
 import AccessRequest from '../models/AccessRequest.js';
-import { resolveUserInvitationSender } from './userInvitationSender.js';
+import { resolveAutomaticEmailSender } from './userInvitationSender.js';
 import { userInviteUrl } from './userInvitations.js';
 import { fetchWithTimeout } from './fetchWithTimeout.js';
 
 const escapeHtml = (value) => String(value || '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 export const registrationReviewEmail = ({ name, email, department = 'other' }) => {
-  const identity = resolveUserInvitationSender();
+  const identity = resolveAutomaticEmailSender();
   const mailbox = (value) => {
     const address = String(value).trim().toLowerCase();
     if (!/^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/.test(address)) throw new Error('One email address per review recipient is required');
     return address;
   };
-  const to = [...new Set([mailbox(process.env.REGISTRATION_REVIEW_EMAIL || identity.email), mailbox(process.env.REGISTRATION_REVIEW_SECOND_EMAIL || 'iurie@ocnyc.com')])];
+  const to = [...new Set([mailbox(process.env.REGISTRATION_REVIEW_EMAIL || process.env.USER_INVITE_REPLY_TO || 'ivan@ocnyc.com'), mailbox(process.env.REGISTRATION_REVIEW_SECOND_EMAIL || 'iurie@ocnyc.com')])];
   const copy = department === 'captain' ? process.env.REGISTRATION_REVIEW_STAFFING_EMAIL || 'staffing@ocnyc.com'
     : department === 'kitchen' ? process.env.REGISTRATION_REVIEW_KITCHEN_EMAIL || 'jerome@ocnyc.com' : '';
   const cc = copy ? [mailbox(copy)].filter((address) => !to.includes(address)) : [];
@@ -40,11 +40,14 @@ export const deliverRegistrationNotification = async ({ email, Requests = Access
   if (!job) return 'idle';
   const claim = { _id: job._id, notificationStatus: 'processing', notificationLockedUntil: lock };
   try {
+    // Older queued payloads may contain a personal display name. Keep their
+    // original mailbox, recipients and idempotency key when correcting it.
+    const payload = { ...job.notificationPayload, from: resolveAutomaticEmailSender(job.notificationPayload?.from).from };
     const response = await fetchWithTimeout('https://api.resend.com/emails', {
       method: 'POST', headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json',
         'Idempotency-Key': `registration-review:${crypto.createHash('sha256').update(job._id).digest('hex')}` },
       // Persisted when queued: retries use the exact same body and recipient.
-      body: JSON.stringify(job.notificationPayload),
+      body: JSON.stringify(payload),
     }, { timeoutMs: 15_000, fetchImpl });
     const result = await response.json().catch(() => ({}));
     if (!response.ok || !result.id) throw new Error('Review notification delivery was not confirmed');

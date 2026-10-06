@@ -478,6 +478,7 @@ import transportationRoutes from './routes/transportation.js';
 import slackIntegrationRoutes from './routes/slackIntegration.js';
 import { runSlackEventChannelSync, slackEventChannelsEnabled } from './utils/slackEventChannels.js';
 import { CAPTAIN_REPORT_EMAIL_REMINDERS_ENABLED, CAPTAIN_REPORT_REMINDERS_START_DATE, runCaptainReportEmailReminders } from './utils/captainReportReminders.js';
+import { runVenueReportNotifications } from './utils/venueReportNotifications.js';
 import { runUserInviteReminders } from './utils/userInviteReminders.js';
 import { runEventReportEmailPreview } from './utils/eventReportEmailPreviews.js';
 import { runRegistrationNotifications } from './utils/registrationNotifications.js';
@@ -758,6 +759,11 @@ export const startServer = async () => {
   captainReportEmailTimer.unref?.();
   console.log(`Captain report email reminders enabled for events from ${CAPTAIN_REPORT_REMINDERS_START_DATE}`);
 
+  const venueReportTimer = setInterval(() => {
+    runVenueReportNotifications().catch((error) => console.error('Venue report notifications failed:', error?.message));
+  }, 60_000);
+  venueReportTimer.unref?.();
+
   const userInviteReminderTimer = setInterval(() => {
     runUserInviteReminders().then((summary) => {
       if (summary.sent || summary.failed) console.log('User invitation reminders processed', summary);
@@ -798,6 +804,7 @@ export const startServer = async () => {
     if (slackStartupTimer) clearTimeout(slackStartupTimer);
     if (slackSyncTimer) clearInterval(slackSyncTimer);
     clearInterval(captainReportEmailTimer);
+    clearInterval(venueReportTimer);
     clearInterval(userInviteReminderTimer);
     clearInterval(reportPreviewTimer);
     clearInterval(registrationNotificationTimer);

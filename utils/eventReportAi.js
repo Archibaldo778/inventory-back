@@ -90,7 +90,7 @@ export const eventReportAnalysisIsStale = (analysis, reports = [], files = []) =
     || reports.some((report) => report.status === 'submitted' && new Date(report.submittedAt) > new Date(analysis.generatedAt));
 };
 
-export const analyzeEventReports = async ({ event, reports = [], files = [], fetchImpl = globalThis.fetch, apiKey = process.env.OPENAI_API_KEY } = {}) => {
+export const analyzeEventReports = async ({ event, reports = [], files = [], venuePlanning = false, fetchImpl = globalThis.fetch, apiKey = process.env.OPENAI_API_KEY } = {}) => {
   const key = clean(apiKey, 2000);
   if (!key) throw Object.assign(new Error('OpenAI API key is not configured'), { statusCode: 503 });
   if (reports.length > 50 || files.length > 20 || files.reduce((sum, file) => sum + file.data.length, 0) > 20 * 1024 * 1024
@@ -111,6 +111,10 @@ export const analyzeEventReports = async ({ event, reports = [], files = [], fet
         'Do not invent facts. Distinguish a reported concern from a confirmed fact.',
         'Use reporter names or positions as evidence when useful. Avoid empty filler.',
         EVENT_REPORT_RERUN_GUIDANCE,
+        ...(venuePlanning ? [
+          'This analysis is for planning a future event at the same venue. Include ONLY reusable venue-specific constraints in problems: BOH space, access, loading, elevators, utilities, venue equipment or venue rules. Exclude one-time staffing, food, guest, weather or service incidents.',
+          'For each problem, evidence must contain exact, complete answer text copied from a supplied form response, without quotation marks or reporter prefixes. Put a cautious, practical planning recommendation in detail, clearly distinguishing it from the historical observation. Do not claim the condition still exists. If there are no relevant venue constraints, return an empty problems array.',
+        ] : []),
         'Attached PDFs are event reports, including scanned pages. Read them alongside the form responses. Cite PDF filenames and page numbers in evidence. If pages are unreadable, state that limitation rather than inventing their contents.',
       ].join(' '),
       input: files.length ? [{ role: 'user', content: [

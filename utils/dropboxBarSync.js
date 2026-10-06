@@ -2,18 +2,29 @@ import crypto from 'node:crypto';
 import { selectLatestDropboxFileRevisions } from './dropboxDocuments.js';
 import { selectBarPackoutSeries } from './barSeriesCharges.js';
 
-export const selectDropboxBarSourceDocuments = (documents = []) => selectLatestDropboxFileRevisions(
-  (Array.isArray(documents) ? documents : [])
-    .filter((document) => String(document?.sourceProvider || '') === 'dropbox')
-    .map((document) => {
-      const source = typeof document?.toObject === 'function' ? document.toObject() : { ...document };
-      return {
-        ...source,
-        relativePath: String(source?.sourcePath || source?.fileName || ''),
-        modifiedAt: source?.uploadedAt,
-      };
-    }),
-);
+export const selectDropboxBarSourceDocuments = (documents = []) => {
+  const seenContent = new Set();
+  return selectLatestDropboxFileRevisions(
+    (Array.isArray(documents) ? documents : [])
+      .filter((document) => String(document?.sourceProvider || '') === 'dropbox')
+      .map((document) => {
+        const source = typeof document?.toObject === 'function' ? document.toObject() : { ...document };
+        return {
+          ...source,
+          relativePath: String(source?.sourcePath || source?.fileName || ''),
+          modifiedAt: source?.uploadedAt,
+        };
+      }),
+  ).filter((document) => {
+    // The same PO can be copied into another event folder with a new Dropbox id.
+    const checksum = String(document?.checksum || '').trim();
+    if (!checksum) return true;
+    const key = `${document.type || ''}:${checksum}`;
+    if (seenContent.has(key)) return false;
+    seenContent.add(key);
+    return true;
+  });
+};
 
 export const resolveDropboxSharedSeriesDocuments = (events = [], currentEventId = '', currentItems = []) => {
   // Daily carryover already represents the previous day's remaining stock.

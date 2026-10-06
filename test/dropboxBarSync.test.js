@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { runImportedBarItemMergePipeline } from '../utils/barManualItems.js';
 import {
   buildDropboxBarSourceChecksum,
   hasAppliedDropboxBarSourceChecksum,
@@ -99,4 +100,35 @@ test('Dropbox checksum is current only when Dropbox is the latest source sync', 
       { action: 'caterease_operations_synced', details: { checksum: 'caterease-checksum' } },
     ],
   }, checksum), false);
+});
+
+test('identical PO copies in different event folders do not double Sent quantities', () => {
+  const documents = ['Warburg Pincus Dinner', 'Rachael Cocktail Bedford'].map((folder, index) => ({
+    sourceProvider: 'dropbox', sourceId: `copy-${index}`, type: 'po',
+    sourcePath: `/Events/${folder}/Leadership File/Rachael PO.docx`,
+    checksum: 'identical-file-content',
+    barItems: [{ name: 'Panna', sentQty: 28 }, { name: 'Sancerre', sentQty: 30 }],
+  }));
+  const selected = selectDropboxBarSourceDocuments(documents);
+  const result = runImportedBarItemMergePipeline({
+    importedItems: selected.flatMap((document) => document.barItems), documentTypes: ['po'],
+  });
+  assert.equal(selected.length, 1);
+  assert.deepEqual(result.items.map((item) => item.sentQty), [28, 30]);
+  assert.equal(documents.length, 2);
+});
+
+test('different PO contents and documents without checksums remain separate', () => {
+  const documents = ['first', 'second', 'unknown-one', 'unknown-two'].map((folder, index) => ({
+    sourceProvider: 'dropbox', sourceId: folder, type: 'po',
+    sourcePath: `/Events/${folder}/PO.docx`,
+    checksum: index < 2 ? `content-${index}` : '',
+    barItems: [{ name: 'Panna', sentQty: 2 }],
+  }));
+  const selected = selectDropboxBarSourceDocuments(documents);
+  assert.equal(selected.length, 4);
+  const result = runImportedBarItemMergePipeline({
+    importedItems: selected.flatMap((document) => document.barItems), documentTypes: ['po'],
+  });
+  assert.equal(result.items[0].sentQty, 8);
 });

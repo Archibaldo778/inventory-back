@@ -52,7 +52,8 @@ const wait = (milliseconds) => new Promise((resolve) => {
 });
 
 const safeUpstreamMessage = (status) => {
-  if (status === 401 || status === 403) return 'Nowsta rejected the access key';
+  if (status === 401) return 'Nowsta authentication failed (HTTP 401)';
+  if (status === 403) return 'Nowsta denied access (HTTP 403)';
   if (status === 429) return 'Nowsta rate limit was reached';
   return `Nowsta API returned ${status || 'an invalid response'}`;
 };
@@ -77,8 +78,17 @@ export const createNowstaClient = ({ apiKey = process.env.NOWSTA_API_KEY, fetchI
       return request(pathname, params, attempt + 1);
     }
     if (!response.ok) {
-      throw Object.assign(new Error(safeUpstreamMessage(response.status)), {
-        statusCode: [401, 403, 429].includes(response.status) ? response.status : 502,
+      // Only known resource paths and page numbers are safe to include in logs.
+      // Never include the key, query values or the upstream response body.
+      const resource = /^\/v2\/[a-z_]+(?:\/\d+)?$/.test(url.pathname.replace('/integrations', ''))
+        ? url.pathname.replace('/integrations', '') : 'Nowsta resource';
+      const page = Number(params.page);
+      const context = `${resource}${Number.isSafeInteger(page) && page > 0 ? `, page ${page}` : ''}`;
+      const format = String(response.headers?.get?.('content-type') || '').toLowerCase().includes('application/json') ? 'JSON' : 'non-JSON';
+      throw Object.assign(new Error(`${safeUpstreamMessage(response.status)} — ${context}; ${format} response`), {
+        // An upstream auth failure must not expire the OCC user's own session.
+        statusCode: response.status === 429 ? 429 : 502,
+        upstreamStatus: response.status,
       });
     }
     const contentType = String(response.headers?.get?.('content-type') || '').toLowerCase();

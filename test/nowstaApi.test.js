@@ -115,6 +115,27 @@ test('Nowsta client sends the access key only as a bearer header', async () => {
   assert.equal(captured.url.includes('secret-key'), false);
 });
 
+test('Nowsta failures identify the resource and page without exposing secrets or rejecting the OCC login', async () => {
+  for (const [status, type, expected] of [[401, 'application/json', 'authentication failed'], [403, 'text/html', 'denied access'], [429, 'application/json', 'rate limit'], [500, 'application/json', 'returned 500']]) {
+    const client = createNowstaClient({ apiKey: 'private-access-key', rateLimitRetries: 0, fetchImpl: async () => new Response('private-response-body', { status, headers: { 'content-type': type } }) });
+    await assert.rejects(client.request('/v2/shifts', { page: 3, private: 'private-query' }), error => {
+      assert.equal(error.statusCode, status === 429 ? 429 : 502);
+      assert.equal(error.upstreamStatus, status);
+      assert.ok(error.message.includes(expected));
+      assert.match(error.message, /\/v2\/shifts, page 3/);
+      assert.ok(error.message.includes(type === 'text/html' ? 'non-JSON response' : 'JSON response'));
+      assert.doesNotMatch(error.message, /private-access-key|private-response-body|private-query/);
+      return true;
+    });
+  }
+  const client = createNowstaClient({ apiKey: 'private-key', fetchImpl: async () => new Response('', { status: 403 }) });
+  await assert.rejects(client.request('/v2/private-key', { page: 'private-page' }), error => {
+    assert.match(error.message, /Nowsta resource/);
+    assert.doesNotMatch(error.message, /private-key|private-page/);
+    return true;
+  });
+});
+
 test('Nowsta default sync range is bounded and valid', () => {
   const range = resolveNowstaSyncRange({ now: new Date('2026-09-04T12:00:00Z') });
   assert.ok(range.from < range.to);

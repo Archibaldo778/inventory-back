@@ -15,6 +15,7 @@ export const readinessReport = { ...base, answers: {
 
 export const briefEvaluationCases = [
   { name: 'Resolved site problem hidden in praise, low attendance and excess food', report: readinessReport,
+    forbidden: [{ label: 'routine entree format flagged as a problem', field: 'attention', pattern: 'entree|entrée' }],
     required: [
       { label: 'site not ready', field: 'attention', pattern: 'clutter|junk|bicycl|disorgani|unorgani|obstruct|blocked' },
       { label: 'resolution preserved', field: 'attention', pattern: 'clear|remov|reorgani|restor|resolved' },
@@ -41,3 +42,12 @@ export const briefEvaluationCases = [
     overallEvaluation: 'Guests enjoyed the food.',
   } }, required: [{ label: 'reported obstruction', field: 'attention', pattern: 'box|block|clutter|obstruct' }] },
 ];
+
+export const evaluateBrief = (sample, brief) => {
+  const text = [brief.summary, ...brief.attention].join(' ');
+  const matches = (rule) => new RegExp(rule.pattern, 'i').test(rule.field === 'attention' ? brief.attention.join(' ') : text);
+  const failures = sample.required.filter((rule) => !matches(rule)).map((rule) => rule.label);
+  failures.push(...(sample.forbidden || []).filter(matches).map((rule) => rule.label));
+  if (sample.noAttention && brief.attention.length) failures.push('unexpected attention item');
+  return failures;
+};

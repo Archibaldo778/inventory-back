@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { generateEventReportEmailBrief, validateEmailBrief } from '../utils/eventReportEmailBrief.js';
 import { buildReportPreviewPayload, runEventReportEmailPreview } from '../utils/eventReportEmailPreviews.js';
 import { renderEventReportEmail, renderEventReportText } from '../utils/eventReportEmail.js';
-import { readinessReport } from './fixtures/eventReportBriefCases.js';
+import { readinessReport, briefEvaluationCases, evaluateBrief } from './fixtures/eventReportBriefCases.js';
 
 const report = {
   _id: 'report-1', status: 'submitted', reportType: 'captain', eventTitle: 'Prada Day 1',
@@ -13,6 +13,21 @@ const report = {
 };
 const user = { _id: 'admin-1', email: 'reviewer@example.com', role: 'admin', isActive: true };
 const brief = { summary: 'The client was happy. An additional 30 minutes of prep time was reported.', attention: [] };
+
+test('live brief evaluation catches a routine service answer incorrectly flagged as a problem', () => {
+  const sample = briefEvaluationCases[0];
+  const valid = { summary: 'Guests were happy despite lower turnout.', attention: [
+    'The work area was cluttered; Alex cleared it and Jordan helped.',
+    'PIB was excessive; the chef estimated supplies could cover both days and noted the refrigerator.',
+  ] };
+  assert.deepEqual(evaluateBrief(sample, valid), []);
+  assert.deepEqual(evaluateBrief(sample, { ...valid, attention: [...valid.attention,
+    'The report indicates there was no choice of entree service. No further impact was stated.',
+  ] }), ['routine entree format flagged as a problem']);
+  assert.ok(evaluateBrief(sample, { ...valid, attention: valid.attention.slice(1) }).includes('site not ready'));
+  assert.deepEqual(evaluateBrief(briefEvaluationCases[1], { summary: 'Guests were happy.', attention: [] }), []);
+  assert.deepEqual(evaluateBrief(briefEvaluationCases[1], { summary: 'Guests were happy.', attention: ['No re-runs.'] }), ['unexpected attention item']);
+});
 
 test('AI brief uses only the selected submitted report and accepts structured output', async () => {
   let body;

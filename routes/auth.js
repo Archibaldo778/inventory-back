@@ -6,10 +6,12 @@ import { getJwtSecret } from '../middleware/auth.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import { userInviteTokenQuery } from '../utils/userInvitations.js';
 import passwordResetRoutes from './passwordReset.js';
+import { publicAccessRequestRoutes } from './accessRequests.js';
 import { hasFullSalesAccess } from '../utils/salesAccess.js';
 
 const router = Router();
 router.use(passwordResetRoutes);
+router.use(publicAccessRequestRoutes);
 const ACCESS_TOKEN_TTL = '15m';
 const REFRESH_TOKEN_TTL_REMEMBERED = '90d';
 const REFRESH_TOKEN_TTL_DEFAULT = '1d';

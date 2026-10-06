@@ -28,6 +28,9 @@ export const departmentAdminRequestAllowed = (auth, req) => {
   const read = ['GET', 'HEAD'].includes(method);
   if (/^\/(?:api\/)?users(?:\/|$)/.test(path)) {
     const suffix = path.replace(/^\/(?:api\/)?users/, '');
+    if (roleOf(auth) === 'staffing admin' && (suffix === '/access-requests' || suffix.startsWith('/access-requests/'))) {
+      return (read && suffix === '/access-requests') || (method === 'POST' && /^\/access-requests\/[^/]+\/(?:approve|reject)$/.test(suffix));
+    }
     if (read) return ['', '/invite-templates', '/options'].includes(suffix);
     if (method === 'POST') return suffix === '/invite';
     if (['PUT', 'PATCH'].includes(method)) return /^\/[a-f\d]{24}(?:\/password)?$/i.test(suffix) || suffix === '/update';

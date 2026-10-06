@@ -8,6 +8,7 @@ import { resolveUserInvitationSender } from '../utils/userInvitationSender.js';
 import { userTeamProfile } from '../utils/userTeamProfile.js';
 import { hasFullSalesAccess } from '../utils/salesAccess.js';
 import reportTeamRoutes from './reportTeams.js';
+import accessRequestRoutes from './accessRequests.js';
 import { invitationRolesFor, departmentUserFilter, canManageDepartmentUser, isDepartmentAdmin, departmentEmployeeRoles } from '../utils/departmentAccess.js';
 import {
   createUserInviteToken,
@@ -23,6 +24,7 @@ import {
 
 const router = express.Router();
 router.use('/teams', reportTeamRoutes);
+router.use('/access-requests', accessRequestRoutes);
 
 const normalizeRole = (role) => {
   const raw = String(role || '').trim().toLowerCase();

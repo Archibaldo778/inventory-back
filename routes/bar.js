@@ -1,3 +1,4 @@
+import { loadBarReturnCaptains, deliverBarReturnReminder } from '../utils/barReturnReminders.js';
 import { Router } from 'express';
 import mongoose from 'mongoose';
 import multer from 'multer';
@@ -1248,6 +1249,39 @@ router.get('/events/:id/packout-series', requireBarOperator, async (req, res) =>
     })) });
   } catch (error) {
     return sendApiError(res, error, { context: 'Bar packout series lookup failed', fallbackMessage: 'Could not find the event series' });
+  }
+});
+
+router.get('/events/:id/return-captains', requireBarManager, async (req, res) => {
+  try {
+    const event = await loadEvent(req, res);
+    if (!event) return undefined;
+    const captains = await loadBarReturnCaptains(event);
+    const completed = ['submitted', 'reviewed', 'closed'].includes(event.status);
+    return res.json({ captains: captains.map(({ email, ...captain }) => ({
+      ...captain, canRemind: Boolean(email) && !completed,
+      unavailableReason: completed ? 'Returns already submitted' : (!email ? 'No email available' : ''),
+    })) });
+  } catch (error) {
+    return sendApiError(res, error, { context: 'Bar return captains lookup failed', fallbackMessage: 'Could not load captains' });
+  }
+});
+
+router.post('/events/:id/return-captains/:captainId/remind', requireBarManager, async (req, res) => {
+  try {
+    const event = await loadEvent(req, res);
+    if (!event) return undefined;
+    const captains = await loadBarReturnCaptains(event);
+    const recipient = captains.find((captain) => captain.id === req.params.captainId);
+    if (!recipient) return res.status(409).json({ message: 'Captain assignments changed. Reload this event.' });
+    const result = await deliverBarReturnReminder({ event, recipient, sender: req.auth });
+    await BarEvent.updateOne({ _id: event._id }, { $push: { audit: { $each: [{
+      action: 'bar_return_reminder_sent', userId: String(req.auth.userId), username: String(req.auth.username || req.auth.email),
+      at: result.sentAt, details: { recipientId: recipient.id, recipientName: recipient.name },
+    }], $slice: -MAX_AUDIT_ENTRIES } } });
+    return res.json({ ok: true, ...result });
+  } catch (error) {
+    return sendApiError(res, error, { context: 'Bar return reminder failed', fallbackMessage: 'Could not send the reminder' });
   }
 });
 

@@ -18,6 +18,7 @@ import {
   validateBarReturnQuantities,
 } from '../utils/barEventAccounting.js';
 import { prepareBarReturnBatchItem } from '../utils/barReturnBatch.js';
+import { visibleBarSourceChangeAfterReturns } from '../utils/barSourceChangeProtection.js';
 import {
   buildActiveDashboardBarEventQuery,
   buildDashboardBarSyncQuery,
@@ -211,6 +212,7 @@ const rememberCatalogMatchAcrossEvents = async ({ catalogItem, names, auth }) =>
 
 const serializeBarEvent = (source, { includeFinancials = false } = {}) => {
   const event = typeof source?.toObject === 'function' ? source.toObject() : { ...(source || {}) };
+  event.sourceChangedAfterReturns = visibleBarSourceChangeAfterReturns(event);
   event.reportRequired = requiresEventReport(event);
   const booking = captainBookings.get(source);
   if (booking) {

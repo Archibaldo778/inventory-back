@@ -2,8 +2,45 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildBarImportChecksum,
+  barItemsHaveRecordedReturns,
+  visibleBarSourceChangeAfterReturns,
   recordBarSourceChangeAfterReturns,
 } from '../utils/barSourceChangeProtection.js';
+
+test('automatic cocktail confirmations and legacy food headings neither lock imports nor show stale warnings', () => {
+  const event = {
+    status: 'ready', revision: 4, audit: [],
+    sourceChangedAfterReturns: { source: 'Dropbox automatic sync', checksum: 'old', at: new Date() },
+    items: ['APPLE CIDER GIMLET', 'TABLE NIBBLES', 'FIRST COURSE - SERVED FAMILY STYLE'].map((name) => ({
+      name, section: 'COCKTAIL', returnConfirmed: true, returnedFullQty: 0, returnedOpenQty: 0,
+    })),
+  };
+  assert.equal(barItemsHaveRecordedReturns(event), false);
+  assert.equal(visibleBarSourceChangeAfterReturns(event), null);
+  assert.ok(event.sourceChangedAfterReturns); // Reading does not mutate the document.
+  assert.deepEqual(recordBarSourceChangeAfterReturns(event, { source: 'Dropbox automatic sync', checksum: 'new' }),
+    { locked: false, changed: false });
+  assert.equal(event.sourceChangedAfterReturns, undefined);
+  assert.equal(event.revision, 4);
+  assert.deepEqual(event.audit, []);
+});
+
+test('real returns remain protected regardless of date, classification or zero quantity', () => {
+  const warning = { source: 'Dropbox automatic sync', checksum: 'old' };
+  for (const item of [
+    { name: 'Gin', scope: 'alcohol', section: 'COCKTAIL', returnConfirmed: true, returnedFullQty: 0 },
+    { name: 'Gimlet', section: 'COCKTAIL', returnedOpenQty: 1 },
+    { name: 'TABLE NIBBLES', returnedFullQty: 1 },
+    { name: 'Wine', lostDamagedQty: 1 },
+  ]) {
+    const event = { status: 'ready', eventDate: '2099-01-01', items: [item], sourceChangedAfterReturns: warning };
+    assert.equal(barItemsHaveRecordedReturns(event), true);
+    assert.equal(visibleBarSourceChangeAfterReturns(event), warning);
+  }
+  for (const status of ['submitted', 'reviewed', 'closed']) {
+    assert.equal(barItemsHaveRecordedReturns({ status, items: [] }), true);
+  }
+});
 
 test('a renamed PO item cannot replace items after returns were submitted', () => {
   const barEvent = {

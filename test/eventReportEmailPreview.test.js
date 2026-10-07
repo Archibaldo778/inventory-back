@@ -189,3 +189,33 @@ test('AI failure sends nothing; uncertain provider response is not retried autom
   assert.equal((await crashed.run()).status, 'idle');
   assert.equal(crashed.requests.length, 0);
 });
+
+test('invalid or oversized AI briefs get one bounded retry using the original report', async () => {
+  for (const first of [
+    { output_text: JSON.stringify({ summary: 'word '.repeat(151), attention: [] }) },
+    { output_text: JSON.stringify({ summary: '', attention: [] }) },
+    { output_text: '{broken' },
+    { status: 'incomplete' },
+  ]) {
+    const requests = [];
+    const result = await generateEventReportEmailBrief({ report, apiKey: 'test', fetchImpl: async (_url, options) => {
+      requests.push(JSON.parse(options.body));
+      return { ok: true, json: async () => requests.length === 1 ? first : { output_text: JSON.stringify(brief) } };
+    } });
+    assert.equal(result.summary, brief.summary);
+    assert.equal(requests.length, 2);
+    assert.equal(requests[1].input, requests[0].input);
+    assert.match(requests[1].instructions, /previous response failed validation/);
+  }
+});
+
+test('invalid AI output stops after two attempts and HTTP failures are not retried', async () => {
+  for (const ok of [true, false]) {
+    let calls = 0;
+    await assert.rejects(generateEventReportEmailBrief({ report, apiKey: 'test', fetchImpl: async () => {
+      calls += 1;
+      return { ok, status: ok ? 200 : 401, json: async () => ({ output_text: '{}' }) };
+    } }));
+    assert.equal(calls, ok ? 2 : 1);
+  }
+});

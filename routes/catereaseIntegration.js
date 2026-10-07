@@ -1225,6 +1225,119 @@ const distributeCatereaseSeriesCharge = async (sourceBarEvent, total, actor) => 
   };
 };
 
+export const syncBarEventClientPricing = async (barEvent, auth = {}, {
+  resolveEventId = resolveCatereaseOperationalEventId, loadBundle = getCatereaseEventBundle,
+} = {}) => {
+  if (isRecentCatereaseSync(barEvent.catereaseClientChargeSnapshot?.syncedAt)) {
+    const lines = barEvent.catereaseClientChargeSnapshot?.lineItems || [];
+    return {
+      ok: true,
+      cached: true,
+      summary: {
+        billedBeverageLineItems: lines.length,
+        billedBeverageTotal: Number(barEvent.catereaseClientChargeSnapshot?.beverageTotal) || 0,
+        appliedClientCharge: Number(barEvent.clientCharge) || null,
+      },
+    };
+  }
+  return dedupeViewSync(`financial:${barEvent.id}`, async () => {
+    const event = await Event.findById(barEvent.linkedEventId).select('externalId title date').lean();
+    if (!event) throw Object.assign(new Error('Linked dashboard event was not found'), { statusCode: 409 });
+    const requestedEventId = String(event.externalId || barEvent.eventNumber || '').trim();
+    const catereaseEventId = await resolveEventId(requestedEventId, String(event.date || '').slice(0, 10), event.title);
+    const bundle = await loadBundle(catereaseEventId);
+    const billing = bundle?.includes?.lineItems;
+    if (!billing || (billing._status && billing._status !== 'ok') || !Array.isArray(billing.data ?? billing)) {
+      throw Object.assign(new Error('Caterease billing data is incomplete'), { statusCode: 502 });
+    }
+    const summary = applyCatereaseAlcoholClientChargesFromBundle(barEvent.items, bundle);
+    const { billedBeverageCharges, ...auditSummary } = summary;
+    const hasBilling = summary.billedBeverageLineItems > 0
+      || (barEvent.clientChargeDetails?.source === 'caterease' && barEvent.catereaseClientChargeSnapshot?.syncedAt);
+    if (summary.matchedItems > 0 || hasBilling) {
+      const syncedAt = new Date();
+      const syncedBy = String(auth?.username || auth?.email || '');
+      if (hasBilling) {
+        barEvent.catereaseClientChargeSnapshot = {
+          beverageTotal: summary.billedBeverageTotal,
+          lineItems: billedBeverageCharges,
+          syncedAt,
+          syncedBy,
+        };
+        barEvent.clientCharge = summary.billedBeverageTotal;
+        barEvent.clientChargeDetails = {
+          beverageSubtotal: summary.billedBeverageTotal,
+          liquorSubtotal: null,
+          source: 'caterease',
+          sourceFileName: 'Caterease live billing',
+          importedAt: syncedAt,
+          importedBy: syncedBy,
+        };
+      }
+      barEvent.revision += 1;
+      barEvent.audit.push({
+        action: 'caterease_client_pricing_synced',
+        userId: String(auth?.userId || ''),
+        username: syncedBy,
+        at: syncedAt,
+        details: {
+          catereaseEventId,
+          ...auditSummary,
+        },
+      });
+      barEvent.audit = barEvent.audit.slice(-200);
+      await barEvent.save();
+      const seriesAllocation = hasBilling
+        ? await distributeCatereaseSeriesCharge(barEvent, summary.billedBeverageTotal, syncedBy)
+        : null;
+      clearApiCacheGroups('bar');
+      auditSummary.seriesAllocation = seriesAllocation;
+    }
+    return {
+      ok: true,
+      catereaseEventId,
+      summary: {
+        ...summary,
+        appliedClientCharge: auditSummary.seriesAllocation?.events
+          ?.find((entry) => entry.barEventId === String(barEvent._id))?.amount
+          ?? (hasBilling ? summary.billedBeverageTotal : null),
+        seriesAllocation: auditSummary.seriesAllocation,
+      },
+    };
+  });
+};
+
+router.post('/financials/sync-report', requireAuth, viewSyncRateLimit, async (req, res) => {
+  try {
+    if (!canSeeBarFinancials(req.auth)) return res.status(403).json({ error: 'Bar financial access required' });
+    const ids = Array.isArray(req.body?.eventIds) ? [...new Set(req.body.eventIds)] : [];
+    if (!ids.length || ids.length > 5 || ids.some((id) => !/^[a-f\d]{24}$/i.test(String(id)))) {
+      return res.status(400).json({ error: 'Provide between 1 and 5 valid bar event IDs' });
+    }
+    const events = await BarEvent.find({ _id: { $in: ids } });
+    if (events.length !== ids.length || events.some((event) => !canViewEvent(event, req.auth))) {
+      return res.status(403).json({ error: 'Bar financial access required for every event' });
+    }
+    const results = [];
+    // Keep provider traffic bounded; all viewers share the existing per-event cooldown.
+    for (const event of events) {
+      if (!event.linkedEventId || (event.clientChargeDetails?.source === 'manual' && Number(event.clientCharge) > 0)) {
+        results.push({ id: String(event._id), skipped: true });
+        continue;
+      }
+      try {
+        await syncBarEventClientPricing(event, req.auth);
+        results.push({ id: String(event._id), ok: true });
+      } catch {
+        results.push({ id: String(event._id), ok: false });
+      }
+    }
+    return res.json({ ok: results.every((result) => result.ok !== false), results });
+  } catch (error) {
+    return sendApiError(res, error, { context: 'Bar report pricing refresh failed', fallbackMessage: 'Could not refresh report pricing' });
+  }
+});
+
 router.post('/financials/sync/:barEventId', requireAuth, viewSyncRateLimit, async (req, res) => {
   try {
     if (!/^[a-f\d]{24}$/i.test(String(req.params.barEventId || ''))) {
@@ -1236,77 +1349,7 @@ router.post('/financials/sync/:barEventId', requireAuth, viewSyncRateLimit, asyn
       return res.status(403).json({ error: 'Bar financial access required' });
     }
     if (!barEvent.linkedEventId) return res.status(409).json({ error: 'Bar event is not linked to a dashboard event' });
-    if (isRecentCatereaseSync(barEvent.catereaseClientChargeSnapshot?.syncedAt)) {
-      const lines = barEvent.catereaseClientChargeSnapshot?.lineItems || [];
-      return res.json({
-        ok: true,
-        cached: true,
-        summary: {
-          billedBeverageLineItems: lines.length,
-          billedBeverageTotal: Number(barEvent.catereaseClientChargeSnapshot?.beverageTotal) || 0,
-          appliedClientCharge: Number(barEvent.clientCharge) || null,
-        },
-      });
-    }
-    const response = await dedupeViewSync(`financial:${barEvent.id}`, async () => {
-      const event = await Event.findById(barEvent.linkedEventId).select('externalId title date').lean();
-      if (!event) throw Object.assign(new Error('Linked dashboard event was not found'), { statusCode: 409 });
-      const requestedEventId = String(event.externalId || barEvent.eventNumber || '').trim();
-      const catereaseEventId = await resolveCatereaseOperationalEventId(requestedEventId, String(event.date || '').slice(0, 10), event.title);
-      const bundle = await getCatereaseEventBundle(catereaseEventId);
-      const summary = applyCatereaseAlcoholClientChargesFromBundle(barEvent.items, bundle);
-      if (summary.matchedItems > 0 || summary.billedBeverageLineItems > 0) {
-        const { billedBeverageCharges, ...auditSummary } = summary;
-        const syncedAt = new Date();
-        const syncedBy = String(req.auth?.username || req.auth?.email || '');
-        if (summary.billedBeverageLineItems > 0) {
-          barEvent.catereaseClientChargeSnapshot = {
-            beverageTotal: summary.billedBeverageTotal,
-            lineItems: billedBeverageCharges,
-            syncedAt,
-            syncedBy,
-          };
-          barEvent.clientCharge = summary.billedBeverageTotal;
-          barEvent.clientChargeDetails = {
-            beverageSubtotal: summary.billedBeverageTotal,
-            liquorSubtotal: null,
-            source: 'caterease',
-            sourceFileName: 'Caterease live billing',
-            importedAt: syncedAt,
-            importedBy: syncedBy,
-          };
-        }
-        barEvent.revision += 1;
-        barEvent.audit.push({
-          action: 'caterease_client_pricing_synced',
-          userId: String(req.auth?.userId || ''),
-          username: syncedBy,
-          at: syncedAt,
-          details: {
-            catereaseEventId,
-            ...auditSummary,
-          },
-        });
-        barEvent.audit = barEvent.audit.slice(-200);
-        await barEvent.save();
-        const seriesAllocation = summary.billedBeverageLineItems > 0
-          ? await distributeCatereaseSeriesCharge(barEvent, summary.billedBeverageTotal, syncedBy)
-          : null;
-        clearApiCacheGroups('bar');
-        auditSummary.seriesAllocation = seriesAllocation;
-      }
-      return {
-        ok: true,
-        catereaseEventId,
-        summary: {
-          ...summary,
-          appliedClientCharge: auditSummary.seriesAllocation?.events
-            ?.find((entry) => entry.barEventId === String(barEvent._id))?.amount
-            ?? (summary.billedBeverageLineItems > 0 ? summary.billedBeverageTotal : null),
-          seriesAllocation: auditSummary.seriesAllocation,
-        },
-      };
-    });
+    const response = await syncBarEventClientPricing(barEvent, req.auth);
     return res.json(response);
   } catch (error) {
     return sendApiError(res, error, { context: 'Caterease client pricing sync failed', fallbackMessage: 'Failed to load client pricing from Caterease' });

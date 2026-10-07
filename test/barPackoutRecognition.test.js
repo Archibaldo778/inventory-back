@@ -309,3 +309,14 @@ test('food headings with service descriptions are not imported as prepared bever
   }] });
   assert.deepEqual(result.items.map((item) => item.name), ['APPLE CIDER GIMLET']);
 });
+
+test('PO specialty servings use cocktail names from Notes instead of merging generic headings', () => {
+  const result = parseRecognizedPackout({ tables: [{ headerRows: [['Name', 'Qty', 'Notes/Comments']], bodyRows: [
+    ['SPECIALTY BEVERAGE (number of servings)', '32', 'APPLE CIDER GIMLET'],
+    ['Specialty Cocktail: Gin, Apple Cider, Fresh Lime, Sage', '', ''],
+    ['SPECIALTY BEVERAGE (number of servings)', '45', 'SPICED PEAR SPRITZ'],
+  ] }] });
+  assert.deepEqual(result.items.map(({ name, quantity }) => ({ name, quantity })), [
+    { name: 'APPLE CIDER GIMLET', quantity: 32 }, { name: 'SPICED PEAR SPRITZ', quantity: 45 },
+  ]);
+});

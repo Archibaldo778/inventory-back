@@ -128,6 +128,7 @@ const parseRows = (rows, startSection = '', startScope = 'review', startIndex = 
     const name = cleanText(cells[columns.name], 240);
     if (!name) return;
     const quantityCell = columns.quantity >= 0 ? cells[columns.quantity] : '';
+    if (/^specialty\s+(?:cocktail|mocktail)\s*:/i.test(name) && !String(quantityCell || '').trim()) return;
     const otherValues = [
       quantityCell,
       columns.notes >= 0 ? cells[columns.notes] : '',
@@ -141,6 +142,15 @@ const parseRows = (rows, startSection = '', startScope = 'review', startIndex = 
       currentSection = name;
       currentScope = classified;
       sections.push({ name, scope: classified });
+      return;
+    }
+    const specialtyName = columns.notes >= 0 ? cleanText(cells[columns.notes] || '').trim() : '';
+    if (/^specialty\s+(?:beverage|cocktail|mocktail)\b/i.test(name) && /servings?/i.test(name) && specialtyName) {
+      items.push({
+        id: `specialty-${items.length + 1}`, name: specialtyName,
+        section: /mocktail/i.test(name) ? 'MOCKTAIL' : 'COCKTAIL', scope: 'review', includedByDefault: true,
+        ...parseQuantity(quantityCell), cocktailServingsAuto: false, notes: '', delivered: '', returned: '',
+      });
       return;
     }
     const quantityState = parseQuantity(quantityCell);

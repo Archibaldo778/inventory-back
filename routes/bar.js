@@ -669,8 +669,11 @@ export const normalizePackoutItems = async (items, { allowFinancials = false, gu
         && explicitSentQty !== undefined
         && String(explicitSentQty).trim() !== ''
         && Number.isFinite(Number(explicitSentQty));
+      const hasDocumentQuantity = item?.quantity !== null && item?.quantity !== undefined
+        && String(item.quantity).trim() !== '' && Number.isFinite(Number(item.quantity)) && Number(item.quantity) >= 0
+        && item.sentQtyPending !== true;
       const cocktailServingsAuto = preparedBeverageType
-        ? cleanBoolean(item?.cocktailServingsAuto, !hasExplicitSentQty)
+        ? (hasDocumentQuantity ? false : cleanBoolean(item?.cocktailServingsAuto, !hasExplicitSentQty))
         : false;
       const automaticCocktailServings = cocktailServingsAuto
         ? cocktailServingsForGuests(guestCount)
@@ -682,7 +685,7 @@ export const normalizePackoutItems = async (items, { allowFinancials = false, gu
           .join(' · '),
         caseSize: catalogItem?.caseSize,
       });
-      const sentQty = cleanNumber(automaticCocktailServings ?? caseConversion?.quantity ?? item?.sentQty ?? item?.quantity, {
+      const sentQty = cleanNumber(automaticCocktailServings ?? caseConversion?.quantity ?? (preparedBeverageType && hasDocumentQuantity ? item.quantity : (item?.sentQty ?? item?.quantity)), {
         fallback: preparedBeverageType ? cleanNumber(guestCount, { fallback: 0 }) : 0,
       });
       return {

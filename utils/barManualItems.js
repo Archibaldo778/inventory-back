@@ -203,6 +203,17 @@ export const preservePackoutOperationalState = (existingItems, nextItems) => {
       updatedBy: String(match.updatedBy || item.updatedBy || ''),
       updatedAt: match.updatedAt || item.updatedAt || null,
     };
+    // A later Kitchen Menu is a preparation plan, never a replacement for PO counts.
+    const keepConfirmedQuantity = match.sentQtyPending !== true && (
+      item.sentQtyPending === true
+      || (getPreparedBeverageType(item) && item.cocktailServingsAuto === true && match.cocktailServingsAuto === false)
+    );
+    if (keepConfirmedQuantity) {
+      next.sentQty = match.sentQty;
+      next.sentQtyText = match.sentQtyText;
+      next.sentQtyPending = false;
+      next.cocktailServingsAuto = match.cocktailServingsAuto;
+    }
     if (match._id) next._id = match._id;
     return next;
   });

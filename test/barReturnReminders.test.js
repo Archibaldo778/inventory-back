@@ -96,3 +96,11 @@ test('the route rechecks assignments and rejects a forged recipient without send
   await handler({ params: { id: event._id, captainId: 'forged' }, auth: { role: 'bar admin', ...sender }, body: { email: 'other@example.com', sender: 'Ivan' } }, res);
   assert.equal(res.statusCode, 409);
 });
+
+test('sanitation captains never receive bar reminders and Captain - Bar takes priority over Floor', () => {
+  const shifts = [shift('Captain - Floor', [worker('Alec')]), shift('Captain - Sanitation', [worker('Jonnathan')])];
+  assert.deepEqual(selectBarReturnCaptains({ schedule: { shifts } }).map((c) => c.name), ['Alec']);
+  shifts.push(shift('Captain - Bar', [worker('Jo'), worker('Pat')]));
+  assert.deepEqual(selectBarReturnCaptains({ schedule: { shifts } }).map((c) => c.name), ['Jo', 'Pat']);
+  assert.deepEqual(selectBarReturnCaptains({ schedule: { shifts: [shift('Sanitation Captain', [worker('Jonnathan')])] } }), []);
+});

@@ -20,12 +20,13 @@ export const selectBarReturnCaptains = ({ schedule, users = [], assignedUserIds 
   const active = users.filter((user) => user.isActive !== false && ['captain', 'bar captain'].includes(user.role));
   const shifts = schedule?.shifts;
   const candidates = Array.isArray(shifts) ? shifts.flatMap((shift) => {
-    if (!/\bcaptain\b/i.test(clean(shift.position).replace(/[_-]/g, ' '))) return [];
+    const position = clean(shift.position).replace(/[_-]/g, ' ');
+    if (!/\bcaptain\b/i.test(position) || /\bsanitation\b/i.test(position)) return [];
     return (shift.workers || []).filter((worker) => ['confirmed', 'assigned'].includes(clean(worker.status).toLowerCase()))
       .map((worker) => ({ ...worker, position: shift.position }));
   }) : active.filter((user) => assignedUserIds.map(String).includes(String(user._id)))
     .map((user) => ({ name: user.username, email: user.email, position: user.role }));
-  const barCaptains = candidates.filter((worker) => /\bbar[\s_-]+captain\b/i.test(worker.position));
+  const barCaptains = candidates.filter((worker) => /\bbar\b/i.test(worker.position));
   const selected = barCaptains.length ? barCaptains : candidates;
   const unique = new Map();
   for (const worker of selected) {

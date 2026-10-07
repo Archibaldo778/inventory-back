@@ -55,16 +55,16 @@ test('AI failures, refusals, drafts and oversized output cannot become an email 
   ]) {
     await assert.rejects(generateEventReportEmailBrief({ report, apiKey: 'test', fetchImpl: async () => response }));
   }
-  for (const value of [{}, { ...brief, summary: 'a'.repeat(1001) }, { ...brief, summary: 'word '.repeat(151) }, { ...brief, attention: ['a'.repeat(501)] }, { ...brief, attention: [''] }]) {
+  for (const value of [{}, { ...brief, summary: 'a'.repeat(1001) }, { ...brief, summary: 'ok '.repeat(251) }, { ...brief, attention: ['a'.repeat(501)] }, { ...brief, attention: [''] }]) {
     assert.throws(() => validateEmailBrief(value));
   }
 });
 
-test('briefs can preserve more than two issues within a shared 150-word limit', () => {
+test('briefs can preserve more than two issues within a shared 250-word limit', () => {
   const expanded = { summary: Array(90).fill('outcome').join(' '), attention: ['Setup required clearing.', 'Equipment needed replacement.', 'Food was excessive.'] };
   assert.deepEqual(validateEmailBrief(expanded), expanded);
-  assert.deepEqual(validateEmailBrief({ summary: Array(147).fill('ok').join(' '), attention: ['one', 'two', 'three'] }).attention, ['one', 'two', 'three']);
-  assert.throws(() => validateEmailBrief({ summary: Array(148).fill('ok').join(' '), attention: ['one', 'two', 'three'] }));
+  assert.deepEqual(validateEmailBrief({ summary: Array(247).fill('ok').join(' '), attention: ['one', 'two', 'three'] }).attention, ['one', 'two', 'three']);
+  assert.throws(() => validateEmailBrief({ summary: Array(248).fill('ok').join(' '), attention: ['one', 'two', 'three'] }));
 });
 
 test('kitchen brief receives all reported context and retains long staff comments through the email renderer', async () => {
@@ -192,7 +192,7 @@ test('AI failure sends nothing; uncertain provider response is not retried autom
 
 test('invalid or oversized AI briefs get one bounded retry using the original report', async () => {
   for (const first of [
-    { output_text: JSON.stringify({ summary: 'word '.repeat(151), attention: [] }) },
+    { output_text: JSON.stringify({ summary: 'ok '.repeat(251), attention: [] }) },
     { output_text: JSON.stringify({ summary: '', attention: [] }) },
     { output_text: '{broken' },
     { status: 'incomplete' },

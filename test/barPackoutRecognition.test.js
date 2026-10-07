@@ -301,3 +301,11 @@ test('Milken PO shorthand matches existing wine and assorted beer inventory', ()
   assert.deepEqual(matched.map((item) => item.beverageItemId), ['sancerre', 'pinot', 'beer']);
   assert.ok(matched.every((item) => item.catalogMatch.status === 'exact'));
 });
+
+test('food headings with service descriptions are not imported as prepared beverages', () => {
+  const result = parseRecognizedPackout({ tables: [{
+    headerRows: [['Name', 'Qty', 'Notes/Comments']],
+    bodyRows: [['COCKTAIL', '', ''], ['APPLE CIDER GIMLET', '32', ''], ['TABLE NIBBLES', '68', ''], ['FIRST COURSE - SERVED FAMILY STYLE', '68', '']],
+  }] });
+  assert.deepEqual(result.items.map((item) => item.name), ['APPLE CIDER GIMLET']);
+});

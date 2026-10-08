@@ -6,6 +6,8 @@ import EventReportFile from '../models/EventReportFile.js';
 import { completedReportPdf, publicReportFile, reportFileName } from '../utils/eventReportFiles.js';
 import { sendApiError } from '../utils/apiErrors.js';
 
+import { sendReportPhoto } from '../utils/eventReportPhotos.js';
+
 const router = Router();
 export const UNIFORM_EVENT_FIELDS = 'title date client externalId managerId status meta.nowsta meta.guestCount meta.venue meta.address meta.eventTime catereaseOperations.staffRequest';
 const active = { status: { $not: /^(deleted|cancelled|canceled|lost|archived)$/i }, 'meta.nowsta.excluded': { $ne: true } };
@@ -66,6 +68,14 @@ router.get('/events/:eventId/files/:fileId', async (req, res) => {
     if (!file) return res.status(404).json({ message: 'Report file not found for this event' });
     res.setHeader('Cache-Control', 'private, no-store'); res.type('application/pdf'); res.attachment(reportFileName(file.fileName));
     return res.send(Buffer.from(file.data));
+  } catch (error) { return fail(res, error); }
+});
+router.get('/events/:eventId/reports/:reportId/photos/:index', async (req, res) => {
+  try {
+    if (!valid(req.params.reportId)) return res.status(400).json({ message: 'Invalid report' });
+    const report = await EventReport.findOne({ _id: req.params.reportId, eventId: req.uniformEvent._id, status: 'submitted' }).lean();
+    if (!report) return res.status(404).json({ message: 'Report not found' });
+    return await sendReportPhoto(res, report, req.params.index);
   } catch (error) { return fail(res, error); }
 });
 export default router;

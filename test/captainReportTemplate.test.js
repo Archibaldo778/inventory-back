@@ -137,8 +137,11 @@ test('public submission saves custom answers with the pinned form and ignores cl
   });
   const accessToken = issueEventGuestAccess({ eventIds: [eventId], capability: 'event:report', subjectId: 'slack-captain' });
   const res = response(); await handler(publicRouter, '/:eventId', 'post')({ params: { eventId }, body: { accessToken, templateRevision: 3,
+    photos: [{ data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=' }],
     templateSnapshot: { revision: 99, sections: [] }, answers: { custom_loading: 'Use narrow carts.', custom_checked: true, injected: 'ignored' },
   } }, res);
   assert.equal(res.code, 200); assert.equal(report.status, 'submitted'); assert.equal(report.templateSnapshot.revision, 3);
+  assert.equal(report.photos.length, 1); assert.equal(report.photoData.length, 1);
+  assert.equal(res.body.report.photos.length, 1); assert.equal(res.body.report.photoData, undefined);
   assert.equal(res.body.report.answers.custom_loading, 'Use narrow carts.'); assert.equal(res.body.report.answers.injected, undefined);
 });

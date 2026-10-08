@@ -13,6 +13,8 @@ import { requiresEventReport } from '../utils/eventReportRequirement.js';
 import { reportCaptainStillAssigned } from '../utils/captainEventDuties.js';
 import { pinReportTemplate, reportTemplate, captainTemplateAnswers } from '../utils/captainReportTemplate.js';
 
+import { validateReportPhotos, sendReportPhoto } from '../utils/eventReportPhotos.js';
+
 const router = Router();
 const limiter = createMemoryRateLimiter({ windowMs: 10 * 60 * 1000, max: 60, message: 'Too many event report requests' });
 const clean = (value, max = 5000) => String(value ?? '').trim().slice(0, max);
@@ -35,7 +37,7 @@ const publicReport = (report) => ({
   eventEndsAt: report.eventEndsAt || null,
   position: report.position, salesRep: report.salesRep, reportType: report.reportType || 'captain',
   status: report.status, submittedAt: report.submittedAt, answers: report.answers || {}, emailDelivery: report.emailDelivery,
-  templateSnapshot: reportTemplate(report),
+  templateSnapshot: reportTemplate(report), photos: report.photos || [],
 });
 
 router.get('/:eventId', limiter, async (req, res) => {
@@ -69,12 +71,13 @@ router.post('/:eventId', limiter, async (req, res) => {
     const templateSnapshot = reportTemplate(report);
     if ((req.body?.templateRevision ?? 0) !== templateSnapshot.revision) return res.status(409).json({ message: 'The report form has changed. Reload it before submitting.' });
     const answers = captainTemplateAnswers(templateSnapshot, req.body?.answers);
+    const photoFields = await validateReportPhotos(req.body?.photos);
     const settings = await EventReportSettings.findOne({ key: 'default' }).lean();
     // Cancellation and submission compete for the same pending state. A stale
     // form cannot revive a cancelled request or send a second submission email.
     const templateGuard = report.templateSnapshot ? { 'templateSnapshot.revision': templateSnapshot.revision } : { templateSnapshot: null };
     report = await EventReport.findOneAndUpdate({ _id: report._id, status: 'pending', ...templateGuard }, { $set: {
-      ...kitchenIdentity,
+      ...kitchenIdentity, ...photoFields,
       salesRep: resolveReportSalesRep(report, event), answers, status: 'submitted', submittedAt: new Date(),
       templateSnapshot,
       nextReminderAt: null, emailDelivery: { status: 'pending', recipients: [], cc: [], error: '' },
@@ -93,6 +96,17 @@ router.post('/:eventId', limiter, async (req, res) => {
   } catch (error) {
     return sendApiError(res, error, { context: 'Public event report submit failed', fallbackMessage: 'Could not submit this event report' });
   }
+});
+
+router.get('/:eventId/photos/:index', limiter, async (req, res) => {
+  try {
+    const access = loadAccess(req, res);
+    if (!access) return undefined;
+    const report = await EventReport.findOne({ eventId: req.params.eventId, slackUserId: clean(access.subjectId, 100) });
+    if (!report) return res.status(404).json({ message: 'Report not found' });
+    await validateStaffKitchenReportAccess(access, report);
+    return await sendReportPhoto(res, report, req.params.index);
+  } catch (error) { return sendApiError(res, error, { fallbackMessage: 'Could not load photo' }); }
 });
 
 export default router;

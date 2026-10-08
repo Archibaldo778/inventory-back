@@ -1,3 +1,4 @@
+import { loadReportPhotoData } from './eventReportPhotos.js';
 import crypto from 'node:crypto';
 import { PDFDocument } from 'pdf-lib';
 import JSZip from 'jszip';
@@ -39,5 +40,17 @@ export const eventReportDocx = async (report) => {
 
 export const completedReportPdf = async (report, { convert = convertLeadershipFileToPdf } = {}) => {
   if (report.status !== 'submitted') throw createApiError(409, 'Only submitted reports can be downloaded');
-  return convert({ fileName: 'event-report.docx', buffer: await eventReportDocx(report) });
+  const buffer = await convert({ fileName: 'event-report.docx', buffer: await eventReportDocx(report) });
+  if (!report.photos?.length) return buffer;
+  const pdf = await PDFDocument.load(buffer);
+  const data = await loadReportPhotoData(report);
+  for (const [index, photo] of report.photos.entries()) {
+    const bytes = Buffer.from(data[index], 'base64');
+    const image = photo.contentType === 'image/png' ? await pdf.embedPng(bytes) : await pdf.embedJpg(bytes);
+    const page = pdf.addPage([612, 792]);
+    const size = image.scaleToFit(540, 700);
+    page.drawText(`Photo ${index + 1}`, { x: 36, y: 756, size: 12 });
+    page.drawImage(image, { x: (612 - size.width) / 2, y: (742 - size.height) / 2, ...size });
+  }
+  return Buffer.from(await pdf.save());
 };

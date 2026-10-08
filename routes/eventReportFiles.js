@@ -8,6 +8,8 @@ import { requireAdmin } from '../middleware/auth.js';
 import { sendApiError } from '../utils/apiErrors.js';
 import { MAX_REPORT_PDF_BYTES, completedReportPdf, publicReportFile, reportFileName, validateReportPdf } from '../utils/eventReportFiles.js';
 
+import { sendReportPhoto } from '../utils/eventReportPhotos.js';
+
 const router = Router();
 router.use(requireAdmin);
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_REPORT_PDF_BYTES, files: 1 } }).single('file');
@@ -66,4 +68,12 @@ router.get('/:reportId/pdf', async (req, res) => {
   } catch (error) { return sendApiError(res, error, { field: 'message', fallbackMessage: 'Could not download this report' }); }
 });
 
+router.get('/:reportId/photos/:index', async (req, res) => {
+  try {
+    if (!validId(req.params.reportId)) return res.status(400).json({ message: 'Invalid report' });
+    const report = await EventReport.findById(req.params.reportId).lean();
+    if (!report) return res.status(404).json({ message: 'Report not found' });
+    return await sendReportPhoto(res, report, req.params.index);
+  } catch (error) { return sendApiError(res, error, { fallbackMessage: 'Could not load photo' }); }
+});
 export default router;

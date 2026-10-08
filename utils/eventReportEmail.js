@@ -1,3 +1,4 @@
+import { loadReportPhotoData } from './eventReportPhotos.js';
 import { listSlackUsers } from './slackApi.js';
 import { loadReportTeamDirectory, resolveTeamRouting } from './reportTeams.js';
 import { generateEventReportEmailBrief, validateEmailBrief } from './eventReportEmailBrief.js';
@@ -237,6 +238,7 @@ export const sendEventReportEmail = async ({ report, event, configuredRecipients
       console.warn('Event report email AI summary unavailable:', clean(error?.message, 300));
     }
   }
+  const photoData = await loadReportPhotoData(report);
   const response = await fetchImpl('https://api.resend.com/emails', {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
@@ -245,6 +247,7 @@ export const sendEventReportEmail = async ({ report, event, configuredRecipients
       to,
       ...(cc.length ? { cc } : {}),
       subject: `${emailReportTitle(report)} · ${clean(report.eventTitle, 300)} · ${clean(report.reporterName, 200)}`,
+      ...(photoData.length ? { attachments: report.photos.map((photo, index) => ({ filename: photo.fileName, content: photoData[index], content_type: photo.contentType })) } : {}),
       html: renderEventReportEmail(report, { emailBrief }),
       text: renderEventReportText(report, { emailBrief }),
     }),

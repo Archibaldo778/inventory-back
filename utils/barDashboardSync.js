@@ -16,7 +16,7 @@ export const DASHBOARD_BAR_SYNC_SELECT = [
   '_id', 'externalId', 'title', 'date', 'client', 'managerId', 'status',
   ...EVENT_GUEST_COUNT_FIELDS,
   'meta.venue', 'meta.location', 'meta.eventVenue', 'meta.event_venue',
-  'meta.nowsta.shifts',
+  'meta.nowsta.shifts', 'meta.nowsta.apiEventId',
 ].join(' ');
 
 export const buildActiveDashboardBarEventQuery = () => ({

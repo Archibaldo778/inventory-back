@@ -46,7 +46,7 @@ import { barItemIdentityKey, mergePackoutDocumentItems, preservePackoutOperation
 import { recognizeDocuments } from '../utils/googleDocumentAi.js';
 import { snapshotBarDocumentImport } from '../utils/documentImportAudit.js';
 import { summarizeBarEventReadiness } from '../utils/barEventReadiness.js';
-import { matchNowstaCaptainUserIds } from '../utils/nowstaCaptainAssignments.js';
+import { loadNowstaCaptainAssignments } from '../utils/nowstaCaptainAssignments.js';
 import {
   keepBarAccountingItems,
   matchRecognizedItemsToCatalog,
@@ -429,6 +429,7 @@ const syncDashboardEventsToBar = async ({ eventId = null } = {}) => {
   })
     .select('_id username email nowstaName')
     .lean();
+  const assignments = await loadNowstaCaptainAssignments(dashboardEvents, captainUsers);
   const operations = dashboardEvents.flatMap((event) => {
     const current = existingByEventId.get(String(event._id));
     const next = {
@@ -438,7 +439,7 @@ const syncDashboardEventsToBar = async ({ eventId = null } = {}) => {
       client: cleanString(event.client, 180),
       venue: eventVenue(event),
       salesRep: eventSalesRep(event),
-      assignedUserIds: matchNowstaCaptainUserIds({ event, users: captainUsers }),
+      assignedUserIds: assignments.get(String(event._id)) || [],
     };
     const preserveBarGuestCount = ['manual', 'packout'].includes(String(current?.guestCountSource || ''))
       && Number(current?.guestCount) > 0;

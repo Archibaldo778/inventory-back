@@ -2,10 +2,10 @@ import { PDFDocument } from 'pdf-lib';
 import EventReport from '../models/EventReport.js';
 import { createApiError } from './apiErrors.js';
 
-export const MAX_REPORT_PHOTOS = 5;
+export const MAX_REPORT_PHOTOS = 10;
 export const MAX_REPORT_PHOTO_BYTES = 1024 * 1024;
 export const validateReportPhotos = async (input = []) => {
-  if (!Array.isArray(input) || input.length > MAX_REPORT_PHOTOS) throw createApiError(400, 'Attach up to 5 photos');
+  if (!Array.isArray(input) || input.length > MAX_REPORT_PHOTOS) throw createApiError(400, 'Attach up to 10 photos');
   const photos = []; const photoData = [];
   const pdf = await PDFDocument.create();
   for (const [index, photo] of input.entries()) {

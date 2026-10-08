@@ -15,7 +15,7 @@ test('report photo validation accepts real photos, normalizes metadata and rejec
   const result = await validateReportPhotos([{ data: png, fileName: '<script>.svg', contentType: 'text/html' }]);
   assert.deepEqual(result.photos, [{ fileName: 'photo-1.png', contentType: 'image/png', size: Buffer.from(png, 'base64').length }]);
   assert.deepEqual(result.photoData, [png]);
-  for (const input of [null, {}, Array(6).fill({ data: png }), [{ data: Buffer.from('<svg/>').toString('base64') }], [{ data: 'not base64' }]]) {
+  for (const input of [null, {}, Array(11).fill({ data: png }), [{ data: Buffer.from('<svg/>').toString('base64') }], [{ data: 'not base64' }]]) {
     await assert.rejects(validateReportPhotos(input));
   }
   await assert.rejects(validateReportPhotos([{ data: 'a'.repeat(2 * 1024 * 1024) }]), { statusCode: 413 });
@@ -78,4 +78,12 @@ test('stored photo bytes are loaded only for the authorized report, including la
   assert.deepEqual(res.body, Buffer.from(png, 'base64'));
   const bytes = await completedReportPdf(report, { convert: async () => { const pdf = await PDFDocument.create(); pdf.addPage(); return pdf.save(); } });
   assert.equal((await PDFDocument.load(bytes)).getPageCount(), 2);
+});
+
+test('ten report photos are accepted and an eleventh is rejected', async () => {
+  const result = await validateReportPhotos(Array(10).fill({ data: png }));
+  assert.equal(result.photos.length, 10);
+  assert.equal(result.photoData.length, 10);
+  assert.equal(result.photos[9].fileName, 'photo-10.png');
+  await assert.rejects(validateReportPhotos(Array(11).fill({ data: png })), /up to 10/);
 });

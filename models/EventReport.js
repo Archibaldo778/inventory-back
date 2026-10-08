@@ -22,7 +22,7 @@ const eventReportSchema = new mongoose.Schema({
   reminderCount: { type: Number, default: 0, min: 0 },
   submittedAt: { type: Date, default: null },
   answers: { type: mongoose.Schema.Types.Mixed, default: {} },
-  photos: { type: [new mongoose.Schema({ fileName: String, contentType: String, size: Number }, { _id: false })], default: [] },
+  photos: { type: [new mongoose.Schema({ fileName: String, contentType: String, size: Number, publicId: String, url: String }, { _id: false })], default: [] },
   photoData: { type: [String], default: undefined, select: false },
   templateSnapshot: { type: mongoose.Schema.Types.Mixed, default: null },
   emailDelivery: {

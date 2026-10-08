@@ -41,7 +41,7 @@ export const eventReportDocx = async (report) => {
 export const completedReportPdf = async (report, { convert = convertLeadershipFileToPdf } = {}) => {
   if (report.status !== 'submitted') throw createApiError(409, 'Only submitted reports can be downloaded');
   const buffer = await convert({ fileName: 'event-report.docx', buffer: await eventReportDocx(report) });
-  if (!report.photos?.length) return buffer;
+  if (!report.photos?.length || report.photos.some((photo) => photo.url)) return buffer;
   const pdf = await PDFDocument.load(buffer);
   const data = await loadReportPhotoData(report);
   for (const [index, photo] of report.photos.entries()) {

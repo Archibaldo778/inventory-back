@@ -145,3 +145,33 @@ test('public submission saves custom answers with the pinned form and ignores cl
   assert.equal(res.body.report.photos.length, 1); assert.equal(res.body.report.photoData, undefined);
   assert.equal(res.body.report.answers.custom_loading, 'Use narrow carts.'); assert.equal(res.body.report.answers.injected, undefined);
 });
+
+test('submission preserves photos already uploaded to Cloudinary instead of replacing them with an empty client list', async (t) => {
+  const eventId = '507f1f77bcf86cd799439011';
+  for (const [key, value] of [['JWT_SECRET', 'template-submit-secret'], ['RESEND_API_KEY', '']]) {
+    const previous = process.env[key]; process.env[key] = value;
+    t.after(() => { if (previous === undefined) delete process.env[key]; else process.env[key] = previous; });
+  }
+  const report = { _id: eventId, eventId, slackUserId: 'slack-captain', status: 'pending', reportType: 'captain', templateSnapshot: structuredClone(snapshot),
+    photos: [{ publicId: 'event-reports/photo', url: 'https://res.cloudinary.com/occ/image/upload/photo.jpg' }],
+    toObject() { return { ...this }; }, save: async () => {} };
+  t.mock.method(EventReport, 'findOne', async () => report);
+  t.mock.method(Event, 'findById', () => ({ select: () => ({ lean: async () => ({ title: 'Dinner' }) }) }));
+  t.mock.method(EventReportSettings, 'findOne', () => ({ lean: async () => null }));
+  t.mock.method(ReportTeam, 'find', () => ({ sort: () => ({ lean: async () => [] }) }));
+  t.mock.method(User, 'find', () => ({ select: () => ({ lean: async () => [] }) }));
+  t.mock.method(globalThis, 'fetch', () => assert.fail('No provider requests in this test'));
+  t.mock.method(EventReport, 'findOneAndUpdate', async (filter, update) => {
+    assert.deepEqual(filter, { _id: eventId, status: 'pending', 'templateSnapshot.revision': 3 });
+    Object.assign(report, update.$set); return report;
+  });
+  const accessToken = issueEventGuestAccess({ eventIds: [eventId], capability: 'event:report', subjectId: 'slack-captain' });
+  const res = response(); await handler(publicRouter, '/:eventId', 'post')({ params: { eventId }, body: { accessToken, templateRevision: 3,
+    photos: [],
+    templateSnapshot: { revision: 99, sections: [] }, answers: { custom_loading: 'Use narrow carts.', custom_checked: true, injected: 'ignored' },
+  } }, res);
+  assert.equal(res.code, 200); assert.equal(report.status, 'submitted'); assert.equal(report.templateSnapshot.revision, 3);
+  assert.equal(report.photos.length, 1); assert.equal(report.photos[0].publicId, 'event-reports/photo'); assert.equal(report.photoData, undefined);
+  assert.equal(res.body.report.photos.length, 1); assert.equal(res.body.report.photoData, undefined);
+  assert.equal(res.body.report.answers.custom_loading, 'Use narrow carts.'); assert.equal(res.body.report.answers.injected, undefined);
+});

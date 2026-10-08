@@ -13,10 +13,11 @@ import { requiresEventReport } from '../utils/eventReportRequirement.js';
 import { reportCaptainStillAssigned } from '../utils/captainEventDuties.js';
 import { pinReportTemplate, reportTemplate, captainTemplateAnswers } from '../utils/captainReportTemplate.js';
 
-import { validateReportPhotos, sendReportPhoto } from '../utils/eventReportPhotos.js';
+import { validateReportPhotos, sendReportPhoto, uploadReportPhoto } from '../utils/eventReportPhotos.js';
 
 const router = Router();
 const limiter = createMemoryRateLimiter({ windowMs: 10 * 60 * 1000, max: 60, message: 'Too many event report requests' });
+const photoLimiter = createMemoryRateLimiter({ windowMs: 10 * 60 * 1000, max: 300, message: 'Please wait before uploading more photos' });
 const clean = (value, max = 5000) => String(value ?? '').trim().slice(0, max);
 const loadAccess = (req, res) => {
   if (!mongoose.Types.ObjectId.isValid(String(req.params.eventId || ''))) {
@@ -71,7 +72,8 @@ router.post('/:eventId', limiter, async (req, res) => {
     const templateSnapshot = reportTemplate(report);
     if ((req.body?.templateRevision ?? 0) !== templateSnapshot.revision) return res.status(409).json({ message: 'The report form has changed. Reload it before submitting.' });
     const answers = captainTemplateAnswers(templateSnapshot, req.body?.answers);
-    const photoFields = await validateReportPhotos(req.body?.photos);
+    const photoFields = req.body?.photos?.length ? await validateReportPhotos(req.body.photos) : {};
+    if (req.body?.photos?.length && report.photos?.some((photo) => photo.url)) return res.status(409).json({ message: 'Reload the report to preserve uploaded photos' });
     const settings = await EventReportSettings.findOne({ key: 'default' }).lean();
     // Cancellation and submission compete for the same pending state. A stale
     // form cannot revive a cancelled request or send a second submission email.
@@ -107,6 +109,38 @@ router.get('/:eventId/photos/:index', limiter, async (req, res) => {
     await validateStaffKitchenReportAccess(access, report);
     return await sendReportPhoto(res, report, req.params.index);
   } catch (error) { return sendApiError(res, error, { fallbackMessage: 'Could not load photo' }); }
+});
+
+router.post('/:eventId/photos', photoLimiter, async (req, res) => {
+  try {
+    const access = loadAccess(req, res);
+    if (!access) return undefined;
+    const report = await EventReport.findOne({ eventId: req.params.eventId, slackUserId: clean(access.subjectId, 100) });
+    if (!report) return res.status(404).json({ message: 'Report not found' });
+    await validateStaffKitchenReportAccess(access, report);
+    const event = await Event.findById(report.eventId).select(`title ${EVENT_REPORT_CONTEXT_SELECT}`).lean();
+    if (!requiresEventReport(event || { title: report.eventTitle }) || !await reportCaptainStillAssigned(report, event)) return res.status(403).json({ message: 'No report is required for this booking' });
+    const photo = await uploadReportPhoto({ report, data: req.body?.data });
+    return res.status(201).json({ photo });
+  } catch (error) { return sendApiError(res, error, { fallbackMessage: 'Could not upload photo' }); }
+});
+
+router.delete('/:eventId/photos', photoLimiter, async (req, res) => {
+  try {
+    const access = loadAccess(req, res);
+    if (!access) return undefined;
+    const report = await EventReport.findOne({ eventId: req.params.eventId, slackUserId: clean(access.subjectId, 100) });
+    if (!report) return res.status(404).json({ message: 'Report not found' });
+    await validateStaffKitchenReportAccess(access, report);
+    const event = await Event.findById(report.eventId).select(`title ${EVENT_REPORT_CONTEXT_SELECT}`).lean();
+    if (!await reportCaptainStillAssigned(report, event)) return res.status(403).json({ message: 'This report is no longer assigned to you' });
+    const publicId = clean(req.body?.publicId, 500);
+    if (!publicId || !report.photos?.some((photo) => photo.publicId === publicId)) return res.status(404).json({ message: 'Photo not found' });
+    const updated = await EventReport.findOneAndUpdate({ _id: report._id, status: 'pending' }, { $pull: { photos: { publicId } } }, { new: true });
+    if (!updated) return res.status(409).json({ message: 'This report is no longer open for changes' });
+    // Keep the asset: an in-flight retry can reattach the same content safely.
+    return res.json({ ok: true });
+  } catch (error) { return sendApiError(res, error, { fallbackMessage: 'Could not remove photo' }); }
 });
 
 export default router;

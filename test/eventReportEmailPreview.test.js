@@ -55,16 +55,16 @@ test('AI failures, refusals, drafts and oversized output cannot become an email 
   ]) {
     await assert.rejects(generateEventReportEmailBrief({ report, apiKey: 'test', fetchImpl: async () => response }));
   }
-  for (const value of [{}, { ...brief, summary: 'a'.repeat(1001) }, { ...brief, summary: 'ok '.repeat(251) }, { ...brief, attention: ['a'.repeat(501)] }, { ...brief, attention: [''] }]) {
+  for (const value of [{}, { ...brief, summary: 'a'.repeat(1001) }, { ...brief, summary: 'ok '.repeat(301) }, { ...brief, attention: ['a'.repeat(501)] }, { ...brief, attention: [''] }]) {
     assert.throws(() => validateEmailBrief(value));
   }
 });
 
-test('briefs can preserve more than two issues within a shared 250-word limit', () => {
+test('briefs can preserve more than two issues within a shared 300-word limit', () => {
   const expanded = { summary: Array(90).fill('outcome').join(' '), attention: ['Setup required clearing.', 'Equipment needed replacement.', 'Food was excessive.'] };
   assert.deepEqual(validateEmailBrief(expanded), expanded);
-  assert.deepEqual(validateEmailBrief({ summary: Array(247).fill('ok').join(' '), attention: ['one', 'two', 'three'] }).attention, ['one', 'two', 'three']);
-  assert.throws(() => validateEmailBrief({ summary: Array(248).fill('ok').join(' '), attention: ['one', 'two', 'three'] }));
+  assert.deepEqual(validateEmailBrief({ summary: Array(297).fill('ok').join(' '), attention: ['one', 'two', 'three'] }).attention, ['one', 'two', 'three']);
+  assert.throws(() => validateEmailBrief({ summary: Array(298).fill('ok').join(' '), attention: ['one', 'two', 'three'] }));
 });
 
 test('kitchen brief receives all reported context and retains long staff comments through the email renderer', async () => {
@@ -192,7 +192,7 @@ test('AI failure sends nothing; uncertain provider response is not retried autom
 
 test('invalid or oversized AI briefs get one bounded retry using the original report', async () => {
   for (const first of [
-    { output_text: JSON.stringify({ summary: 'ok '.repeat(251), attention: [] }) },
+    { output_text: JSON.stringify({ summary: 'ok '.repeat(301), attention: [] }) },
     { output_text: JSON.stringify({ summary: '', attention: [] }) },
     { output_text: '{broken' },
     { status: 'incomplete' },
@@ -218,4 +218,25 @@ test('invalid AI output stops after two attempts and HTTP failures are not retri
     } }));
     assert.equal(calls, ok ? 2 : 1);
   }
+});
+
+test('a second over-limit brief keeps complete high-priority issues within 300 words', async () => {
+  const summary = 'The event finished.';
+  const attention = Array.from({ length: 10 }, (_, i) => `Issue ${i}: ${'detail '.repeat(36)}resolved.`);
+  let calls = 0;
+  const result = await generateEventReportEmailBrief({ report, apiKey: 'test', fetchImpl: async () => {
+    calls += 1;
+    return { ok: true, json: async () => ({ output_text: JSON.stringify({ summary, attention }) }) };
+  } });
+  assert.equal(calls, 2);
+  assert.deepEqual(result.attention, attention.slice(0, 7));
+  assert.ok([result.summary, ...result.attention].join(' ').split(/\s+/).length <= 300);
+});
+
+test('a repeatedly overlong summary is bounded instead of disappearing from the email', async () => {
+  const result = await generateEventReportEmailBrief({ report, apiKey: 'test', fetchImpl: async () => ({
+    ok: true, json: async () => ({ output_text: JSON.stringify({ summary: 'ok '.repeat(301), attention: [] }) }),
+  }) });
+  assert.ok(result.summary.trim().split(/\s+/).length <= 300);
+  assert.ok(result.summary.length > 0);
 });

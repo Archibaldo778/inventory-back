@@ -239,7 +239,7 @@ test('email reminders start with October 1 events, excluding older overnight eve
 
 test('exempt event names never create reports or send email, including queued retries and Nowsta-only names', async (t) => {
   const state = setup(t);
-  for (const title of ['Tasting', 'Walk Through', 'Load-in', 'Load out']) {
+  for (const title of ['Tasting', 'Walk Through', 'Load-in', 'Load out', 'Rental Check-in', 'Rentals Check In', 'Rental Checkin']) {
     state.events = [{ ...event, title }];
     state.schedules = [schedule];
     assert.equal((await state.run(24)).sent, 0);

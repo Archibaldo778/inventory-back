@@ -1,6 +1,5 @@
 import EventReport from '../models/EventReport.js';
 import { resolveEventSalesRep } from './eventReportSalesRep.js';
-import { requiresCaptainReport } from './eventReportRequirement.js';
 import { createApiError } from './apiErrors.js';
 import { captainEventDuties } from './captainEventDuties.js';
 
@@ -14,7 +13,6 @@ export const captainReportIdentity = (eventId, user) => ({
 
 export const openCaptainReport = async ({ event, user, schedule, fallbackSalesRep = '' }) => {
   if (!['captain', 'bar captain'].includes(String(user?.role || '').trim().toLowerCase())) throw createApiError(403, 'Captain account required to create a personal report');
-  if (!requiresCaptainReport(event, schedule)) throw createApiError(403, 'No report is required for this event');
   if (!captainEventDuties({ event, user, schedule }).captainAssigned) throw createApiError(403, 'A confirmed Captain booking is required for this event');
   // Reuse Slack requests and submitted reports for the same person.
   const existing = await EventReport.findOne(captainReportIdentity(event._id, user))

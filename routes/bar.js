@@ -217,9 +217,9 @@ const serializeBarEvent = (source, { includeFinancials = false } = {}) => {
   const booking = captainBookings.get(source);
   if (booking) {
     event.bookingPositions = booking.positions;
-    event.canUseCaptainReport = event.reportRequired && booking.reportRequired !== false && booking.captainAssigned;
+    event.canUseCaptainReport = booking.captainAssigned;
     event.canOperateBar = booking.canOperateBar;
-    event.reportRequired = event.canUseCaptainReport;
+    event.reportRequired = event.reportRequired && booking.reportRequired !== false && booking.captainAssigned;
   }
   const totals = calculateBarEventAccounting(event);
   const captainSyncAudit = [...(Array.isArray(event.audit) ? event.audit : [])].reverse().find((entry) => (

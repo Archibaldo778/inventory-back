@@ -50,8 +50,9 @@ router.get('/:eventId', limiter, async (req, res) => {
     const kitchenIdentity = await validateStaffKitchenReportAccess(access, report);
     const event = await Event.findById(report.eventId).select(`title ${EVENT_REPORT_CONTEXT_SELECT}`).lean();
     const reportRequired = report.status !== 'cancelled' && requiresReportType(report.reportType, event || { title: report.eventTitle }) && await reportCaptainStillAssigned(report, event);
-    if (reportRequired) report = await pinReportTemplate(report);
-    return res.json({ report: { ...publicReport(report), ...(report.status === 'pending' ? kitchenIdentity : {}), salesRep: resolveReportSalesRep(report, event), reportRequired: reportRequired && report.status !== 'cancelled' } });
+    const reportAvailable = report.status !== 'cancelled' && (report.reportType !== 'kitchen' || reportRequired) && await reportCaptainStillAssigned(report, event);
+    if (reportAvailable) report = await pinReportTemplate(report);
+    return res.json({ report: { ...publicReport(report), ...(report.status === 'pending' ? kitchenIdentity : {}), salesRep: resolveReportSalesRep(report, event), reportRequired, reportAvailable, reportOptional: reportAvailable && !reportRequired } });
   } catch (error) {
     return sendApiError(res, error, { context: 'Public event report load failed', fallbackMessage: 'Could not load this event report' });
   }
@@ -67,7 +68,7 @@ router.post('/:eventId', limiter, async (req, res) => {
     if (report.status === 'submitted') return res.status(409).json({ message: 'This report has already been submitted' });
     if (report.status === 'cancelled') return res.status(403).json({ message: 'This report request was cancelled. No report is required.' });
     const event = await Event.findById(report.eventId).select(`title ${EVENT_REPORT_CONTEXT_SELECT}`).lean();
-    if (!requiresReportType(report.reportType, event || { title: report.eventTitle })) return res.status(403).json({ message: 'No report is required for this event' });
+    if (report.reportType === 'kitchen' && !requiresReportType(report.reportType, event || { title: report.eventTitle })) return res.status(403).json({ message: 'No report is required for this event' });
     if (!await reportCaptainStillAssigned(report, event)) return res.status(403).json({ message: 'No Captain report is required for your booking on this event' });
     const templateSnapshot = reportTemplate(report);
     if ((req.body?.templateRevision ?? 0) !== templateSnapshot.revision) return res.status(409).json({ message: 'The report form has changed. Reload it before submitting.' });
@@ -80,7 +81,7 @@ router.post('/:eventId', limiter, async (req, res) => {
     const templateGuard = report.templateSnapshot ? { 'templateSnapshot.revision': templateSnapshot.revision } : { templateSnapshot: null };
     report = await EventReport.findOneAndUpdate({ _id: report._id, status: 'pending', ...templateGuard }, { $set: {
       ...kitchenIdentity, ...photoFields,
-      salesRep: resolveReportSalesRep(report, event), answers, status: 'submitted', submittedAt: new Date(), digestRequested: true,
+      salesRep: resolveReportSalesRep(report, event), answers, status: 'submitted', submittedAt: new Date(), digestRequested: requiresReportType(report.reportType, event),
       templateSnapshot,
       nextReminderAt: null, emailDelivery: { status: 'pending', recipients: [], cc: [], error: '' },
     } }, { new: true, runValidators: true });
@@ -119,7 +120,7 @@ router.post('/:eventId/photos', photoLimiter, async (req, res) => {
     if (!report) return res.status(404).json({ message: 'Report not found' });
     await validateStaffKitchenReportAccess(access, report);
     const event = await Event.findById(report.eventId).select(`title ${EVENT_REPORT_CONTEXT_SELECT}`).lean();
-    if (!requiresReportType(report.reportType, event || { title: report.eventTitle }) || !await reportCaptainStillAssigned(report, event)) return res.status(403).json({ message: 'No report is required for this booking' });
+    if ((report.reportType === 'kitchen' && !requiresReportType(report.reportType, event || { title: report.eventTitle })) || !await reportCaptainStillAssigned(report, event)) return res.status(403).json({ message: 'No report is required for this booking' });
     const photo = await uploadReportPhoto({ report, data: req.body?.data });
     return res.status(201).json({ photo });
   } catch (error) { return sendApiError(res, error, { fallbackMessage: 'Could not upload photo' }); }

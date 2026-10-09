@@ -124,7 +124,7 @@ test('an earlier personal report link cannot require or submit a report after re
 });
 
 
-test('manual report opt-out hides the captain report while keeping bar return duties', async (t) => {
+test('manual report opt-out keeps optional captain feedback and bar return duties', async (t) => {
   const disabled = { ...event, meta: { ...event.meta, captainReportDisabled: true } };
   const barEvent = { _id: barId, linkedEventId: eventId, assignedUserIds: [userId], items: [], audit: [], name: 'Dinner' };
   t.mock.method(BarEvent, 'findById', async () => barEvent);
@@ -133,6 +133,6 @@ test('manual report opt-out hides the captain report while keeping bar return du
   const res = response();
   await handler(router, '/events/:id', 'get')({ params: { id: barId }, auth: user }, res);
   assert.equal(res.body.reportRequired, false);
-  assert.equal(res.body.canUseCaptainReport, false);
+  assert.equal(res.body.canUseCaptainReport, true);
   assert.equal(res.body.canOperateBar, true);
 });

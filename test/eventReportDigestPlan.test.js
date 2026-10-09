@@ -74,3 +74,10 @@ test('AI request includes all textual reports without photos, emails or the indi
   assert.doesNotMatch(request.instructions, /300 words/);
   assert.ok(input.reports[0].answers.some((answer) => answer.answer.length > 2000));
 });
+
+
+test('manual captain opt-out stops automatic digest even if every report is already submitted', () => {
+  const reports = [report('one'), report('two'), report('chef', 'kitchen')];
+  const disabled = { ...event, meta: { ...event.meta, captainReportDisabled: true } };
+  assert.equal(eventDigestReadiness({ event: disabled, schedule, reports }).ready, false);
+});

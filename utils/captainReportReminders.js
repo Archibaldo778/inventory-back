@@ -8,7 +8,7 @@ import { buildActiveDashboardBarEventQuery } from './barDashboardSync.js';
 import { captainReportIdentity, openCaptainReport } from './captainReports.js';
 import { eventReportUrl } from './slackEventChannels.js';
 import { fetchWithTimeout } from './fetchWithTimeout.js';
-import { requiresEventReport } from './eventReportRequirement.js';
+import { requiresCaptainReport } from './eventReportRequirement.js';
 
 const HOUR = 60 * 60 * 1000;
 export const CAPTAIN_REPORT_EMAIL_REMINDERS_ENABLED = true;
@@ -63,7 +63,7 @@ export const deliverCaptainReportReminder = async ({ event, schedule, user, repo
   if (!enabled) return 'skipped';
   if (['submitted', 'cancelled'].includes(report?.status)) return 'skipped';
   if (!assignedReportCaptains(schedule, [user]).length) return 'skipped';
-  if (!requiresEventReport(event, schedule)) return 'skipped';
+  if (!requiresCaptainReport(event, schedule)) return 'skipped';
   if (!captainReminderEventEligible({ event, schedule, report })) return 'skipped';
   if (![24, 36, 48].includes(hours) || captainReportReminderStage(schedule.endsAt, now) !== hours) return 'skipped';
   const id = `captain-report:${event._id}:${user._id}:${hours}`;
@@ -88,7 +88,8 @@ export const deliverCaptainReportReminder = async ({ event, schedule, user, repo
   }, { $set: { lockedUntil: new Date(now.getTime() + 2 * 60_000) } }, { new: true });
   if (!delivery) return 'skipped';
   // Submission through either the email link, portal or Slack stops reminders.
-  if (await EventReport.exists({ ...captainReportIdentity(event._id, user), status: { $in: ['submitted', 'cancelled'] } })) {
+  if (await Event.exists({ _id: event._id, 'meta.captainReportDisabled': true })
+    || await EventReport.exists({ ...captainReportIdentity(event._id, user), status: { $in: ['submitted', 'cancelled'] } })) {
     await EventReportReminder.updateOne({ _id: id }, { $set: { status: 'cancelled', lockedUntil: null } });
     return 'skipped';
   }
@@ -135,7 +136,7 @@ export const runCaptainReportEmailReminders = async ({ now = new Date(), fetchIm
       const matches = events.filter((event) => String(event.meta?.nowsta?.apiEventId) === schedule.nowstaEventId);
       if (matches.length !== 1) continue;
       const event = matches[0];
-      if (!requiresEventReport(event, schedule)) continue;
+      if (!requiresCaptainReport(event, schedule)) continue;
       if (!captainReminderEventEligible({ event, schedule })) continue;
       const hours = captainReportReminderStage(schedule.endsAt, now);
       if (!hours || schedule.archived) continue;

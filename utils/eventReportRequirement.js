@@ -6,3 +6,9 @@ export const requiresEventReport = (...events) => !events.some((event) => (
     String(value || '').normalize('NFKC').replace(/[^a-z0-9]+/gi, ' ').trim(),
   ))
 ));
+
+export const requiresCaptainReport = (...events) => requiresEventReport(...events)
+  && !events.some((event) => event?.meta?.captainReportDisabled === true);
+
+export const requiresReportType = (type, ...events) => type === 'kitchen'
+  ? requiresEventReport(...events) : requiresCaptainReport(...events);

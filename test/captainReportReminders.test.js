@@ -42,6 +42,7 @@ const setup = (t) => {
     assert.equal(query.isActive.$ne, false);
     return { select: () => ({ lean: async () => state.users }) };
   });
+  t.mock.method(Event, 'exists', () => state.events.some((row) => row.meta?.captainReportDisabled === true));
   t.mock.method(Event, 'find', (query) => {
     assert.equal(query['meta.nowsta.excluded'].$ne, true);
     assert.equal(query['meta.eventReportTest'].$ne, true);
@@ -321,4 +322,23 @@ test('delivery guard prevents historical retries and premature reminders; defaul
   assert.equal(result.sent, 1);
   assert.equal(state.requests.length, 1);
   assert.match(state.requests[0].body.text, /Event date: 2026-10-01/);
+});
+
+
+test('manual event opt-out prevents future captains and queued reminders; opting back in restores scheduling', async (t) => {
+  const state = setup(t);
+  state.events = [{ ...event, meta: { ...event.meta, captainReportDisabled: true } }];
+  assert.equal((await state.run(24)).sent, 0);
+  assert.equal(state.report, null);
+  assert.equal(state.requests.length, 0);
+  state.events = [event];
+  assert.equal((await state.run(24)).sent, 1);
+});
+
+test('manual opt-out after a reminder is claimed is checked before contacting the email provider', async (t) => {
+  const state = setup(t);
+  t.mock.method(Event, 'exists', () => true);
+  assert.equal((await state.run(24)).sent, 0);
+  assert.equal(state.requests.length, 0);
+  assert.equal([...state.deliveries.values()][0].status, 'cancelled');
 });

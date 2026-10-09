@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { requiresEventReport } from '../utils/eventReportRequirement.js';
+import { requiresEventReport, requiresCaptainReport, requiresReportType } from '../utils/eventReportRequirement.js';
 import { openCaptainReport } from '../utils/captainReports.js';
 import { openStaffKitchenReport } from '../utils/staffKitchenReport.js';
 import { serializeStaffEvent } from '../utils/staffPortal.js';
@@ -78,4 +78,32 @@ test('old emailed report links show an exemption and cannot submit a pending rep
     assert.equal(submitted.code, 403);
     assert.match(submitted.body.message, /No report is required/);
   }
+});
+
+
+test('manual captain opt-out leaves kitchen requirements and stored reports intact', async (t) => {
+  const event = { _id: eventId, title: 'Dinner', meta: { captainReportDisabled: true } };
+  assert.equal(requiresCaptainReport(event), false);
+  assert.equal(requiresReportType('captain', event), false);
+  assert.equal(requiresReportType('kitchen', event), true);
+  t.mock.method(EventReport, 'findOne', () => assert.fail('Must not open a captain report'));
+  await assert.rejects(openCaptainReport({ event, user }), /No report is required/);
+  assert.equal(requiresCaptainReport({ ...event, meta: { captainReportDisabled: false } }), true);
+  assert.equal(requiresReportType('kitchen', { title: 'Rental Check In' }), false);
+});
+
+test('already-open captain form cannot submit after the office disables reports for the event', async (t) => {
+  const old = process.env.JWT_SECRET;
+  process.env.JWT_SECRET = 'manual-policy-test';
+  t.after(() => { if (old === undefined) delete process.env.JWT_SECRET; else process.env.JWT_SECRET = old; });
+  const report = { _id: eventId, eventId, slackUserId: `account:${user.userId}`, reportType: 'captain', status: 'pending' };
+  t.mock.method(EventReport, 'findOne', async () => report);
+  t.mock.method(EventReport, 'findOneAndUpdate', () => assert.fail('Disabled report cannot be submitted'));
+  t.mock.method(Event, 'findById', () => ({ select: () => ({ lean: async () => ({ _id: eventId, title: 'Dinner', meta: { captainReportDisabled: true } }) }) }));
+  const access = issueEventGuestAccess({ eventIds: [eventId], capability: 'event:report', subjectId: report.slackUserId });
+  const req = { params: { eventId }, query: { access }, body: { answers: {} } };
+  const loaded = response(); await handler(publicRouter, '/:eventId', 'get')(req, loaded);
+  assert.equal(loaded.body.report.reportRequired, false);
+  const submitted = response(); await handler(publicRouter, '/:eventId', 'post')(req, submitted);
+  assert.equal(submitted.code, 403);
 });

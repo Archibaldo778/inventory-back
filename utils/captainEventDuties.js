@@ -1,3 +1,4 @@
+import { requiresCaptainReport } from './eventReportRequirement.js';
 import NowstaScheduleEntry from '../models/NowstaScheduleEntry.js';
 import User from '../models/Users.js';
 import { nowstaPersonKeys } from './nowstaCaptainAssignments.js';
@@ -21,6 +22,7 @@ export const captainEventDuties = ({ event, schedule, user }) => {
   const hasBooking = Boolean(schedule?.shifts || nowsta?.apiEventId || nowsta?.shifts);
   const shifts = captainAssignedShifts(schedule?.shifts ? schedule : nowsta, user);
   return {
+    reportRequired: requiresCaptainReport(event, schedule),
     captainAssigned: !hasBooking || shifts.some((shift) => isCaptainPosition(shift.position)),
     positions: [...new Set(shifts.map((shift) => shift.position).filter(Boolean))],
   };

@@ -36,7 +36,7 @@ test('event duties use the confirmed booking position, not the account role or a
   }
   const mixed = schedule('Bartender');
   mixed.shifts.push({ position: 'Captain', workers: [{ ...worker, email: 'other@example.com' }, { ...worker, status: 'declined' }] });
-  assert.deepEqual(captainEventDuties({ event, schedule: mixed, user }), { captainAssigned: false, positions: ['Bartender'] });
+  assert.deepEqual(captainEventDuties({ event, schedule: mixed, user }), { reportRequired: true, captainAssigned: false, positions: ['Bartender'] });
   mixed.shifts.push({ position: 'Captain', workers: [{ ...worker, status: 'assigned' }] });
   assert.equal(captainEventDuties({ event, schedule: mixed, user }).captainAssigned, true);
   assert.equal(captainEventDuties({ event, schedule: { ...mixed, archived: true }, user }).captainAssigned, false);
@@ -121,4 +121,18 @@ test('an earlier personal report link cannot require or submit a report after re
   const submitted = response();
   await handler(publicRouter, '/:eventId', 'post')(req, submitted);
   assert.equal(submitted.statusCode, 403);
+});
+
+
+test('manual report opt-out hides the captain report while keeping bar return duties', async (t) => {
+  const disabled = { ...event, meta: { ...event.meta, captainReportDisabled: true } };
+  const barEvent = { _id: barId, linkedEventId: eventId, assignedUserIds: [userId], items: [], audit: [], name: 'Dinner' };
+  t.mock.method(BarEvent, 'findById', async () => barEvent);
+  t.mock.method(Event, 'findById', () => ({ select: () => ({ lean: async () => disabled }) }));
+  t.mock.method(NowstaScheduleEntry, 'findOne', () => ({ select: () => ({ lean: async () => schedule('Captain - Bar') }) }));
+  const res = response();
+  await handler(router, '/events/:id', 'get')({ params: { id: barId }, auth: user }, res);
+  assert.equal(res.body.reportRequired, false);
+  assert.equal(res.body.canUseCaptainReport, false);
+  assert.equal(res.body.canOperateBar, true);
 });

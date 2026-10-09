@@ -9,7 +9,7 @@ import { verifyEventGuestAccess } from '../utils/eventGuestAccess.js';
 import { sendEventReportEmail } from '../utils/eventReportEmail.js';
 import { EVENT_REPORT_CONTEXT_SELECT, resolveReportSalesRep } from '../utils/eventReportSalesRep.js';
 import { validateStaffKitchenReportAccess } from '../utils/staffKitchenReport.js';
-import { requiresEventReport } from '../utils/eventReportRequirement.js';
+import { requiresReportType } from '../utils/eventReportRequirement.js';
 import { reportCaptainStillAssigned } from '../utils/captainEventDuties.js';
 import { pinReportTemplate, reportTemplate, captainTemplateAnswers } from '../utils/captainReportTemplate.js';
 
@@ -49,7 +49,7 @@ router.get('/:eventId', limiter, async (req, res) => {
     if (!report) return res.status(404).json({ message: 'Event report was not found' });
     const kitchenIdentity = await validateStaffKitchenReportAccess(access, report);
     const event = await Event.findById(report.eventId).select(`title ${EVENT_REPORT_CONTEXT_SELECT}`).lean();
-    const reportRequired = report.status !== 'cancelled' && requiresEventReport(event || { title: report.eventTitle }) && await reportCaptainStillAssigned(report, event);
+    const reportRequired = report.status !== 'cancelled' && requiresReportType(report.reportType, event || { title: report.eventTitle }) && await reportCaptainStillAssigned(report, event);
     if (reportRequired) report = await pinReportTemplate(report);
     return res.json({ report: { ...publicReport(report), ...(report.status === 'pending' ? kitchenIdentity : {}), salesRep: resolveReportSalesRep(report, event), reportRequired: reportRequired && report.status !== 'cancelled' } });
   } catch (error) {
@@ -67,7 +67,7 @@ router.post('/:eventId', limiter, async (req, res) => {
     if (report.status === 'submitted') return res.status(409).json({ message: 'This report has already been submitted' });
     if (report.status === 'cancelled') return res.status(403).json({ message: 'This report request was cancelled. No report is required.' });
     const event = await Event.findById(report.eventId).select(`title ${EVENT_REPORT_CONTEXT_SELECT}`).lean();
-    if (!requiresEventReport(event || { title: report.eventTitle })) return res.status(403).json({ message: 'No report is required for this event' });
+    if (!requiresReportType(report.reportType, event || { title: report.eventTitle })) return res.status(403).json({ message: 'No report is required for this event' });
     if (!await reportCaptainStillAssigned(report, event)) return res.status(403).json({ message: 'No Captain report is required for your booking on this event' });
     const templateSnapshot = reportTemplate(report);
     if ((req.body?.templateRevision ?? 0) !== templateSnapshot.revision) return res.status(409).json({ message: 'The report form has changed. Reload it before submitting.' });
@@ -119,7 +119,7 @@ router.post('/:eventId/photos', photoLimiter, async (req, res) => {
     if (!report) return res.status(404).json({ message: 'Report not found' });
     await validateStaffKitchenReportAccess(access, report);
     const event = await Event.findById(report.eventId).select(`title ${EVENT_REPORT_CONTEXT_SELECT}`).lean();
-    if (!requiresEventReport(event || { title: report.eventTitle }) || !await reportCaptainStillAssigned(report, event)) return res.status(403).json({ message: 'No report is required for this booking' });
+    if (!requiresReportType(report.reportType, event || { title: report.eventTitle }) || !await reportCaptainStillAssigned(report, event)) return res.status(403).json({ message: 'No report is required for this booking' });
     const photo = await uploadReportPhoto({ report, data: req.body?.data });
     return res.status(201).json({ photo });
   } catch (error) { return sendApiError(res, error, { fallbackMessage: 'Could not upload photo' }); }

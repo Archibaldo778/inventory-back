@@ -1,3 +1,4 @@
+import { requiresCaptainReport } from '../utils/eventReportRequirement.js';
 import { Router } from 'express';
 import mongoose from 'mongoose';
 import Event from '../models/Event.js';
@@ -194,7 +195,7 @@ router.get('/', async (req, res) => {
     if (req.query?.status && !eventId) filter.status = clean(req.query.status, 40);
     const [reports, event, files] = await Promise.all([
       EventReport.find(filter).sort({ eventDate: -1, reporterName: 1 }).limit(1000).lean(),
-      eventId ? Event.findById(eventId).select('title date status meta.nowsta meta.eventReportTest meta.eventReportAnalysis').lean() : null,
+      eventId ? Event.findById(eventId).select('title date status meta.nowsta meta.eventReportTest meta.eventReportAnalysis meta.captainReportDisabled').lean() : null,
       eventId ? EventReportFile.find({ eventId }).sort({ createdAt: 1 }).lean() : [],
     ]);
     const analysis = event?.meta?.eventReportAnalysis || null;
@@ -204,6 +205,7 @@ router.get('/', async (req, res) => {
     return res.json({
       items: req.query?.status ? items.filter((report) => report.status === req.query.status) : items,
       files: files.map(publicReportFile),
+      captainReportPolicy: event ? { disabled: event.meta?.captainReportDisabled === true, required: requiresCaptainReport(event, context?.schedule) } : undefined,
       ai: eventId ? {
         enabledForEvent: Boolean(event),
         configured: Boolean(clean(process.env.OPENAI_API_KEY, 2000)),
@@ -213,6 +215,22 @@ router.get('/', async (req, res) => {
     });
   } catch (error) {
     return sendApiError(res, error, { context: 'Event reports list failed', fallbackMessage: 'Could not load event reports' });
+  }
+});
+
+router.put('/events/:eventId/captain-report-policy', async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.eventId) || typeof req.body?.disabled !== 'boolean') {
+      return res.status(400).json({ message: 'Choose a valid event and report setting' });
+    }
+    const event = await Event.findOneAndUpdate({ _id: req.params.eventId }, {
+      $set: { 'meta.captainReportDisabled': req.body.disabled },
+      $push: { 'meta.captainReportPolicyAudit': { $each: [{ disabled: req.body.disabled, actor: req.auth.userId, at: new Date() }], $slice: -100 } },
+    }, { new: true }).select('title meta.captainReportDisabled').lean();
+    if (!event) return res.status(404).json({ message: 'Event not found' });
+    return res.json({ disabled: event.meta?.captainReportDisabled === true, required: requiresCaptainReport(event) });
+  } catch (error) {
+    return sendApiError(res, error, { context: 'Captain report policy update failed', fallbackMessage: 'Could not update the report requirement' });
   }
 });
 

@@ -4,7 +4,7 @@ import { isCaptainPosition } from './captainEventDuties.js';
 import { kitchenReportPosition } from './eventStaffAccess.js';
 import { workerMatchesStaff } from './staffPortal.js';
 import { normalizeNowstaPersonName } from './nowstaCaptainAssignments.js';
-import { requiresEventReport } from './eventReportRequirement.js';
+import { requiresCaptainReport } from './eventReportRequirement.js';
 import { eventReportAnalysisInput } from './eventReportAi.js';
 import { EVENT_REPORT_RERUN_GUIDANCE } from './eventReportReruns.js';
 
@@ -12,7 +12,7 @@ const email = (value) => String(value || '').trim().toLowerCase();
 export const eventDigestReadiness = ({ event, schedule, users = [], reports = [] }) => {
   const waiting = { ready: false, reports: [], captainCount: 0 };
   if (!event || /^(deleted|cancelled|canceled|lost|archived)$/i.test(event.status || '') || event.meta?.nowsta?.excluded
-    || schedule?.archived || schedule?.excluded || !requiresEventReport(event, schedule)) return waiting;
+    || schedule?.archived || schedule?.excluded || !requiresCaptainReport(event, schedule)) return waiting;
   const hasNowsta = Boolean(event.meta?.nowsta?.apiEventId || event.meta?.nowsta?.shifts);
   if (hasNowsta && !schedule?.shifts) return waiting;
   const requirements = new Map();

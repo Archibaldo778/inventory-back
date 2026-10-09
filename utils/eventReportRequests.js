@@ -5,7 +5,7 @@ import EventReportReminder from '../models/EventReportReminder.js';
 import { captainAssignedShifts, isCaptainPosition } from './captainEventDuties.js';
 import { captainReportIdentity } from './captainReports.js';
 import { CAPTAIN_REPORT_REMINDERS_START_DATE } from './captainReportReminders.js';
-import { requiresEventReport } from './eventReportRequirement.js';
+import { requiresCaptainReport } from './eventReportRequirement.js';
 import { createApiError } from './apiErrors.js';
 
 const email = (value) => String(value || '').trim().toLowerCase();
@@ -30,15 +30,16 @@ export const buildEventReportRequests = ({ event, schedule, users, reports }) =>
   const items = reports.map((report) => {
     const user = users.find((candidate) => matchesUser(report, candidate))
       || { username: report.reporterName, email: report.reporterEmail };
-    return { ...report, eventPosition: positions(schedule, user).join(' / '),
-      canCancelRequest: report.reportType !== 'kitchen' && report.status === 'pending' };
+    const disabled = report.reportType !== 'kitchen' && report.status === 'pending' && !requiresCaptainReport(event, schedule);
+    return { ...report, ...(disabled ? { status: 'not_required', requirementReason: 'Captain’s Report is not required for this event.' } : {}), eventPosition: positions(schedule, user).join(' / '),
+      canCancelRequest: !disabled && report.reportType !== 'kitchen' && report.status === 'pending' };
   });
   if (!event || /^(?:deleted|cancelled|canceled|lost)$/i.test(event.status || '') || event.meta?.nowsta?.excluded || schedule?.archived) return items;
   for (const user of users) {
     const assigned = positions(schedule, user);
     if (!assigned.length || reports.some((report) => matchesUser(report, user))) continue;
     let reason = '';
-    if (!requiresEventReport(event, schedule)) reason = 'This event does not require a report.';
+    if (!requiresCaptainReport(event, schedule)) reason = 'This event does not require a report.';
     else if (!assigned.some(isCaptainPosition)) reason = 'Not booked as a Captain on this event.';
     items.push({
       id: `planned:${user._id}`, userId: String(user._id), eventId: String(event._id),

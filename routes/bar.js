@@ -217,7 +217,7 @@ const serializeBarEvent = (source, { includeFinancials = false } = {}) => {
   const booking = captainBookings.get(source);
   if (booking) {
     event.bookingPositions = booking.positions;
-    event.canUseCaptainReport = event.reportRequired && booking.captainAssigned;
+    event.canUseCaptainReport = event.reportRequired && booking.reportRequired !== false && booking.captainAssigned;
     event.canOperateBar = booking.canOperateBar;
     event.reportRequired = event.canUseCaptainReport;
   }
@@ -366,7 +366,7 @@ const loadEvent = async (req, res) => {
     return null;
   }
   if (isCaptain(req.auth) && isObjectId(event.linkedEventId)) {
-    const dashboardEvent = await Event.findById(event.linkedEventId).select('meta.nowsta').lean();
+    const dashboardEvent = await Event.findById(event.linkedEventId).select('title meta.nowsta meta.captainReportDisabled').lean();
     rememberCaptainBooking(event, dashboardEvent ? await loadCaptainEventDuties(dashboardEvent, req.auth) : { captainAssigned: false, positions: [] }, req.auth);
   }
   return event;
@@ -376,7 +376,7 @@ const attachCaptainBookings = async (events, auth) => {
   if (!isCaptain(auth)) return;
   const ids = events.map((event) => event.linkedEventId).filter((id) => isObjectId(id));
   if (!ids.length) return;
-  const dashboardEvents = await Event.find({ _id: { $in: ids } }).select('meta.nowsta').lean();
+  const dashboardEvents = await Event.find({ _id: { $in: ids } }).select('title meta.nowsta meta.captainReportDisabled').lean();
   const bookings = await loadCaptainEventDutiesBatch(dashboardEvents, auth);
   for (const event of events) {
     if (isObjectId(event.linkedEventId)) rememberCaptainBooking(event, bookings.get(String(event.linkedEventId)) || { captainAssigned: false, positions: [] }, auth);

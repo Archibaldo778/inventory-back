@@ -1,3 +1,4 @@
+import { sendManualCaptainReminder } from '../utils/manualCaptainReportReminder.js';
 import { requiresCaptainReport, canManageCaptainReportRequirement } from '../utils/eventReportRequirement.js';
 import { Router } from 'express';
 import mongoose from 'mongoose';
@@ -203,7 +204,7 @@ router.get('/', async (req, res) => {
     const context = event ? await loadReportRequestContext(event) : null;
     const canManage = canManageCaptainReportRequirement(req.auth);
     const items = (context ? buildEventReportRequests({ event, ...context, reports: visible }) : visible)
-      .map((report) => ({ ...report, canCancelRequest: canManage && Boolean(report.canCancelRequest) }));
+      .map((report) => ({ ...report, canSendReminder: canManage && Boolean(report.canSendReminder), canCancelRequest: canManage && Boolean(report.canCancelRequest) }));
     return res.json({
       items: req.query?.status ? items.filter((report) => report.status === req.query.status) : items,
       files: files.map(publicReportFile),
@@ -234,6 +235,19 @@ router.put('/events/:eventId/captain-report-policy', async (req, res) => {
     return res.json({ disabled: event.meta?.captainReportDisabled === true, required: requiresCaptainReport(event) });
   } catch (error) {
     return sendApiError(res, error, { context: 'Captain report policy update failed', fallbackMessage: 'Could not update the report requirement' });
+  }
+});
+
+router.post('/events/:eventId/requests/remind', async (req, res) => {
+  if (!canManageCaptainReportRequirement(req.auth)) return res.status(403).json({ message: 'Only designated report administrators can send reminders' });
+  try {
+    if (!mongoose.isValidObjectId(req.params.eventId) || !mongoose.isValidObjectId(req.body?.userId)
+      || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(req.body?.requestId || '')) {
+      return res.status(400).json({ message: 'Choose a valid event and captain' });
+    }
+    return res.json(await sendManualCaptainReminder({ eventId: req.params.eventId, userId: req.body.userId, requestId: req.body.requestId, actor: req.auth }));
+  } catch (error) {
+    return sendApiError(res, error, { context: 'Manual captain reminder failed', fallbackMessage: 'Could not send reminder' });
   }
 });
 

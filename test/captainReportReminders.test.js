@@ -89,7 +89,7 @@ const setup = (t) => {
 test('cancelled requests remain cancelled at all reminder stages and cannot be recreated by the worker', async (t) => {
   const state = setup(t);
   state.report = { _id: reportId, status: 'cancelled', reportType: 'captain', eventId: event._id, slackUserId: `account:${user._id}` };
-  for (const hours of [24, 36, 48]) {
+  for (const hours of [12, 24, 36]) {
     const result = await state.run(hours);
     assert.equal(result.sent, 0);
     assert.equal(result.skipped, 1);
@@ -111,8 +111,8 @@ test('cancellation after reminder claim is checked again before sending email', 
   assert.equal([...state.deliveries.values()][0].status, 'cancelled');
 });
 
-test('reminders are due exactly 24, 36 and 48 elapsed hours after event end, including DST', () => {
-  for (const [hours, stage] of [[0, null], [23.999, null], [24, 24], [35.999, 24], [36, 36], [47.999, 36], [48, 48], [72, 48]]) {
+test('reminders are due exactly 12, 24 and 36 elapsed hours after event end, including DST', () => {
+  for (const [hours, stage] of [[0, null], [11.999, null], [12, 12], [24, 24], [35.999, 24], [36, 36], [47.999, 36], [48, 36], [72, 36]]) {
     assert.equal(captainReportReminderStage(endsAt, at(hours)), stage);
   }
   assert.equal(captainReportReminderStage(null, at(48)), null);
@@ -131,8 +131,8 @@ test('only active assigned captains receive reminders, with exact email or full-
 
 test('a never-opened report receives exactly three emails, with a working report link and Staffing reply address', async (t) => {
   const state = setup(t);
-  assert.equal((await state.run(23.999)).sent, 0);
-  for (const hour of [24, 36, 48]) {
+  assert.equal((await state.run(11.999)).sent, 0);
+  for (const hour of [12, 24, 36]) {
     assert.equal((await state.run(hour)).sent, 1);
     assert.equal((await state.run(hour + 0.1)).sent, 0);
   }
@@ -187,7 +187,7 @@ test('failed delivery retries the same payload and idempotency key without dupli
 test('overlapping workers claim a delivery only once; uncertain deliveries cannot retry after idempotency expiry', async (t) => {
   const state = setup(t);
   const report = await openCaptainReport({ event, user, schedule });
-  const args = { event, schedule, user, report, hours: 48, now: at(48), fetchImpl: state.fetch };
+  const args = { event, schedule, user, report, hours: 36, now: at(48), fetchImpl: state.fetch };
   args.enabled = true;
   const results = await Promise.all([deliverCaptainReportReminder(args), deliverCaptainReportReminder(args)]);
   assert.deepEqual(results.sort(), ['sent', 'skipped']);
@@ -202,7 +202,7 @@ test('catch-up sends only the latest stage and skips cancelled, excluded, test, 
   const state = setup(t);
   assert.equal((await state.run(49)).sent, 1);
   assert.equal(state.requests.length, 1);
-  assert.match(state.requests[0].headers['Idempotency-Key'], /:48$/);
+  assert.match(state.requests[0].headers['Idempotency-Key'], /:36$/);
   state.deliveries.clear();
   for (const events of [[{ ...event, status: 'cancelled' }], [{ ...event, meta: { nowsta: { apiEventId: '123', excluded: true } } }], [{ ...event, meta: { ...event.meta, eventReportTest: true } }], [event, { ...event, _id: 'duplicate' }]]) {
     state.events = events;
@@ -226,7 +226,7 @@ test('email reminders start with October 1 events, excluding older overnight eve
   state.schedules = [schedule];
   assert.equal((await state.run(36)).sent, 0);
   assert.equal(state.report, null);
-  const args = { event, schedule, user, report: { _id: reportId }, hours: 48, now: at(48), fetchImpl: state.fetch, enabled: true };
+  const args = { event, schedule, user, report: { _id: reportId }, hours: 36, now: at(48), fetchImpl: state.fetch, enabled: true };
   state.deliveries.set(`captain-report:${event._id}:${user._id}:48`, { status: 'failed', firstAttemptAt: at(48) });
   assert.equal(await deliverCaptainReportReminder({ ...args, event: oldEvent }), 'skipped');
   assert.equal(await deliverCaptainReportReminder({ ...args, schedule: oldSchedule }), 'skipped');
@@ -247,7 +247,7 @@ test('exempt event names never create reports or send email, including queued re
     state.events = [event];
     state.schedules = [{ ...schedule, title }];
     assert.equal((await state.run(36)).sent, 0);
-    assert.equal(await deliverCaptainReportReminder({ event: { ...event, title }, schedule, user, report: { _id: reportId }, hours: 48, now: at(48), fetchImpl: state.fetch, enabled: true }), 'skipped');
+    assert.equal(await deliverCaptainReportReminder({ event: { ...event, title }, schedule, user, report: { _id: reportId }, hours: 36, now: at(48), fetchImpl: state.fetch, enabled: true }), 'skipped');
   }
   assert.equal(state.report, null);
   assert.equal(state.deliveries.size, 0);
@@ -314,8 +314,8 @@ test('delivery guard prevents historical retries and premature reminders; defaul
   const state = setup(t);
   const args = { event, schedule, user, report: { _id: reportId, eventDate: '2026-09-29' }, hours: 24, now: at(24), fetchImpl: state.fetch };
   assert.equal(await deliverCaptainReportReminder(args), 'skipped');
-  assert.equal(await deliverCaptainReportReminder({ ...args, report: { _id: reportId }, now: at(23.99) }), 'skipped');
-  assert.equal(await deliverCaptainReportReminder({ ...args, report: { _id: reportId }, hours: 48 }), 'skipped');
+  assert.equal(await deliverCaptainReportReminder({ ...args, report: { _id: reportId }, now: at(11.99) }), 'skipped');
+  assert.equal(await deliverCaptainReportReminder({ ...args, report: { _id: reportId }, hours: 36 }), 'skipped');
   assert.equal(state.deliveries.size, 0);
   assert.equal(state.requests.length, 0);
   const result = await runCaptainReportEmailReminders({ now: at(24), fetchImpl: state.fetch });
@@ -341,4 +341,67 @@ test('manual opt-out after a reminder is claimed is checked before contacting th
   assert.equal((await state.run(24)).sent, 0);
   assert.equal(state.requests.length, 0);
   assert.equal([...state.deliveries.values()][0].status, 'cancelled');
+});
+
+
+test('moving the first stage earlier does not resend an already delivered legacy 24-hour reminder', async (t) => {
+  const state = setup(t);
+  state.deliveries.set(`captain-report:${event._id}:${user._id}:24`, { status: 'sent', firstAttemptAt: at(24) });
+  assert.equal((await state.run(25)).sent, 0);
+  assert.equal(state.requests.length, 0);
+});
+
+test('office can send an additional reminder after 48h with its own identity and retries deduplicate', async (t) => {
+  const state = setup(t);
+  assert.equal((await state.run(48)).sent, 1);
+  const args = { event, schedule, user, report: state.report, hours: 36, now: at(60), fetchImpl: state.fetch,
+    manualRequestId: '11111111-2222-3333-4444-555555555555', actor: { userId: 'office', username: 'Office User', email: 'office@example.com' } };
+  assert.equal(await deliverCaptainReportReminder(args), 'sent');
+  assert.equal(await deliverCaptainReportReminder(args), 'already_sent');
+  assert.equal(state.requests.length, 2);
+  assert.match(state.requests[1].body.from, /Office User/);
+  assert.equal(state.requests[1].body.reply_to, 'office@example.com');
+  assert.match(state.requests[1].headers['Idempotency-Key'], /:manual:/);
+  assert.equal([...state.deliveries.values()].at(-1).requestedBy, 'office');
+});
+
+test('manual reminder does not bypass optional reports, submission, cancellations or the 36h boundary', async (t) => {
+  const state = setup(t);
+  const base = { event, schedule, user, report: { _id: reportId, reportType: 'captain', status: 'pending' }, hours: 36, now: at(60), fetchImpl: state.fetch, manualRequestId: 'manual' };
+  for (const change of [{ now: at(35.99) }, { event: { ...event, meta: { ...event.meta, captainReportDisabled: true } } },
+    { report: { ...base.report, status: 'submitted' } }, { report: { ...base.report, status: 'cancelled' } }, { event: { ...event, title: 'Rental Check-in' } }, { schedule: { ...schedule, archived: true } }]) {
+    assert.equal(await deliverCaptainReportReminder({ ...base, ...change }), 'skipped');
+  }
+  assert.equal(state.requests.length, 0);
+});
+
+
+test('a previously delivered legacy 48h final reminder suppresses the new 36h final stage', async (t) => {
+  const state = setup(t);
+  state.deliveries.set(`captain-report:${event._id}:${user._id}:48`, { status: 'sent', firstAttemptAt: at(48) });
+  assert.equal((await state.run(60)).sent, 0);
+  assert.equal(state.requests.length, 0);
+});
+
+test('manual reminder after 36h does not claim the 48h deadline has already passed', async (t) => {
+  const state = setup(t);
+  await state.run(36);
+  assert.equal(await deliverCaptainReportReminder({ event, schedule, user, report: state.report, hours: 36, now: at(37), fetchImpl: state.fetch,
+    manualRequestId: 'manual-37', actor: { username: 'Office' } }), 'sent');
+  assert.doesNotMatch(state.requests.at(-1).body.text, /deadline.*has been reached/);
+});
+
+test('manual service reloads the event and current roster and refuses submitted or unassigned captains', async (t) => {
+  const state = setup(t);
+  const { sendManualCaptainReminder } = await import('../utils/manualCaptainReportReminder.js');
+  t.mock.method(Event, 'findById', () => ({ select: () => ({ lean: async () => event }) }));
+  t.mock.method(NowstaScheduleEntry, 'findOne', () => ({ select: () => ({ lean: async () => schedule }) }));
+  t.mock.method(User, 'find', () => ({ select: () => ({ lean: async () => [user] }) }));
+  const args = { eventId: event._id, userId: user._id, requestId: 'service-request', actor: { userId: 'office', username: 'Office' }, now: at(37), fetchImpl: state.fetch };
+  assert.equal((await sendManualCaptainReminder(args)).status, 'sent');
+  assert.equal(state.requests.length, 1);
+  state.report.status = 'submitted';
+  await assert.rejects(sendManualCaptainReminder({ ...args, requestId: 'second' }), /already submitted/);
+  await assert.rejects(sendManualCaptainReminder({ ...args, userId: 'not-assigned' }), /current Captain bookings/);
+  assert.equal(state.requests.length, 1);
 });

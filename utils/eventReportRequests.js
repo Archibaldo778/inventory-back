@@ -4,7 +4,7 @@ import EventReport from '../models/EventReport.js';
 import EventReportReminder from '../models/EventReportReminder.js';
 import { captainAssignedShifts, isCaptainPosition } from './captainEventDuties.js';
 import { captainReportIdentity } from './captainReports.js';
-import { CAPTAIN_REPORT_REMINDERS_START_DATE } from './captainReportReminders.js';
+import { CAPTAIN_REPORT_REMINDERS_START_DATE, canManuallyRemindCaptain } from './captainReportReminders.js';
 import { requiresCaptainReport } from './eventReportRequirement.js';
 import { createApiError } from './apiErrors.js';
 
@@ -31,7 +31,7 @@ export const buildEventReportRequests = ({ event, schedule, users, reports }) =>
     const user = users.find((candidate) => matchesUser(report, candidate))
       || { username: report.reporterName, email: report.reporterEmail };
     const disabled = report.reportType !== 'kitchen' && report.status === 'pending' && !requiresCaptainReport(event, schedule);
-    return { ...report, ...(disabled ? { status: 'not_required', requirementReason: 'Captain’s Report is optional. No reminders will be sent.' } : {}), eventPosition: positions(schedule, user).join(' / '),
+    return { ...report, userId: user._id ? String(user._id) : '', canSendReminder: canManuallyRemindCaptain({ event, schedule, user, report }), ...(disabled ? { status: 'not_required', requirementReason: 'Captain’s Report is optional. No reminders will be sent.' } : {}), eventPosition: positions(schedule, user).join(' / '),
       canCancelRequest: !disabled && report.reportType !== 'kitchen' && report.status === 'pending' };
   });
   if (!event || /^(?:deleted|cancelled|canceled|lost)$/i.test(event.status || '') || event.meta?.nowsta?.excluded || schedule?.archived) return items;
@@ -49,6 +49,7 @@ export const buildEventReportRequests = ({ event, schedule, users, reports }) =>
       status: reason ? 'not_required' : 'pending', planned: true, requirementReason: reason,
       reminderNote: !reason && event.date < CAPTAIN_REPORT_REMINDERS_START_DATE
         ? 'Automatic reminders apply to events from October 1, 2026.' : '',
+      canSendReminder: canManuallyRemindCaptain({ event, schedule, user }),
       canCancelRequest: !reason, reminderCount: 0, requestSentAt: null,
       emailDelivery: { status: 'not_sent' },
     });

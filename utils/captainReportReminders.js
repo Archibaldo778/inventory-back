@@ -1,3 +1,4 @@
+import { resolveUserInvitationSender } from './userInvitationSender.js';
 import Event from '../models/Event.js';
 import EventReport from '../models/EventReport.js';
 import EventReportReminder from '../models/EventReportReminder.js';
@@ -30,7 +31,7 @@ const escapeHtml = (value) => clean(value).replace(/[&<>"']/g, (character) => ({
 export const captainReportReminderStage = (endsAt, now = new Date()) => {
   if (!endsAt) return null;
   const elapsed = new Date(now).getTime() - new Date(endsAt).getTime();
-  return [48, 36, 24].find((hours) => elapsed >= hours * HOUR) || null;
+  return [36, 24, 12].find((hours) => elapsed >= hours * HOUR) || null;
 };
 
 export const assignedReportCaptains = (schedule, users) => users.filter((user) => (
@@ -53,21 +54,30 @@ export const captainReminderEmail = ({ event, user, report, endsAt, hours }) => 
     from: clean(process.env.EVENT_REPORT_REMINDER_FROM) || 'Staffing and Service Department <reports@reports.occdecks.com>',
     reply_to: clean(process.env.EVENT_REPORT_REMINDER_REPLY_TO) || 'staffing@ocnyc.com',
     to: [clean(user.email).toLowerCase()],
-    subject: `${hours === 48 ? 'Final reminder' : 'Reminder'}: Captain’s Report · ${event.title}`,
+    subject: `${hours === 36 ? 'Final reminder' : 'Reminder'}: Captain’s Report · ${event.title}`,
     text,
     html: `<div style="font-family:Arial,sans-serif;line-height:1.6;color:#172129"><h2>Captain’s Report</h2><p>Hi ${escapeHtml(user.username || user.nowstaName || 'Captain')},</p><p>${escapeHtml(instruction)}</p><p><strong>${escapeHtml(event.title)}</strong><br>${escapeHtml(event.date)}</p><p>Reports must be submitted no later than <strong>48 hours after the event ends</strong>.<br>Deadline: <strong>${escapeHtml(deadline)} (New York time)</strong></p><p><a href="${escapeHtml(url)}">Complete your report</a></p><p>If you need help, reply to this email.</p><p>Staffing and Service Department</p></div>`,
   };
 };
 
-export const deliverCaptainReportReminder = async ({ event, schedule, user, report, hours, now, fetchImpl, enabled = CAPTAIN_REPORT_EMAIL_REMINDERS_ENABLED }) => {
+export const deliverCaptainReportReminder = async ({ event, schedule, user, report, hours, now, fetchImpl, manualRequestId, actor, enabled = CAPTAIN_REPORT_EMAIL_REMINDERS_ENABLED }) => {
   if (!enabled) return 'skipped';
   if (['submitted', 'cancelled'].includes(report?.status)) return 'skipped';
   if (!assignedReportCaptains(schedule, [user]).length) return 'skipped';
   if (!requiresCaptainReport(event, schedule)) return 'skipped';
   if (!captainReminderEventEligible({ event, schedule, report })) return 'skipped';
-  if (![24, 36, 48].includes(hours) || captainReportReminderStage(schedule.endsAt, now) !== hours) return 'skipped';
-  const id = `captain-report:${event._id}:${user._id}:${hours}`;
+  const manual = Boolean(manualRequestId);
+  if (manual ? !canManuallyRemindCaptain({ event, schedule, user, report, now })
+    : (![12, 24, 36].includes(hours) || captainReportReminderStage(schedule.endsAt, now) !== hours)) return 'skipped';
+  // Preserve the existing 24h/36h delivery keys across the schedule change.
+  const stageKey = manual ? `manual:${manualRequestId}` : hours;
+  if (!manual && hours === 36) {
+    const oldFinal = await EventReportReminder.findById(`captain-report:${event._id}:${user._id}:48`).select('status').lean();
+    if (oldFinal?.status === 'sent') return 'skipped';
+  }
+  const id = `captain-report:${event._id}:${user._id}:${stageKey}`;
   const existing = await EventReportReminder.findById(id).select('status firstAttemptAt lockedUntil').lean();
+  if (manual && existing?.status === 'sent') return 'already_sent';
   if (existing && (['sent', 'cancelled'].includes(existing.status)
     || existing.firstAttemptAt <= new Date(now.getTime() - 23 * HOUR)
     || existing.lockedUntil > now)) return 'skipped';
@@ -75,7 +85,9 @@ export const deliverCaptainReportReminder = async ({ event, schedule, user, repo
     try {
       await EventReportReminder.updateOne({ _id: id }, { $setOnInsert: {
         reportId: report._id, status: 'pending', firstAttemptAt: now,
-        payload: captainReminderEmail({ event, user, report, endsAt: schedule.endsAt, hours }),
+        payload: manual ? manualCaptainReminderEmail({ event, user, report, endsAt: schedule.endsAt, actor, now })
+          : captainReminderEmail({ event, user, report, endsAt: schedule.endsAt, hours }),
+        ...(manual ? { requestedBy: String(actor?.userId || '') } : {}),
       } }, { upsert: true });
     } catch (error) { if (error.code !== 11000) throw error; }
   }
@@ -124,7 +136,7 @@ export const runCaptainReportEmailReminders = async ({ now = new Date(), fetchIm
     // due stage, not a burst of all missed reminders.
     const schedules = await NowstaScheduleEntry.find({
       date: { $gte: CAPTAIN_REPORT_REMINDERS_START_DATE },
-      archived: { $ne: true }, endsAt: { $gte: new Date(Math.max(CAPTAIN_REPORT_REMINDERS_START_AT.getTime(), now.getTime() - 14 * 24 * HOUR)), $lte: new Date(now.getTime() - 24 * HOUR) },
+      archived: { $ne: true }, endsAt: { $gte: new Date(Math.max(CAPTAIN_REPORT_REMINDERS_START_AT.getTime(), now.getTime() - 14 * 24 * HOUR)), $lte: new Date(now.getTime() - 12 * HOUR) },
     }).select('nowstaEventId title date endsAt archived shifts').lean();
     if (!schedules.length) return summary;
     const [events, users] = await Promise.all([
@@ -153,4 +165,24 @@ export const runCaptainReportEmailReminders = async ({ now = new Date(), fetchIm
     }
     return summary;
   } finally { running = false; }
+};
+
+
+export const canManuallyRemindCaptain = ({ event, schedule, user, report, now = new Date() }) => (
+  Boolean(event) && !/^(deleted|cancelled|canceled|lost|archived)$/i.test(event.status || '')
+  && !event.meta?.nowsta?.excluded && !schedule?.archived
+  && requiresCaptainReport(event, schedule)
+  && report?.reportType !== 'kitchen' && !['submitted', 'cancelled'].includes(report?.status)
+  && assignedReportCaptains(schedule, [user || {}]).length > 0
+  && captainReminderEventEligible({ event, schedule, report })
+  && captainReportReminderStage(schedule?.endsAt, now) === 36
+);
+
+const manualCaptainReminderEmail = ({ event, user, report, endsAt, actor, now }) => {
+  const identity = resolveUserInvitationSender(actor);
+  const payload = captainReminderEmail({ event, user, report, endsAt, hours: +now - +new Date(endsAt) >= 48 * HOUR ? 48 : 36 });
+  return { ...payload, from: identity.from, reply_to: identity.email,
+    subject: `Reminder: Captain’s Report · ${event.title}`,
+    text: `${payload.text}\n\nReminder requested by ${identity.name}.`,
+    html: `${payload.html}<p>Reminder requested by ${escapeHtml(identity.name)}.</p>` };
 };

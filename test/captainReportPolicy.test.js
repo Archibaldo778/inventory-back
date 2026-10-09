@@ -67,7 +67,7 @@ test('only verified owners and Kitchen/Staffing Admin can toggle or cancel capta
   for (const role of ['admin', 'super admin', 'sales rep', 'manager', 'captain', 'bar captain', 'bar admin', 'event staff']) {
     const auth = { userId: '6ac51f12caed1c8144b1f327', username: 'Iurie', role, canManageRoles: true, accessPermissions: { 'reports.edit': true, 'reports.send': true } };
     assert.equal(canManageCaptainReportRequirement(auth), false);
-    for (const handler of [handle, cancel]) {
+    for (const handler of [handle, cancel, router.stack.find((layer) => layer.route?.path === '/events/:eventId/requests/remind').route.stack.at(-1).handle]) {
       const res = response(); await handler({ auth, params: { eventId }, body: { disabled: true } }, res);
       assert.equal(res.code, 403);
     }

@@ -195,7 +195,7 @@ export const renderEventReportText = (report = {}, { emailBrief = null } = {}) =
   return `${emailReportTitle(report).toUpperCase()}\n${clean(report.eventTitle) || '—'} · ${formatEventDate(report.eventDate) || '—'}\n${clean(report.reporterName) || '—'} · ${clean(report.position) || '—'}\n\n${brief}${sections}${reportPhotoEmailContent(report).text}`;
 };
 
-export const sendEventReportEmail = async ({ report, event, configuredRecipients = [], fetchImpl = fetch, loadSlackUsers = listSlackUsers, loadTeams = loadReportTeamDirectory, generateBrief = generateEventReportEmailBrief }) => {
+export const resolveEventReportDelivery = async ({ report, event, configuredRecipients = [], loadSlackUsers = listSlackUsers, loadTeams = loadReportTeamDirectory }) => {
   const isTest = event?.meta?.eventReportTest === true;
   const kitchen = report?.reportType === 'kitchen';
   const baseRecipients = kitchen
@@ -228,6 +228,13 @@ export const sendEventReportEmail = async ({ report, event, configuredRecipients
   if (!to.length) return { status: 'not_sent', recipients: [], cc: [], error: '' };
   const reporterEmail = email(report?.reporterEmail);
   const cc = reporterEmail && !to.includes(reporterEmail) ? [reporterEmail] : [];
+  return { recipients: to, cc };
+};
+
+export const sendEventReportEmail = async ({ report, event, configuredRecipients = [], fetchImpl = fetch, loadSlackUsers = listSlackUsers, loadTeams = loadReportTeamDirectory, generateBrief = generateEventReportEmailBrief }) => {
+  const routing = await resolveEventReportDelivery({ report, event, configuredRecipients, loadSlackUsers, loadTeams });
+  if (routing.status) return routing;
+  const { recipients: to, cc } = routing;
   const apiKey = clean(process.env.RESEND_API_KEY, 1000);
   if (!apiKey) return { status: 'failed', recipients: to, cc, error: 'RESEND_API_KEY is not configured' };
   let emailBrief = null;

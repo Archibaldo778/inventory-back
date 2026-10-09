@@ -20,6 +20,7 @@ const eventReportSchema = new mongoose.Schema({
   lastReminderAt: { type: Date, default: null },
   nextReminderAt: { type: Date, default: null, index: true },
   reminderCount: { type: Number, default: 0, min: 0 },
+  digestRequested: { type: Boolean, default: false, select: false, index: true },
   submittedAt: { type: Date, default: null },
   answers: { type: mongoose.Schema.Types.Mixed, default: {} },
   photos: { type: [new mongoose.Schema({ fileName: String, contentType: String, size: Number, publicId: String, url: String }, { _id: false })], default: [] },

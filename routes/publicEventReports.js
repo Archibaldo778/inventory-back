@@ -80,7 +80,7 @@ router.post('/:eventId', limiter, async (req, res) => {
     const templateGuard = report.templateSnapshot ? { 'templateSnapshot.revision': templateSnapshot.revision } : { templateSnapshot: null };
     report = await EventReport.findOneAndUpdate({ _id: report._id, status: 'pending', ...templateGuard }, { $set: {
       ...kitchenIdentity, ...photoFields,
-      salesRep: resolveReportSalesRep(report, event), answers, status: 'submitted', submittedAt: new Date(),
+      salesRep: resolveReportSalesRep(report, event), answers, status: 'submitted', submittedAt: new Date(), digestRequested: true,
       templateSnapshot,
       nextReminderAt: null, emailDelivery: { status: 'pending', recipients: [], cc: [], error: '' },
     } }, { new: true, runValidators: true });

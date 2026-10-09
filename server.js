@@ -483,6 +483,7 @@ import venueRoutes from './routes/venues.js';
 import eventReportTemplateRoutes from './routes/eventReportTemplates.js';
 import { runVenueKnowledgeSync } from './utils/venueKnowledge.js';
 import { runUserInviteReminders } from './utils/userInviteReminders.js';
+import { runEventReportDigests } from './utils/eventReportDigest.js';
 import { runEventReportEmailPreview } from './utils/eventReportEmailPreviews.js';
 import { runRegistrationNotifications } from './utils/registrationNotifications.js';
 import { ensureDropboxPoPolicy, runDropboxPoAlerts } from './utils/dropboxPoAlerts.js';
@@ -794,6 +795,11 @@ export const startServer = async () => {
     }).catch((error) => console.error('User invitation reminders failed:', error?.message || error));
   }, 60_000);
   userInviteReminderTimer.unref?.();
+
+  const reportDigestTimer = setInterval(() => {
+    runEventReportDigests().catch((error) => console.error('Event summary processing failed:', error?.message));
+  }, 60_000);
+  reportDigestTimer.unref?.();
 
   const reportPreviewTimer = setInterval(() => {
     runEventReportEmailPreview().catch((error) => console.error('Report email preview failed:', error?.message || error));

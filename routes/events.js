@@ -1,3 +1,4 @@
+import { withoutCaptainReportPolicy, updateEventPreservingReportPolicy } from '../utils/eventReportPolicyGuard.js';
 import { Router } from 'express';
 import eventMenuCardsRouter from './eventMenuCards.js';
 import crypto from 'crypto';
@@ -927,7 +928,7 @@ router.post('/', async (req, res) => {
     const { externalId, title, date, client, managerId, status, meta } = req.body || {};
     if (!title || !String(title).trim()) return res.status(400).json({ error: 'title is required' });
     await ensureClientRecord(client);
-    const doc = await Event.create({ externalId, title: String(title).trim(), date, client, managerId, status, meta });
+    const doc = await Event.create({ externalId, title: String(title).trim(), date, client, managerId, status, meta: withoutCaptainReportPolicy(meta) });
     res.status(201).json(doc);
     clearCache();
   } catch (e) {
@@ -1624,7 +1625,9 @@ router.patch('/:id', async (req, res) => {
     });
     if (updates.title) updates.title = String(updates.title).trim();
     if (typeof updates.client === 'string') await ensureClientRecord(updates.client);
-    const doc = await Event.findByIdAndUpdate(req.params.id, updates, {
+    const doc = updates.meta !== undefined
+      ? await updateEventPreservingReportPolicy(req.params.id, updates)
+      : await Event.findByIdAndUpdate(req.params.id, updates, {
       new: true,
       runValidators: true,
     });

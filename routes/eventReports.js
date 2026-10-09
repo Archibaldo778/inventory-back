@@ -1,4 +1,4 @@
-import { requiresCaptainReport } from '../utils/eventReportRequirement.js';
+import { requiresCaptainReport, canManageCaptainReportRequirement } from '../utils/eventReportRequirement.js';
 import { Router } from 'express';
 import mongoose from 'mongoose';
 import Event from '../models/Event.js';
@@ -201,11 +201,13 @@ router.get('/', async (req, res) => {
     const analysis = event?.meta?.eventReportAnalysis || null;
     const visible = await visibleEventReports(reports);
     const context = event ? await loadReportRequestContext(event) : null;
-    const items = context ? buildEventReportRequests({ event, ...context, reports: visible }) : visible;
+    const canManage = canManageCaptainReportRequirement(req.auth);
+    const items = (context ? buildEventReportRequests({ event, ...context, reports: visible }) : visible)
+      .map((report) => ({ ...report, canCancelRequest: canManage && Boolean(report.canCancelRequest) }));
     return res.json({
       items: req.query?.status ? items.filter((report) => report.status === req.query.status) : items,
       files: files.map(publicReportFile),
-      captainReportPolicy: event ? { disabled: event.meta?.captainReportDisabled === true, required: requiresCaptainReport(event, context?.schedule) } : undefined,
+      captainReportPolicy: event ? { canManage, disabled: event.meta?.captainReportDisabled === true, required: requiresCaptainReport(event, context?.schedule) } : undefined,
       ai: eventId ? {
         enabledForEvent: Boolean(event),
         configured: Boolean(clean(process.env.OPENAI_API_KEY, 2000)),
@@ -219,6 +221,7 @@ router.get('/', async (req, res) => {
 });
 
 router.put('/events/:eventId/captain-report-policy', async (req, res) => {
+  if (!canManageCaptainReportRequirement(req.auth)) return res.status(403).json({ message: 'Only designated report administrators can change report requirements' });
   try {
     if (!mongoose.isValidObjectId(req.params.eventId) || typeof req.body?.disabled !== 'boolean') {
       return res.status(400).json({ message: 'Choose a valid event and report setting' });
@@ -235,6 +238,7 @@ router.put('/events/:eventId/captain-report-policy', async (req, res) => {
 });
 
 router.post('/events/:eventId/requests/cancel', async (req, res) => {
+  if (!canManageCaptainReportRequirement(req.auth)) return res.status(403).json({ message: 'Only designated report administrators can change report requirements' });
   try {
     const { eventId } = req.params;
     const reportId = clean(req.body?.reportId, 80);

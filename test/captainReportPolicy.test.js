@@ -20,14 +20,14 @@ test('captain policy writes only its event flag and records the authenticated ac
     return { select: () => ({ lean: async () => ({ title: 'Dinner', meta: { captainReportDisabled: true } }) }) };
   });
   const res = response();
-  await handle({ params: { eventId }, auth: { userId: actor }, body: { disabled: true, actor: 'spoofed' } }, res);
+  await handle({ params: { eventId }, auth: { userId: actor, role: 'staffing admin' }, body: { disabled: true, actor: 'spoofed' } }, res);
   assert.equal(res.code, 200); assert.deepEqual(res.body, { disabled: true, required: false });
 });
 
 test('policy API rejects invalid values and event ids without database writes', async (t) => {
   t.mock.method(Event, 'findOneAndUpdate', () => assert.fail('Invalid input must not mutate an event'));
   for (const [id, disabled] of [[eventId, 'true'], [eventId, null], ['bad', true]]) {
-    const res = response(); await handle({ params: { eventId: id }, body: { disabled }, auth: { userId: actor } }, res);
+    const res = response(); await handle({ params: { eventId: id }, body: { disabled }, auth: { userId: actor, role: 'staffing admin' } }, res);
     assert.equal(res.code, 400);
   }
 });
@@ -53,4 +53,42 @@ test('disabled event labels pending captain requests not required without changi
   assert.equal(items[0].status, 'not_required'); assert.equal(items[0].canCancelRequest, false);
   assert.equal(items[1].status, 'submitted'); assert.deepEqual(items[1].answers, reports[1].answers);
   assert.equal(items[2].status, 'pending'); assert.equal(reports[0].status, 'pending');
+});
+
+
+test('only verified owners and Kitchen/Staffing Admin can toggle or cancel captain reports', async (t) => {
+  const { canManageCaptainReportRequirement } = await import('../utils/eventReportRequirement.js');
+  for (const auth of [{ userId: '68c70548aea053de74d25b22', role: 'admin' }, { userId: '68c7047faea053de74d25b15', role: 'admin' }, { role: 'kitchen admin' }, { role: 'staffing admin' }]) {
+    assert.equal(canManageCaptainReportRequirement(auth), true);
+  }
+  t.mock.method(Event, 'findOneAndUpdate', () => assert.fail('Unauthorized request must not write'));
+  t.mock.method(Event, 'findById', () => assert.fail('Unauthorized cancellation must stop before loading'));
+  const cancel = router.stack.find((layer) => layer.route?.path === '/events/:eventId/requests/cancel').route.stack.at(-1).handle;
+  for (const role of ['admin', 'super admin', 'sales rep', 'manager', 'captain', 'bar captain', 'bar admin', 'event staff']) {
+    const auth = { userId: '6ac51f12caed1c8144b1f327', username: 'Iurie', role, canManageRoles: true, accessPermissions: { 'reports.edit': true, 'reports.send': true } };
+    assert.equal(canManageCaptainReportRequirement(auth), false);
+    for (const handler of [handle, cancel]) {
+      const res = response(); await handler({ auth, params: { eventId }, body: { disabled: true } }, res);
+      assert.equal(res.code, 403);
+    }
+  }
+});
+
+
+test('ordinary event edits cannot overwrite the protected report policy or its audit', async (t) => {
+  const { updateEventPreservingReportPolicy, withoutCaptainReportPolicy } = await import('../utils/eventReportPolicyGuard.js');
+  const audit = [{ disabled: true, actor: 'owner' }];
+  t.mock.method(Event, 'findById', () => ({ select: () => ({ lean: async () => ({ meta: { captainReportDisabled: true, captainReportPolicyAudit: audit } }) }) }));
+  t.mock.method(Event, 'findOneAndUpdate', async (filter, update) => {
+    assert.equal(filter['meta.captainReportDisabled'], true);
+    assert.deepEqual(filter['meta.captainReportPolicyAudit'], audit);
+    assert.equal(update.meta.captainReportDisabled, true);
+    assert.deepEqual(update.meta.captainReportPolicyAudit, audit);
+    assert.equal(update.meta.venue, 'New venue');
+    return update;
+  });
+  await updateEventPreservingReportPolicy(eventId, { meta: { venue: 'New venue', captainReportDisabled: false, captainReportPolicyAudit: [] } });
+  assert.deepEqual(withoutCaptainReportPolicy({ venue: 'Venue', captainReportDisabled: true, captainReportPolicyAudit: audit }), { venue: 'Venue' });
+  t.mock.method(Event, 'findOneAndUpdate', async () => null);
+  await assert.rejects(updateEventPreservingReportPolicy(eventId, { meta: {} }), { statusCode: 409 });
 });

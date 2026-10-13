@@ -26,6 +26,6 @@ export async function inspectBarMetadata(metadata, text, inspect = inspectBarDoc
     return { ...metadata, barItems: result.status === 'verified' ? result.items : [],
       barReview: { status: result.status, issues: result.issues, rulesRevision: result.rulesRevision || 0 } };
   } catch (error) {
-    return { ...metadata, barItems: [], barReview: { status: 'needs_review', issues: [String(error.message || 'AI inspection failed').slice(0, 300)] } };
+    return { ...metadata, barItems: [], barReview: { status: 'needs_review', retryable: true, issues: [String(error.message || 'AI inspection failed').slice(0, 300)] } };
   }
 }

@@ -1,3 +1,4 @@
+import { runBarDocumentRechecks } from './utils/barDocumentRecheck.js';
 import dotenv from 'dotenv';
 import express from 'express';
 import staffPortalRoutes from './routes/staffPortal.js';
@@ -694,6 +695,14 @@ export const startServer = async () => {
     console.log(`Nowsta automatic sync enabled every ${intervalMinutes} minutes`);
   }
 
+  const recheckBarDocuments = () => runBarDocumentRechecks().then((summary) => {
+    if (summary.updated || summary.review || summary.failed) console.log('Bar document recheck', summary);
+  }).catch((error) => console.error('Bar document recheck failed:', error.message));
+  const barDocumentRecheckStartup = setTimeout(recheckBarDocuments, 45_000);
+  barDocumentRecheckStartup.unref?.();
+  const barDocumentRecheckTimer = setInterval(recheckBarDocuments, 60_000);
+  barDocumentRecheckTimer.unref?.();
+
   let dropboxSyncTimer = null;
   let dropboxStartupTimer = null;
   const catereaseConfig = getCatereaseConfig();
@@ -827,6 +836,8 @@ export const startServer = async () => {
     console.log(`${signal} received, shutting down`);
     if (nowstaStartupTimer) clearTimeout(nowstaStartupTimer);
     if (nowstaSyncTimer) clearInterval(nowstaSyncTimer);
+    clearTimeout(barDocumentRecheckStartup);
+    clearInterval(barDocumentRecheckTimer);
     if (dropboxStartupTimer) clearTimeout(dropboxStartupTimer);
     if (dropboxSyncTimer) clearInterval(dropboxSyncTimer);
     if (catereaseStartupTimer) clearTimeout(catereaseStartupTimer);

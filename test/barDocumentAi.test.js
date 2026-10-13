@@ -111,3 +111,16 @@ test('generic KM water description and staff supply do not block tracked PO wate
   const uncertain = validateBarAiResult({ rows: [row(1, 'water', 'Flat and sparkling water', 20, 1, '20')], issues: [] }, { lines: ['Flat and sparkling water\t20'], documentType: 'po' });
   assert.equal(uncertain.status, 'needs_review');
 });
+
+
+test('ice supplier note does not block a verified PO, genuine baseline drinks remain protected', () => {
+  const lines = ['ICE\t2', 'Standard from United', 'White Burgundy\t9'];
+  const rows = [row(1, 'ingredient'), row(2, 'note'), row(3, 'alcohol', 'White Burgundy', 9, 3, '9')];
+  const baseline = [{ name: 'Standard from United', scope: 'alcohol' }, { name: 'White Burgundy', scope: 'alcohol' }];
+  const result = validateBarAiResult({ rows, issues: [] }, { lines, documentType: 'po', baseline });
+  assert.equal(result.status, 'verified');
+  assert.deepEqual(result.items.map((item) => [item.name, item.quantity]), [['White Burgundy', 9]]);
+  const missingWine = validateBarAiResult({ rows: [...rows.slice(0, 2), row(3, 'note')], issues: [] }, { lines, documentType: 'po', baseline });
+  assert.equal(missingWine.status, 'needs_review');
+  assert.match(missingWine.issues.join(';'), /White Burgundy/);
+});

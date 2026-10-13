@@ -6,7 +6,7 @@ import { PDFDocument } from 'pdf-lib';
 import { canTeachDocumentAi, requireDocumentTeacher } from '../utils/assistantDocumentAccess.js';
 import { prepareAssistantAttachments, ASSISTANT_FILE_LIMIT } from '../utils/assistantAttachments.js';
 import { askDocumentAssistant } from '../utils/assistantDocumentAi.js';
-import documentRouter, { documentChatMessage, rememberDocumentRule } from '../routes/assistantDocuments.js';
+import documentRouter, { documentChatMessage, rememberDocumentRule, documentChatError } from '../routes/assistantDocuments.js';
 import AssistantThread from '../models/AssistantThread.js';
 import BarAiSettings from '../models/BarAiSettings.js';
 import BarEvent from '../models/BarEvent.js';
@@ -159,4 +159,16 @@ test('Sam and Alexander can use document chat with restricted bar roles without 
     assert.equal(requestPermission(user, { originalUrl: '/api/users', method: 'GET' }), false);
     assert.equal(requestPermission({ ...user, userId: 'other' }, { originalUrl: '/api/assistant/documents/messages', method: 'POST' }), false);
   }
+});
+
+
+test('unreadable attachments return a helpful 400 instead of a generic server error', async () => {
+  const res = response();
+  await documentChatMessage({ auth, body: { message: 'Read this' }, files: [{ originalname: 'broken.docx', buffer: Buffer.from('broken') }] }, res,
+    (error) => documentChatError(error, {}, res, fail));
+  assert.equal(res.statusCode, 400); assert.match(res.body.message, /valid Word document or PDF/);
+  const unavailable = response(); documentChatError(Object.assign(new Error('OpenAI is not configured'), { statusCode: 503 }), {}, unavailable, fail);
+  assert.equal(unavailable.statusCode, 503);
+  let forwarded; documentChatError(new Error('private DB detail'), {}, response(), (error) => { forwarded = error; });
+  assert.equal(forwarded.message, 'private DB detail');
 });

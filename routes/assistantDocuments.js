@@ -91,6 +91,12 @@ export async function rememberDocumentRule(req, res, next) {
     return next(error);
   }
 }
+export function documentChatError(error, _req, res, next) {
+  if (![400, 502, 503].includes(error?.statusCode)) return next(error);
+  return res.status(error.statusCode).json({ message: String(error.message).slice(0, 400) });
+}
+
 router.post('/messages', receive, (req, res, next) => documentChatMessage(req, res, next));
 router.post('/rules/:messageId/remember', rememberDocumentRule);
+router.use(documentChatError);
 export default router;

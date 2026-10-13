@@ -100,3 +100,19 @@ test('renamed event folders and numbered menu revisions contribute one authorita
   assert.equal(result.items.length, 1);
   assert.equal(result.items[0].sentQty, 12);
 });
+
+
+test('exact named wine aliases in KM merge into PO quantities without inventing a match', async () => {
+  const result = await prepareBarDocumentRecheck({ bar: { items: [] },
+    documents: [{ type: 'po', fileName: 'Dinner PO.docx' }, { type: 'kitchen_menu', fileName: 'Dinner KM.docx' }],
+    read: async (doc) => ({ barReview: { status: 'verified' }, barItems: doc.type === 'po'
+      ? [{ name: 'White Burgundy (Les Vergelesses)', scope: 'alcohol', sentQty: 9 }, { name: 'Red Bordeaux (Chateau Gloria)', scope: 'alcohol', sentQty: 5 }]
+      : [{ name: 'Les Vergelesses- White', scope: 'alcohol', sentQty: 0, sentQtyPending: true }, { name: 'Chateau Gloria- Red', scope: 'alcohol', sentQty: 0, sentQtyPending: true }, { name: 'Other Vineyard- Red', scope: 'alcohol', sentQty: 0, sentQtyPending: true }] }),
+    normalize: async (items) => items,
+  });
+  assert.equal(result.status, 'ready');
+  assert.equal(result.items.length, 3);
+  assert.equal(result.items.find((item) => item.name === 'White Burgundy (Les Vergelesses)').sentQty, 9);
+  assert.equal(result.items.find((item) => item.name === 'Red Bordeaux (Chateau Gloria)').sentQty, 5);
+  assert.equal(result.items.find((item) => item.name === 'Other Vineyard- Red').sentQtyPending, true);
+});

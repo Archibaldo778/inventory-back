@@ -6,7 +6,7 @@ import { runImportedBarItemMergePipeline } from './barManualItems.js';
 import { getPreparedBeverageType } from './barPackoutScope.js';
 
 export const recheckSourceSignature = (documents, rulesRevision = 0) => crypto.createHash('sha256').update(JSON.stringify({
-  version: BAR_AI_VERSION, recheckVersion: 3, rulesRevision, model: process.env.BAR_DOCUMENT_AI_MODEL || 'gpt-5.6-luna',
+  version: BAR_AI_VERSION, recheckVersion: 4, rulesRevision, model: process.env.BAR_DOCUMENT_AI_MODEL || 'gpt-5.6-luna',
   sources: documents.map((d) => [String(d._id), d.type, d.sourceProvider, d.sourceId, d.sourceRevision, d.checksum]).sort(),
 })).digest('hex');
 
@@ -52,7 +52,20 @@ export async function prepareBarDocumentRecheck({ bar, documents, read, normaliz
     if (metadata.barReview?.status !== 'verified') return { status: metadata.barReview?.retryable ? 'retry' : 'needs_review', issues: (metadata.barReview?.issues || ['Document could not be verified']).map((issue) => `${document.fileName}: ${issue}`) };
     parsed.push({ ...document, barItems: metadata.barItems, barReview: metadata.barReview });
   }
-  const imported = await normalize(parsed.flatMap((d) => d.barItems), { guestCount: bar.guestCount, allowFinancials: false });
+  const poWines = parsed.filter((d) => d.type === 'po').flatMap((d) => d.barItems).filter((item) => item.scope === 'alcohol');
+  const sourceItems = parsed.flatMap((document) => (document.barItems || []).map((item) => {
+    if (document.type !== 'kitchen_menu' || item.scope !== 'alcohol') return item;
+    // KM "Chateau Gloria- Red" and PO "Red Bordeaux (Chateau Gloria)" are one wine.
+    // Require the full named alias, matching color, and exactly one PO name.
+    const match = String(item.name || '').match(/^(.+?)\s*[-–—]\s*(white|red|ros[eé])$/i);
+    if (!match) return item;
+    const alias = plainName(match[1]);
+    const color = match[2].toLowerCase();
+    const names = [...new Set(poWines.filter((wine) => new RegExp(`\\b${color}\\b`, 'i').test(wine.name)
+      && [...wine.name.matchAll(/\(([^)]+)\)/g)].some((part) => plainName(part[1]) === alias)).map((wine) => wine.name))];
+    return names.length === 1 ? { ...item, name: names[0] } : item;
+  }));
+  const imported = await normalize(sourceItems, { guestCount: bar.guestCount, allowFinancials: false });
   return { ...planBarDocumentRecheck(bar, imported, [...new Set(documents.map((d) => d.type))]), documents: parsed };
 }
 

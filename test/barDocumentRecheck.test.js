@@ -75,9 +75,16 @@ test('concurrent edits, new confirmations, rule changes or replaced documents re
   ]) assert.equal(canCommitBarRecheck({ ...input, ...change }), false);
 });
 
-test('only the explicitly requested Dieter event can enter the historical queue', async () => {
+test('automatic queue starts at New York today and excludes closed reports and malformed dates', async () => {
   const { barDocumentRecheckQuery } = await import('../utils/barDocumentRecheckPlan.js');
-  assert.deepEqual(barDocumentRecheckQuery(), { linkedEventId: { $in: ['6aa993cb55df57b2093ba0b2'] }, status: { $nin: ['submitted', 'reviewed', 'closed'] } });
+  const beforeMidnight = barDocumentRecheckQuery(new Date('2026-10-14T03:59:00Z'));
+  const afterMidnight = barDocumentRecheckQuery(new Date('2026-10-14T04:01:00Z'));
+  assert.equal(beforeMidnight.eventDate.$gte, '2026-10-13');
+  assert.equal(afterMidnight.eventDate.$gte, '2026-10-14');
+  assert.equal(afterMidnight.eventDate.$regex.test('74512-06-05'), false);
+  assert.equal(afterMidnight.eventDate.$regex.test('2026-10-15'), true);
+  assert.deepEqual(afterMidnight.status.$nin, ['submitted', 'reviewed', 'closed']);
+  assert.equal(afterMidnight.linkedEventId, undefined);
 });
 
 
@@ -130,4 +137,29 @@ test('separate bar PO is used without kitchen KPO blocking it; a lone KPO is not
     normalize: async (items) => items,
   });
   assert.equal(result.status, 'ready'); assert.equal(result.items[0].sentQty, 16);
+});
+
+
+test('complete verified menu recheck removes stale notes instead of retaining fake alcohol', () => {
+  const bar = { status: 'ready', items: [{ ...wine, name: 'Client provide champagne, wine,' }] };
+  const result = planBarDocumentRecheck(bar, [], ['kitchen_menu']);
+  assert.equal(result.status, 'ready');
+  assert.deepEqual(result.items, []);
+});
+
+test('recheck replaces duplicate whiskey and fake headings with verified PO counts', () => {
+  const bar = { status: 'ready', items: [
+    { name: 'WHISKEY SOUR', scope: 'alcohol', sentQty: 70 },
+    { name: 'WHISKEY SOUR', section: 'COCKTAIL', sentQty: 70 },
+    { name: 'SPECIALTY COCKTAILS', section: 'COCKTAIL', sentQty: 1 },
+  ] };
+  const result = planBarDocumentRecheck(bar, [{ name: 'WHISKEY SOUR', section: 'COCKTAIL', sentQty: 20, cocktailServingsAuto: false }], ['po']);
+  assert.equal(result.status, 'ready');
+  assert.deepEqual(result.items.map((item) => [item.name, item.sentQty]), [['WHISKEY SOUR', 20]]);
+});
+
+test('menu-only recheck cannot silently remove a previous positive PO quantity', () => {
+  const result = planBarDocumentRecheck({ items: [{ ...wine, sentQty: 12, sentQtyPending: false }] }, [], ['kitchen_menu']);
+  assert.equal(result.status, 'needs_review');
+  assert.match(result.issues[0], /Previous PO quantity/);
 });

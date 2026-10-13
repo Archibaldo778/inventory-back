@@ -6,7 +6,7 @@ import { runImportedBarItemMergePipeline } from './barManualItems.js';
 import { getPreparedBeverageType } from './barPackoutScope.js';
 
 export const recheckSourceSignature = (documents, rulesRevision = 0) => crypto.createHash('sha256').update(JSON.stringify({
-  version: BAR_AI_VERSION, recheckVersion: 5, rulesRevision, model: process.env.BAR_DOCUMENT_AI_MODEL || 'gpt-5.6-luna',
+  version: BAR_AI_VERSION, recheckVersion: 6, rulesRevision, model: process.env.BAR_DOCUMENT_AI_MODEL || 'gpt-5.6-luna',
   sources: documents.map((d) => [String(d._id), d.type, d.sourceProvider, d.sourceId, d.sourceRevision, d.checksum]).sort(),
 })).digest('hex');
 
@@ -42,8 +42,15 @@ export function planBarDocumentRecheck(bar, importedItems, documentTypes) {
     const fullNames = names.filter((name) => /\([^)]*\)/.test(name));
     return fullNames.length === 1 ? { ...item, name: fullNames[0] } : item;
   });
+  // This is a review of every current source, not a partial single-file upload.
+  // Do not retain stale notes/headings merely because they were classified as drinks before.
+  if (!documentTypes.includes('po')) {
+    const missingCounts = (bar.items || []).filter((previous) => previous.sentQtyPending !== true && Number(previous.sentQty) > 0
+      && !items.some((item) => plainName(item.name) === plainName(previous.name)));
+    if (missingCounts.length) return { status: 'needs_review', issues: missingCounts.map((item) => `Previous PO quantity has no current PO source: ${item.name}`) };
+  }
   const merged = runImportedBarItemMergePipeline({ existingItems: bar.items || [], importedItems: items,
-    documentTypes, eventDate: bar.eventDate, scheduledBy: 'Automatic document recheck' });
+    documentTypes: ['po', 'kitchen_menu'], eventDate: bar.eventDate, scheduledBy: 'Automatic document recheck' });
   return { status: 'ready', items: merged.items };
 }
 
@@ -82,8 +89,8 @@ export const canCommitBarRecheck = ({ beforeBar, currentBar, beforeDocuments, cu
   && recheckSourceSignature(currentDocuments.filter((d) => ['dropbox', 'caterease'].includes(d.sourceProvider)), rulesRevision) === signature
 );
 
-// Explicitly requested historical repair. No other past events are enrolled automatically.
-export const barDocumentRecheckQuery = () => ({
-  linkedEventId: { $in: ['6aa993cb55df57b2093ba0b2'] },
+// Repair today's and future automatic imports; never reopen past events.
+export const barDocumentRecheckQuery = (now = new Date()) => ({
+  eventDate: { $gte: new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now), $regex: /^\d{4}-\d{2}-\d{2}$/ },
   status: { $nin: ['submitted', 'reviewed', 'closed'] },
 });

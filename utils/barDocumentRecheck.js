@@ -26,7 +26,7 @@ async function runBatch() {
   const now = new Date();
   const settings = await BarAiSettings.findById('bar').lean();
   const rulesRevision = settings?.revision || 0;
-  const bars = await BarEvent.find(barDocumentRecheckQuery()).lean();
+  const bars = await BarEvent.find(barDocumentRecheckQuery(now)).lean();
   const events = await Event.find({ _id: { $in: bars.map((b) => b.linkedEventId) }, status: { $not: /^(?:deleted|cancelled|canceled|lost)$/i }, 'meta.nowsta.excluded': { $ne: true }, 'documents.0': { $exists: true } }).select('title date documents').lean();
   const byId = new Map(events.map((e) => [String(e._id), e]));
   const jobs = await BarDocumentRecheck.find({ _id: { $in: events.map((e) => e._id) } }).lean();
@@ -42,8 +42,7 @@ async function runBatch() {
     if (job?.lockedUntil > now || (job?.signature === signature && (['done', 'protected', 'needs_review'].includes(job.status) || job.nextAttemptAt > now))) return [];
     return [{ bar, event, documents, signature, job }];
   }).sort((a, b) => {
-    const priority = (x) => x.bar.sourceChangedAfterReturns ? -1 : (x.bar.items?.length > 0 && x.bar.items?.some((i) => i.sentQtyPending)) ? 0 : 1;
-    return priority(a) - priority(b) || Math.abs(+new Date(a.event.date) - +now) - Math.abs(+new Date(b.event.date) - +now);
+    return String(a.event.date).localeCompare(String(b.event.date)) || Number(b.bar.importReview?.status === 'needs_review') - Number(a.bar.importReview?.status === 'needs_review');
   });
   let dropbox;
   const read = async (document) => {

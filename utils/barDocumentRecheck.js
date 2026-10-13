@@ -1,3 +1,4 @@
+import { downloadDropboxDocumentSnapshot } from './dropboxDocumentSnapshot.js';
 import crypto from 'node:crypto';
 import mongoose from 'mongoose';
 import Event from '../models/Event.js';
@@ -7,7 +8,7 @@ import BarDocumentRecheck from '../models/BarDocumentRecheck.js';
 import DropboxDocument from '../models/DropboxDocument.js';
 import CatereaseFile from '../models/CatereaseFile.js';
 import DropboxIntegration from '../models/DropboxIntegration.js';
-import { decryptDropboxSecret, refreshDropboxAccessToken, downloadDropboxFile, getDropboxMetadata } from './dropboxApi.js';
+import { decryptDropboxSecret, refreshDropboxAccessToken } from './dropboxApi.js';
 import { downloadCatereaseEventFile } from './catereaseApi.js';
 import { readDropboxDocxMetadata } from './dropboxDocxMetadata.js';
 import { inspectBarDocument } from './barDocumentAiService.js';
@@ -53,11 +54,7 @@ async function runBatch() {
         if (!integration) throw new Error('Dropbox is not connected');
         dropbox = { token: await refreshDropboxAccessToken(decryptDropboxSecret(integration.refreshToken)), namespaceId: integration.namespaceId };
       }
-      const current = await getDropboxMetadata(dropbox.token, document.sourceId, { namespaceId: dropbox.namespaceId });
-      if (document.sourceRevision && current.rev !== document.sourceRevision) throw new Error('Source revision changed; waiting for regular Dropbox sync');
-      buffer = await downloadDropboxFile(dropbox.token, document.sourceId, { namespaceId: dropbox.namespaceId });
-      const after = await getDropboxMetadata(dropbox.token, document.sourceId, { namespaceId: dropbox.namespaceId });
-      if (after.rev !== current.rev) throw new Error('Source revision changed during download');
+      buffer = await downloadDropboxDocumentSnapshot(dropbox.token, document, dropbox.namespaceId);
     } else buffer = (await downloadCatereaseEventFile(document.sourceId)).buffer;
     return readDropboxDocxMetadata(buffer, { documentType: document.type, inspectBar: inspectBarDocument });
   };

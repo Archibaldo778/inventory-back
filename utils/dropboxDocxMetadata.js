@@ -18,22 +18,22 @@ const decodeXmlEntities = (value) => String(value || '')
   .replace(/&#(\d+);/g, (_match, code) => String.fromCodePoint(Number(code)))
   .replace(/&#x([0-9a-f]+);/gi, (_match, code) => String.fromCodePoint(Number.parseInt(code, 16)));
 
-const fragmentText = (fragment) => decodeXmlEntities(String(fragment || '')
+const fragmentText = (fragment, preserveCellBreaks = false) => decodeXmlEntities(String(fragment || '')
   .replace(/<w:tab\b[^>]*\/>/gi, ' ')
-  .replace(/<w:br\b[^>]*\/>/gi, ' ')
-  .replace(/<\/w:p>/gi, ' ')
+  .replace(/<w:br\b[^>]*\/>/gi, preserveCellBreaks ? '\u2028' : ' ')
+  .replace(/<\/w:p>/gi, preserveCellBreaks ? '\u2028' : ' ')
   .replace(/<[^>]+>/g, ''))
   .replace(/[ \u00a0]+/g, ' ')
   .trim();
 
-export const extractDropboxDocxLines = (xml) => {
+export const extractDropboxDocxLines = (xml, { preserveCellBreaks = false } = {}) => {
   const lines = [];
   const blocks = String(xml || '').match(/<w:tbl\b[\s\S]*?<\/w:tbl>|<w:p\b[\s\S]*?<\/w:p>/gi) || [];
   blocks.forEach((block) => {
     if (/^<w:tbl\b/i.test(block)) {
       const rows = block.match(/<w:tr\b[\s\S]*?<\/w:tr>/gi) || [];
       rows.forEach((row) => {
-        const cells = (row.match(/<w:tc\b[\s\S]*?<\/w:tc>/gi) || []).map(fragmentText);
+        const cells = (row.match(/<w:tc\b[\s\S]*?<\/w:tc>/gi) || []).map((cell) => fragmentText(cell, preserveCellBreaks));
         if (cells.some(Boolean)) lines.push(cells.join('\t'));
       });
       return;
@@ -284,7 +284,7 @@ export const readDropboxDocxMetadata = async (buffer, { documentType: typeHint =
   const text = lines.join('\n');
   const metadata = parseDropboxDocxMetadataText(text);
   const documentType = metadata.documentType !== 'review' ? metadata.documentType : typeHint;
-  const finish = (result) => inspectBar && ['po', 'kitchen_menu'].includes(documentType) ? inspectBarMetadata(result, text, inspectBar) : result;
+  const finish = (result) => inspectBar && ['po', 'kitchen_menu'].includes(documentType) ? inspectBarMetadata(result, extractDropboxDocxLines(xml, { preserveCellBreaks: true }).join('\n'), inspectBar) : result;
   if (documentType === 'kitchen_menu') {
     return finish({
       ...metadata,

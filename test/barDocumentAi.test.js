@@ -189,3 +189,50 @@ test('Returned-only table cannot provide sent quantity', () => {
   const result = validateBarAiResult({ rows: [row(1, 'heading'), row(2, 'alcohol', 'Dry Sherry', 4, 2, '4')], issues: [] }, { lines: ['Item\tReturned', 'Dry Sherry\t4'], documentType: 'po' });
   assert.equal(result.status, 'needs_review');
 });
+
+test('DOCX AI sees separate paragraphs and hard breaks without changing kitchen extraction', async () => {
+  for (const separator of ['</w:t></w:r></w:p><w:p><w:r><w:t>', '</w:t><w:br/><w:t>']) {
+    const xml = `<w:document><w:body><w:tbl><w:tr><w:tc><w:p><w:r><w:t>Grey Goose${separator}Patron Silver</w:t></w:r></w:p></w:tc></w:tr></w:tbl></w:body></w:document>`;
+    assert.deepEqual(extractDropboxDocxLines(xml), ['Grey Goose Patron Silver']);
+    const zip = new JSZip(); zip.file('word/document.xml', xml);
+    const result = await readDropboxDocxMetadata(await zip.generateAsync({ type: 'nodebuffer' }), {
+      documentType: 'kitchen_menu', inspectBar: async ({ text, documentType }) => {
+        const lines = barDocumentLines(text);
+        assert.deepEqual(lines, ['Grey Goose\u2028Patron Silver']);
+        return validateBarAiResult({ rows: [row(1, 'alcohol', 'Grey Goose'), row(1, 'alcohol', 'Patron Silver')], issues: [] }, {
+          lines, documentType, baseline: [{ name: 'Grey Goose Patron Silver', scope: 'alcohol' }],
+        });
+      },
+    });
+    assert.equal(result.barReview.status, 'verified', result.barReview.issues.join(';'));
+    assert.deepEqual(result.barItems.map(({ name, quantity }) => [name, quantity]), [['Grey Goose', null], ['Patron Silver', null]]);
+  }
+});
+test('multiline PO quantities stay aligned with each drink and cannot be swapped or shared', () => {
+  const lines = ['Name\tQty\tReturned', 'Grey Goose\u2028Patron Silver\t3\u20285\t1\u20282'];
+  const rows = [row(1, 'heading'), row(2, 'alcohol', 'Grey Goose', 3, 2, '3'), row(2, 'alcohol', 'Patron Silver', 5, 2, '5')];
+  const result = validateBarAiResult({ rows, issues: [] }, { lines, documentType: 'po' });
+  assert.equal(result.status, 'verified', result.issues.join(';'));
+  assert.deepEqual(result.items.map((item) => item.quantity), [3, 5]);
+  for (const invalid of [
+    [row(1, 'heading'), row(2, 'alcohol', 'Grey Goose', 5, 2, '5'), row(2, 'alcohol', 'Patron Silver', 3, 2, '3')],
+    [row(1, 'heading'), row(2, 'alcohol', 'Grey Goose', 1, 2, '1'), row(2, 'alcohol', 'Patron Silver', 2, 2, '2')],
+  ]) assert.equal(validateBarAiResult({ rows: invalid, issues: [] }, { lines, documentType: 'po' }).status, 'needs_review');
+  const shared = ['Name\tQty', 'Grey Goose\u2028Patron Silver\t8'];
+  assert.equal(validateBarAiResult({ rows: [row(1, 'heading'), row(2, 'alcohol', 'Grey Goose', 8, 2, '8'), row(2, 'alcohol', 'Patron Silver', 8, 2, '8')], issues: [] }, { lines: shared, documentType: 'po' }).status, 'needs_review');
+});
+test('splitting a multiline cell cannot excuse a missing known drink or duplicate classification', () => {
+  const lines = ['Grey Goose\u2028Patron Silver'];
+  const baseline = [{ name: 'Grey Goose Patron Silver', scope: 'alcohol' }];
+  for (const rows of [[row(1, 'alcohol', 'Grey Goose')], [row(1, 'alcohol', 'Grey Goose'), row(1, 'alcohol', 'Grey Goose')]]) {
+    assert.equal(validateBarAiResult({ rows, issues: [] }, { lines, documentType: 'kitchen_menu', baseline }).status, 'needs_review');
+  }
+  assert.equal(validateBarAiResult({ rows: [row(1, 'alcohol', 'Grey Goose'), row(1, 'note')], issues: [] }, { lines: ['Grey Goose'], documentType: 'kitchen_menu' }).status, 'needs_review');
+});
+test('a wrapped wine name remains one item with its original PO quantity', () => {
+  const result = validateBarAiResult({ rows: [row(1, 'heading'), row(2, 'alcohol', 'Champagne, Louis Roederer Brut Collection', 12, 2, '12')], issues: [] }, {
+    lines: ['Name\tQty', 'Champagne, Louis Roederer\u2028Brut Collection\t12'], documentType: 'po', baseline: [{ name: 'Champagne, Louis Roederer Brut Collection', scope: 'alcohol' }],
+  });
+  assert.equal(result.status, 'verified', result.issues.join(';'));
+  assert.equal(result.items.length, 1); assert.equal(result.items[0].quantity, 12);
+});

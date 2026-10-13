@@ -116,3 +116,18 @@ test('exact named wine aliases in KM merge into PO quantities without inventing 
   assert.equal(result.items.find((item) => item.name === 'Red Bordeaux (Chateau Gloria)').sentQty, 5);
   assert.equal(result.items.find((item) => item.name === 'Other Vineyard- Red').sentQtyPending, true);
 });
+
+
+test('separate bar PO is used without kitchen KPO blocking it; a lone KPO is not silently discarded', async () => {
+  const { selectRecheckDocumentVersions } = await import('../utils/barDocumentRecheckPlan.js');
+  const po = { fileName: 'Dinner PO.docx', type: 'po' };
+  const kpo = { fileName: 'Dinner KPO.docx', type: 'po' };
+  const km = { fileName: 'Dinner KM.docx', type: 'kitchen_menu' };
+  assert.deepEqual(selectRecheckDocumentVersions([po, kpo, km]).map((d) => d.fileName), [po.fileName, km.fileName]);
+  assert.deepEqual(selectRecheckDocumentVersions([kpo, km]).map((d) => d.fileName), [kpo.fileName, km.fileName]);
+  const result = await prepareBarDocumentRecheck({ bar: { items: [] }, documents: [po, kpo],
+    read: async (document) => { assert.equal(document.fileName, po.fileName); return { barReview: { status: 'verified' }, barItems: [{ name: 'Panna', scope: 'bar_support', sentQty: 16 }] }; },
+    normalize: async (items) => items,
+  });
+  assert.equal(result.status, 'ready'); assert.equal(result.items[0].sentQty, 16);
+});

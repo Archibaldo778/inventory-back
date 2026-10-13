@@ -6,7 +6,7 @@ import { runImportedBarItemMergePipeline } from './barManualItems.js';
 import { getPreparedBeverageType } from './barPackoutScope.js';
 
 export const recheckSourceSignature = (documents, rulesRevision = 0) => crypto.createHash('sha256').update(JSON.stringify({
-  version: BAR_AI_VERSION, recheckVersion: 4, rulesRevision, model: process.env.BAR_DOCUMENT_AI_MODEL || 'gpt-5.6-luna',
+  version: BAR_AI_VERSION, recheckVersion: 5, rulesRevision, model: process.env.BAR_DOCUMENT_AI_MODEL || 'gpt-5.6-luna',
   sources: documents.map((d) => [String(d._id), d.type, d.sourceProvider, d.sourceId, d.sourceRevision, d.checksum]).sort(),
 })).digest('hex');
 
@@ -20,9 +20,14 @@ export const protectedBarRecheckReason = (bar = {}) => {
 
 // Historical copies can remain attached after an event folder is renamed.
 // Within this explicitly selected event, the same filename family is one PO/KM.
-export const selectRecheckDocumentVersions = (documents) => selectLatestDropboxFileRevisions(
-  documents.map((document) => ({ ...document, relativePath: document.fileName, modifiedAt: document.uploadedAt })),
-);
+export const selectRecheckDocumentVersions = (documents) => {
+  const kitchenPackout = (document) => /\bkpo\b/i.test(document.fileName || '');
+  const hasSeparatePo = documents.some((document) => document.type === 'po' && !kitchenPackout(document));
+  return selectLatestDropboxFileRevisions(
+    documents.filter((document) => !hasSeparatePo || !kitchenPackout(document))
+      .map((document) => ({ ...document, relativePath: document.fileName, modifiedAt: document.uploadedAt })),
+  );
+};
 
 const plainName = (value) => String(value || '').toLowerCase().replace(/\([^)]*\)/g, '').replace(/[^a-z0-9]/g, '');
 export function planBarDocumentRecheck(bar, importedItems, documentTypes) {

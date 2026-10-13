@@ -22,11 +22,12 @@ const hasReasonableBarQuantity = (item = {}) => {
   const quantity = Number(raw);
   return Number.isFinite(quantity) && quantity >= 0 && quantity <= MAX_REASONABLE_BAR_ITEM_QUANTITY;
 };
-const FOOD_MENU_SECTION_PATTERN = /^(?:\d+\s+)?(?:table\s+nibbles|(?:first|second|third|fourth)\s+courses?|plated\s+desserts?|proteins?|sides?|salads?|soups?|appetizers?|hors\s+d[’']?oeuvres?|canap[eé]s?|entr[eé]es?|main\s+courses?|desserts?|breads?|starches?|vegetables?|vendor\s+meals?)\s*:?(?:\s*\([^)]*\))?(?:\s*[-–—:]\s*served\s+family\s+style)?$/i;
+const FOOD_MENU_SECTION_PATTERN = /^(?:\d+\s+)?(?:table\s+nibbles|(?:first|second|third|fourth)\s+courses?|plated\s+desserts?|proteins?|sides?|salads?|soups?|appetizers?|hors\s+d[’']?oeuvres?|canap[eé]s?|entr[eé]es?|main\s+courses?|mains?|desserts?|breads?|starches?|vegetables?|vendor\s+meals?)\s*:?(?:\s*\([^)]*\))?(?:\s*[-–—:]\s*served\s+family\s+style)?$/i;
 const CULINARY_CONTEXT_PATTERN = /\b(?:food|meals?|courses?|hors\s+d[’']?oeuvres?|canap[eé]s?|appetizers?|entr[eé]es?|desserts?|salads?|soups?|breads?|starches?|vegetables?|proteins?|vinaigrettes?|dressings?|sauces?|purees?|marinades?|glazes?)\b/i;
 export const isFoodMenuItem = (item = {}) => (
   FOOD_MENU_SECTION_PATTERN.test(String(item?.name || '').trim())
   || FOOD_MENU_SECTION_PATTERN.test(String(item?.section || '').trim())
+  || /\b(?:vinaigrettes?|dressings?|marinades?|glazes?|salads?|soups?)\b/i.test(String(item?.name || ''))
   || CULINARY_CONTEXT_PATTERN.test(String(item?.section || '').trim())
 );
 const isPreparedBeverageSupportRow = (item = {}) => (
@@ -69,7 +70,7 @@ export const isExternalJelloItem = (item = {}) => (
 );
 
 export const isBarGarnishItem = (item = {}) => (
-  /(?:^|\b)garnish(?:es)?(?:\b|\s*:)/i.test(sourceText(item))
+  /(?:^|\b)garnish(?:es)?(?:\b|\s*:)/i.test(item?.scope === 'alcohol' ? String(item?.name || '') : sourceText(item))
 );
 
 export const isBarGlasswareItem = (item = {}) => (

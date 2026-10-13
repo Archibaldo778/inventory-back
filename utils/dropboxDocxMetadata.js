@@ -1,3 +1,4 @@
+import { isFoodMenuItem } from './barPackoutScope.js';
 import JSZip from 'jszip';
 import { parseRecognizedPackout } from './barPackoutRecognition.js';
 import { extractDropboxPoItems } from './dropboxPoItems.js';
@@ -175,6 +176,7 @@ export const parseDropboxKitchenBarItems = (text) => {
   let preparedType = '';
   for (let index = start + 1; index < stop; index += 1) {
     const line = lines[index];
+    if (isFoodMenuItem({ name: line })) { preparedType = ''; continue; }
     if (/^(?:\d+\s+)?SPECIALTY MOCKTAILS?\b/i.test(line)) {
       preparedType = 'mocktail';
       continue;

@@ -2,6 +2,7 @@ import {
   getPreparedBeverageRate,
   getPreparedBeverageType,
   isBarAccountingItem,
+  isFoodMenuItem,
 } from './barPackoutScope.js';
 
 const cleanText = (value, maxLength = 500) => String(value ?? '')
@@ -44,7 +45,7 @@ export const classifyRecognizedSection = (value) => {
   if (/\b(?:staff|kitchen|sanitation|disposable|equipment|rental|linen|decor|trays?|risers?|buckets?|tubs?|coolers?|food|meals?|courses?|hors\s+d[’']?oeuvres?|canap[eé]s?|appetizers?|entr[eé]es?|desserts?|salads?|soups?|breads?|starches?|vegetables?|proteins?|vinaigrettes?|dressings?|sauces?|purees?|marinades?|glazes?)\b/i.test(section)) {
     return 'non_bar';
   }
-  if (/\b(?:alcohol|liquor|spirits?|wines?|sparkling|champagne|prosecco|beer|cider|seltzer|vermouth|amaro|bitters|vodka|gin|tequila|mezcal|whisk(?:e)?y|bourbon|scotch|rum|cognac|brandy|sancerre|chablis|chardonnay|sauvignon|cabernet|merlot|pinot|ros[eé])\b/i.test(section)) {
+  if (/\b(?:alcohol|liquor|spirits?|wines?|sparkling|champagne|prosecco|beer|cider|seltzer|vermouth|amaro|bitters|vodka|gin|tequila|mezcal|whisk(?:e)?y|bourbon|scotch|rum|cognac|brandy|sancerre|burgundy|bordeaux|sherry|chablis|chardonnay|sauvignon|cabernet|merlot|pinot|ros[eé])\b/i.test(section)) {
     return 'alcohol';
   }
   if (/\b(?:cocktails?|mocktails?|ice|waters?|garnish|mixers?|juices?|sodas?|beverages?|bar supplies?|additional)\b/i.test(section)) {
@@ -124,7 +125,10 @@ const parseRows = (rows, startSection = '', startScope = 'review', startIndex = 
   let currentSection = startSection;
   let currentScope = startScope;
 
-  sourceRows.slice(headerIndex + 1).forEach((cells) => {
+  let consumedRow = -1;
+  const bodyRows = sourceRows.slice(headerIndex + 1);
+  bodyRows.forEach((cells, rowIndex) => {
+    if (rowIndex === consumedRow) return;
     const name = cleanText(cells[columns.name], 240);
     if (!name) return;
     const quantityCell = columns.quantity >= 0 ? cells[columns.quantity] : '';
@@ -143,6 +147,18 @@ const parseRows = (rows, startSection = '', startScope = 'review', startIndex = 
       currentScope = classified;
       sections.push({ name, scope: classified });
       return;
+    }
+    if (/^(?:signature|specialty)\s+(?:cocktail|mocktail)s?$/i.test(name) && Number(quantityCell) > 0) {
+      const next = bodyRows[rowIndex + 1] || [];
+      const recipeName = cleanText(next[columns.name], 240);
+      if (recipeName && !String(next[columns.quantity] || '').trim()
+        && !isFoodMenuItem({ name: recipeName }) && classifyRecognizedSection(recipeName) === 'review') {
+        currentSection = /mocktail/i.test(name) ? 'MOCKTAIL' : 'COCKTAIL'; currentScope = 'review';
+        items.push({ id: `signature-${startIndex + items.length + 1}`, name: recipeName, section: currentSection,
+          scope: 'review', includedByDefault: true, ...parseQuantity(quantityCell), cocktailServingsAuto: false,
+          notes: '', delivered: '', returned: '' });
+        consumedRow = rowIndex + 1; return;
+      }
     }
     const specialtyName = columns.notes >= 0 ? cleanText(cells[columns.notes] || '').trim() : '';
     if (/^specialty\s+(?:beverage|cocktail|mocktail)\b/i.test(name) && /servings?/i.test(name) && specialtyName) {

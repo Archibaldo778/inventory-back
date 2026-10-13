@@ -320,3 +320,27 @@ test('PO specialty servings use cocktail names from Notes instead of merging gen
     { name: 'APPLE CIDER GIMLET', quantity: 32 }, { name: 'SPICED PEAR SPRITZ', quantity: 45 },
   ]);
 });
+
+test('Dieter PO keeps wine after garnish and takes signature cocktail quantity from the preceding row', () => {
+  const result = parseRecognizedPackout({ tables: [{ headerRows: [['Item', 'Qty', 'Comments']], bodyRows: [
+    ['WATER', '', ''], ['Panna', '16', ''], ['Pellegrino', '10', ''],
+    ['GARNISH', '', ''], ['Lime Wheels', '25', ''], ['Lemon Wheels', '20', ''],
+    ['Champagne, Louis Roederer Brut Collection', '12', ''],
+    ['White Burgundy (Les Vergelesses)', '9', 'ordered for client see Sam'],
+    ['Red Bordeaux (Chateau Gloria)', '5', ''],
+    ['SIGNATURE COCKTAIL', '20', ''], ['NEW YORK 45', '', ''], ['GARNISH: Lemon Half Wheel', '20', ''],
+    ['ICE', '2', ''], ['COFFEE EQUIPMENT', '', ''], ['Tea Kettle', '1', ''],
+  ] }] });
+  assert.deepEqual(result.items.map((item) => [item.name, item.quantity]), [
+    ['Panna', 16], ['Pellegrino', 10], ['Champagne, Louis Roederer Brut Collection', 12],
+    ['White Burgundy (Les Vergelesses)', 9], ['Red Bordeaux (Chateau Gloria)', 5], ['NEW YORK 45', 20],
+  ]);
+});
+
+test('food names containing alcohol and MAINS headings never become bar accounting items', () => {
+  const result = parseRecognizedPackout({ tables: [{ headerRows: [['Item', 'Qty']], bodyRows: [
+    ['WINE', ''], ['Baby greens with aged sherry shallot vinaigrette Vegan, GF, NF', '195'], ['Dry Sherry', '2'],
+    ['MOCKTAIL', ''], ['MAINS', '195'], ['Cucumber Cooler', '20'],
+  ] }] });
+  assert.deepEqual(result.items.map((item) => item.name), ['Dry Sherry', 'Cucumber Cooler']);
+});

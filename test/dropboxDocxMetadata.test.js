@@ -157,3 +157,10 @@ test('Dropbox DOCX reader extracts bar rows from a PO table even when the folder
   assert.equal(result.barItems[0].name, "Hendrick's Gin");
   assert.equal(result.barItems[0].quantity, 4);
 });
+
+test('Kitchen Menu does not interpret MAINS and sherry vinaigrette as mocktails or wine', () => {
+  const result = parseDropboxKitchenBarItems(['BEVERAGE', 'SPECIALTY MOCKTAILS', 'Cucumber Cooler',
+    'Cucumber, Fresh Lime Juice, Soda', 'MAINS', 'Baby greens with aged sherry shallot vinaigrette Vegan, GF, NF',
+    'STAFFING INFO'].join('\n'));
+  assert.deepEqual(result.map((item) => item.name), ['Cucumber Cooler']);
+});

@@ -13,19 +13,21 @@ import NowstaScheduleEntry from '../models/NowstaScheduleEntry.js';
 import barRouter from '../routes/bar.js';
 import publicRouter from '../routes/publicEventReports.js';
 
-const names = ['TASTING: Wedding', 'Venue Walk-Through', 'Prada LOAD IN', 'Gala – Load-Out', 'Gala Rental Check-in'];
+const names = ['TASTING: Wedding', 'Venue Walk-Through', 'Prada LOAD IN', 'Gala – Load-Out', 'Gala Rental Check-in', 'Travel Day - Miu Miu Saks Boston Opening Champagne Service'];
 const eventId = '507f1f77bcf86cd799439001';
 const user = { userId: '507f1f77bcf86cd799439002', role: 'captain', email: 'captain@example.com' };
 const handler = (router, path, method) => router.stack.find((layer) => layer.route?.path === path && layer.route.methods[method]).route.stack.at(-1).handle;
 const response = () => ({ code: 200, status(code) { this.code = code; return this; }, json(body) { this.body = body; return this; } });
 
-test('tasting, walk-through, load-in and load-out names are exempt regardless of case, spacing or punctuation', () => {
-  for (const title of [...names, 'Client walkthrough', 'Client Walk Thru', 'Walk_through for Dinner', 'LOADIN', 'Loadout', 'Menu Tastings', 'RENTAL CHECK IN', 'Rentals Check-In', 'Rental Checkin', 'Rental_Check_In', 'RentalCheckIn']) {
+test('operational and travel day names are exempt regardless of case, spacing or punctuation', () => {
+  for (const title of [...names, 'Client walkthrough', 'Client Walk Thru', 'Walk_through for Dinner', 'LOADIN', 'Loadout', 'Menu Tastings', 'RENTAL CHECK IN', 'Rentals Check-In', 'Rental Checkin', 'Rental_Check_In', 'RentalCheckIn', 'TRAVEL DAY', 'Travel-Day', 'Travel_Days', 'TravelDay']) {
     assert.equal(requiresEventReport({ title }), false, title);
     assert.equal(requiresEventReport({ name: title }), false, title);
+    assert.equal(requiresReportType('captain', { title }), false, title);
+    assert.equal(requiresReportType('kitchen', { title }), false, title);
     assert.equal(requiresEventReport({ title: 'Dinner' }, { title }), false, title);
   }
-  for (const title of ['Dinner', 'Wedding reception', 'Cocktail party', 'Walkway reception', 'Loading dock dinner', 'Tastingson family wedding', 'Rental showroom reception', 'Guest check-in dinner', '']) {
+  for (const title of ['Dinner', 'Wedding reception', 'Cocktail party', 'Walkway reception', 'Loading dock dinner', 'Tastingson family wedding', 'Rental showroom reception', 'Guest check-in dinner', 'Travel agency reception', 'Travel Daylight dinner', '']) {
     assert.equal(requiresEventReport({ title }), true, title);
   }
 });

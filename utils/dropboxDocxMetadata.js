@@ -33,8 +33,8 @@ export const extractDropboxDocxLines = (xml) => {
     if (/^<w:tbl\b/i.test(block)) {
       const rows = block.match(/<w:tr\b[\s\S]*?<\/w:tr>/gi) || [];
       rows.forEach((row) => {
-        const cells = (row.match(/<w:tc\b[\s\S]*?<\/w:tc>/gi) || []).map(fragmentText).filter(Boolean);
-        if (cells.length) lines.push(cells.join('\t'));
+        const cells = (row.match(/<w:tc\b[\s\S]*?<\/w:tc>/gi) || []).map(fragmentText);
+        if (cells.some(Boolean)) lines.push(cells.join('\t'));
       });
       return;
     }

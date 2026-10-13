@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import JSZip from 'jszip';
 import { barDocumentLines, validateBarAiResult, generateBarDocument } from '../utils/barDocumentAi.js';
-import { readDropboxDocxMetadata } from '../utils/dropboxDocxMetadata.js';
+import { extractDropboxDocxLines, readDropboxDocxMetadata } from '../utils/dropboxDocxMetadata.js';
 import { blockUnverifiedBarImport } from '../utils/barImportReview.js';
 import { requireBarAiOwner, saveBarAiSettings } from '../routes/barAi.js';
 import BarAiSettings from '../models/BarAiSettings.js';
@@ -162,4 +162,30 @@ test('malformed service times remain notes while adjacent PO drink quantities st
   assert.equal(result.status, 'verified');
   assert.deepEqual(result.items.map((item) => [item.name, item.quantity]), [['White Burgundy', 9]]);
   assert.equal(validateBarAiResult({ rows: [rows[0], row(2, 'alcohol', 'White Burgundy', 5, 1, '5')], issues: [] }, { lines, documentType: 'po' }).status, 'needs_review');
+});
+
+
+test('DOCX empty Qty cannot shift Returned into sent quantity through AI inspection', async () => {
+  const tableRow = (cells) => '<w:tr>' + cells.map((text) => `<w:tc><w:p><w:r><w:t>${text}</w:t></w:r></w:p></w:tc>`).join('') + '</w:tr>';
+  for (const [qty, claimed, expected] of [['', 4, 'needs_review'], ['12', 12, 'verified']]) {
+    const xml = `<w:document><w:body><w:tbl>${tableRow(['Item', 'Qty', 'Returned'])}${tableRow(['Dry Sherry', qty, '4'])}</w:tbl></w:body></w:document>`;
+    const zip = new JSZip(); zip.file('word/document.xml', xml);
+    const result = await readDropboxDocxMetadata(await zip.generateAsync({ type: 'nodebuffer' }), {
+      documentType: 'po', inspectBar: async ({ text, documentType }) => {
+        const lines = barDocumentLines(text);
+        assert.deepEqual(lines[1].split('\t'), ['Dry Sherry', qty, '4']);
+        return validateBarAiResult({ rows: [row(1, 'heading'), row(2, 'alcohol', 'Dry Sherry', claimed, 2, String(claimed))], issues: [] }, { lines, documentType });
+      },
+    });
+    assert.equal(result.barReview.status, expected);
+    assert.deepEqual(result.barItems.map((item) => item.quantity), expected === 'verified' ? [12] : []);
+  }
+});
+test('AI source lines preserve leading and trailing empty table cells', () => {
+  assert.deepEqual(barDocumentLines('  \n\tDry Sherry\t\t4\t\n'), ['\tDry Sherry\t\t4\t']);
+  assert.deepEqual(extractDropboxDocxLines('<w:tbl><w:tr><w:tc/><w:tc></w:tc></w:tr></w:tbl>'), []);
+});
+test('Returned-only table cannot provide sent quantity', () => {
+  const result = validateBarAiResult({ rows: [row(1, 'heading'), row(2, 'alcohol', 'Dry Sherry', 4, 2, '4')], issues: [] }, { lines: ['Item\tReturned', 'Dry Sherry\t4'], documentType: 'po' });
+  assert.equal(result.status, 'needs_review');
 });

@@ -1,3 +1,5 @@
+import { inspectBarDocument } from '../utils/barDocumentAiService.js';
+import { readDropboxDocxMetadata } from '../utils/dropboxDocxMetadata.js';
 import crypto from 'node:crypto';
 import { Router } from 'express';
 import mongoose from 'mongoose';
@@ -573,6 +575,47 @@ router.post('/pending', pendingReportRateLimit, async (req, res) => {
     return sendApiError(res, error, { context: 'Guest report creation failed', fallbackMessage: 'Could not create the pending report' });
   }
 });
+
+// Guest sessions keep their existing event scope; no operator role is granted.
+export const createGuestBarDocumentReader = ({ readMetadata = readDropboxDocxMetadata } = {}) => async (req, res) => {
+  try {
+    const event = await loadEditableEvent(req, res);
+    if (!event) return;
+    if (event.items.length) return res.status(409).json({ message: 'This event already has a packout' });
+    if (!req.file || !/\.docx$/i.test(req.file.originalname || '')) {
+      return res.status(400).json({ message: 'Choose a DOCX PO or Kitchen Menu' });
+    }
+    const metadata = await readMetadata(req.file.buffer, { documentType: 'po', inspectBar: inspectBarDocument });
+    if (metadata.barReview?.status !== 'verified') {
+      return res.status(422).json({
+        message: `Needs review: ${(metadata.barReview?.issues || ['Document could not be verified']).join('; ')}`,
+        review: metadata.barReview,
+      });
+    }
+    const catalog = await BeverageItem.find({ active: { $ne: false } }).select('name aliases').lean();
+    return res.json({
+      items: matchRecognizedItemsToCatalog(metadata.barItems, catalog),
+      metadata: { guests: metadata.guests, eventName: metadata.eventTitle, eventNumber: metadata.eventId },
+      documentType: metadata.documentType,
+      review: metadata.barReview,
+    });
+  } catch (error) {
+    return sendApiError(res, error, { defaultStatus: 502, context: 'Guest AI document reading failed', fallbackMessage: 'Document could not be verified. No packout was saved.' });
+  }
+};
+
+const guestDocxUpload = multer({ storage: multer.memoryStorage(), limits: { files: 1, fileSize: MAX_FILE_BYTES, fields: 0 } }).single('file');
+router.post('/:eventId/packout/read-document', (req, res, next) => {
+  if (increment(scanBuckets, ipKey(req)) > MAX_SCANS) {
+    return res.status(429).json({ message: 'Too many scans. Wait a few minutes and try again.' });
+  }
+  return guestDocxUpload(req, res, (error) => {
+    if (error) return res.status(error.code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({
+      message: error.code === 'LIMIT_FILE_SIZE' ? 'DOCX exceeds the 12 MB AI upload limit.' : 'Choose one DOCX file.',
+    });
+    return next();
+  });
+}, createGuestBarDocumentReader());
 
 router.post('/:eventId/recognize', (req, res, next) => {
   if (increment(scanBuckets, ipKey(req)) > MAX_SCANS) {

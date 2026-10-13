@@ -154,3 +154,12 @@ test('a supply note mentioning the same wine does not excuse dropping its separa
   assert.equal(result.status, 'needs_review');
   assert.match(result.issues.join('; '), /Parser disagreement: Dry Sherry/);
 });
+
+test('malformed service times remain notes while adjacent PO drink quantities still require evidence', () => {
+  const lines = ['Service time: 5:145PM', 'White Burgundy\t9'];
+  const rows = [row(1, 'note'), row(2, 'alcohol', 'White Burgundy', 9, 2, '9')];
+  const result = validateBarAiResult({ rows, issues: [] }, { lines, documentType: 'po' });
+  assert.equal(result.status, 'verified');
+  assert.deepEqual(result.items.map((item) => [item.name, item.quantity]), [['White Burgundy', 9]]);
+  assert.equal(validateBarAiResult({ rows: [rows[0], row(2, 'alcohol', 'White Burgundy', 5, 1, '5')], issues: [] }, { lines, documentType: 'po' }).status, 'needs_review');
+});

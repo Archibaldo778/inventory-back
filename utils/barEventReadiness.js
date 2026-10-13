@@ -16,6 +16,7 @@ export const summarizeBarEventReadiness = (event = {}) => {
     linkedEventId: String(event?.linkedEventId?._id || event?.linkedEventId || ''),
     unmatchedAlcohol,
     missingRecipes,
-    total: unmatchedAlcohol + missingRecipes,
+    ...(event.importReview?.status === 'needs_review' ? { importIssues: event.importReview.issues || [] } : {}),
+    total: unmatchedAlcohol + missingRecipes + (event.importReview?.status === 'needs_review' ? 1 : 0),
   };
 };

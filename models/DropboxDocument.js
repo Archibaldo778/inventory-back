@@ -27,6 +27,7 @@ const dropboxDocumentSchema = new mongoose.Schema({
   contentInspectedAt: { type: Date, default: null },
   contentInspectionError: { type: String, trim: true, default: '' },
   kitchenItems: { type: [mongoose.Schema.Types.Mixed], default: undefined },
+  barReview: { type: mongoose.Schema.Types.Mixed, default: undefined },
   barItems: { type: [mongoose.Schema.Types.Mixed], default: undefined },
   packoutType: { type: String, trim: true, default: '' },
   poAlertItems: { type: [mongoose.Schema.Types.Mixed], default: undefined },

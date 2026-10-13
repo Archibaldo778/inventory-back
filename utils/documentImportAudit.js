@@ -48,6 +48,7 @@ const BAR_IMPORT_FIELDS = Object.freeze([
   'guestCountSource',
   'items',
   'packout',
+  'importReview',
   'status',
   'revision',
 ]);

@@ -20,6 +20,7 @@ const catereaseFileSchema = new mongoose.Schema({
   status: { type: String, enum: ['imported', 'superseded', 'ignored', 'failed', 'deleted'], default: 'ignored', index: true },
   reason: { type: String, trim: true, default: '' },
   kitchenItems: { type: [mongoose.Schema.Types.Mixed], default: undefined },
+  barReview: { type: mongoose.Schema.Types.Mixed, default: undefined },
   barItems: { type: [mongoose.Schema.Types.Mixed], default: undefined },
   packoutType: { type: String, trim: true, default: '' },
   importedEventId: { type: mongoose.Schema.Types.ObjectId, ref: 'Event', default: null, index: true },

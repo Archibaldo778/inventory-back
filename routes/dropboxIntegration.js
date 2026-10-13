@@ -1,3 +1,5 @@
+import { inspectBarDocument } from '../utils/barDocumentAiService.js';
+import { blockUnverifiedBarImport } from '../utils/barImportReview.js';
 import { Router } from 'express';
 import DropboxIntegration from '../models/DropboxIntegration.js';
 import DropboxDocument from '../models/DropboxDocument.js';
@@ -189,7 +191,7 @@ const inspectDropboxDocumentContents = async (accessToken, namespaceId) => {
       try {
         const metadata = await readDropboxDocxMetadata(
           await downloadDropboxFile(accessToken, document.dropboxId || document.path, { namespaceId }),
-          { documentType: document.documentType }
+          { documentType: document.documentType, inspectBar: inspectBarDocument }
         );
         const inferredDate = metadata.eventDate || document.inferredDate || '';
         const documentType = metadata.documentType !== 'review' ? metadata.documentType : document.documentType;
@@ -227,6 +229,7 @@ const inspectDropboxDocumentContents = async (accessToken, namespaceId) => {
           contentInspectedAt: new Date(),
           contentInspectionError: '',
           kitchenItems: metadata.kitchenItems,
+          barReview: metadata.barReview,
           barItems: metadata.barItems,
           packoutType: metadata.packoutType,
           poAlertItems: metadata.poAlertItems,
@@ -290,6 +293,7 @@ const nextSeriesVersion = (event, sourceSeries) => Math.max(0, ...[
 
 const documentContentSignature = (document) => JSON.stringify({
   kitchenItems: Array.isArray(document?.kitchenItems) ? document.kitchenItems : [],
+  barReview: document?.barReview,
   barItems: Array.isArray(document?.barItems) ? document.barItems : [],
 });
 
@@ -323,6 +327,7 @@ const syncDropboxBarItems = async (event, { force = false } = {}) => {
   let barEvent = await BarEvent.findOne({ linkedEventId: event._id });
   const seriesContext = await loadDropboxBarSeriesContext(event, barEvent?.items || []);
   const sourceDocuments = seriesContext?.documents || selectDropboxBarSourceDocuments(event?.documents);
+  if (await blockUnverifiedBarImport(event, sourceDocuments)) return false;
   let rawItems = sourceDocuments.flatMap((document) => (
     Array.isArray(document?.barItems) ? document.barItems : []
   ));
@@ -379,6 +384,7 @@ const syncDropboxBarItems = async (event, { force = false } = {}) => {
     eventDate: String(event.date || ''),
     scheduledBy: 'Dropbox automatic sync',
   });
+  barEvent.importReview = undefined;
   barEvent.items = merged.items;
   barEvent.packout = {
     fileName: (chargeSeriesContext?.fileName || sourceDocuments.map((document) => document.fileName).filter(Boolean).join(', ')).slice(0, 500),
@@ -551,6 +557,7 @@ const attachDiscoveredDropboxDocuments = async (namespaceId) => {
           sourceSeries,
           sourceRevision: String(document.rev || ''),
           kitchenItems: document.documentType === 'kitchen_menu' ? document.kitchenItems : undefined,
+          barReview: document.barReview,
           barItems: Array.isArray(document.barItems) ? document.barItems : undefined,
         },
       ];

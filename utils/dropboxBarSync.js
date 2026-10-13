@@ -73,6 +73,7 @@ const sourceDocumentSignature = (document = {}) => ({
   sourceRevision: String(document?.sourceRevision || ''),
   checksum: String(document?.checksum || ''),
   type: String(document?.type || ''),
+  ...(document?.barReview ? { barReview: document.barReview } : {}),
   barItems: Array.isArray(document?.barItems) ? document.barItems : [],
 });
 

@@ -173,6 +173,7 @@ const barEventSchema = new mongoose.Schema(
       syncedBy: { type: String, default: '', trim: true },
     },
     currency: { type: String, default: 'USD', trim: true },
+    importReview: { type: mongoose.Schema.Types.Mixed, default: undefined },
     packout: {
       fileName: { type: String, default: '', trim: true },
       contentType: { type: String, default: '', trim: true },

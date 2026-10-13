@@ -1,3 +1,4 @@
+import { inspectBarMetadata } from './barDocumentAiService.js';
 import { isFoodMenuItem } from './barPackoutScope.js';
 import JSZip from 'jszip';
 import { parseRecognizedPackout } from './barPackoutRecognition.js';
@@ -267,7 +268,7 @@ export const parseDropboxDocxMetadataText = (text) => {
   };
 };
 
-export const readDropboxDocxMetadata = async (buffer, { documentType: typeHint = 'review' } = {}) => {
+export const readDropboxDocxMetadata = async (buffer, { documentType: typeHint = 'review', inspectBar = null } = {}) => {
   const size = Number(buffer?.byteLength ?? buffer?.length);
   if (!Number.isFinite(size) || size <= 0) throw new Error('Dropbox returned an empty DOCX file');
   if (size > MAX_DOCX_BYTES) throw new Error('DOCX file exceeds the 100 MB inspection limit');
@@ -283,25 +284,26 @@ export const readDropboxDocxMetadata = async (buffer, { documentType: typeHint =
   const text = lines.join('\n');
   const metadata = parseDropboxDocxMetadataText(text);
   const documentType = metadata.documentType !== 'review' ? metadata.documentType : typeHint;
+  const finish = (result) => inspectBar && ['po', 'kitchen_menu'].includes(documentType) ? inspectBarMetadata(result, text, inspectBar) : result;
   if (documentType === 'kitchen_menu') {
-    return {
+    return finish({
       ...metadata,
       documentType,
       kitchenItems: parseDropboxKitchenItems(text),
       barItems: parseDropboxKitchenBarItems(text),
       packoutType: 'bar_only',
-    };
+    });
   }
   const packout = parseRecognizedPackout({
     tables: [{ bodyRows: lines.map((line) => line.split('\t').map(clean)) }],
     text,
   });
-  return {
+  return finish({
     ...metadata,
     documentType,
     kitchenItems: [],
     barItems: packout.items,
     poAlertItems: documentType === 'po' ? extractDropboxPoItems(xml) : [],
     packoutType: packout.packoutType,
-  };
+  });
 };

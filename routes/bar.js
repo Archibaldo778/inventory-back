@@ -1,3 +1,5 @@
+import { inspectBarDocument } from '../utils/barDocumentAiService.js';
+import { readDropboxDocxMetadata } from '../utils/dropboxDocxMetadata.js';
 import { loadBarReturnCaptains, deliverBarReturnReminder } from '../utils/barReturnReminders.js';
 import { Router } from 'express';
 import mongoose from 'mongoose';
@@ -689,7 +691,7 @@ export const normalizePackoutItems = async (items, { allowFinancials = false, gu
         caseSize: catalogItem?.caseSize,
       });
       const sentQty = cleanNumber(automaticCocktailServings ?? caseConversion?.quantity ?? (preparedBeverageType && hasDocumentQuantity ? item.quantity : (item?.sentQty ?? item?.quantity)), {
-        fallback: preparedBeverageType ? cleanNumber(guestCount, { fallback: 0 }) : 0,
+        fallback: item?.sentQtyPending === true ? 0 : preparedBeverageType ? cleanNumber(guestCount, { fallback: 0 }) : 0,
       });
       return {
         beverageItemId,
@@ -941,7 +943,7 @@ router.get('/events-readiness', async (req, res) => {
       query.assignedUserIds = req.auth.userId;
     }
     const events = await BarEvent.find(query)
-      .select('_id linkedEventId items')
+      .select('_id linkedEventId items importReview')
       .lean();
     return res.json(events.map(summarizeBarEventReadiness));
   } catch (error) {
@@ -1493,6 +1495,22 @@ router.post('/events/:id/packout/match', requireBarOperator, async (req, res) =>
   }
 });
 
+const docxAiUpload = multer({ storage: multer.memoryStorage(), limits: { files: 1, fileSize: 12 * 1024 * 1024, fields: 1 } });
+router.post('/events/:id/packout/read-document', requireBarOperator, limitPackoutRecognition, docxAiUpload.single('file'), async (req, res) => {
+  try {
+    const event = await loadEvent(req, res);
+    if (!event) return;
+    if (!canOperateEvent(event, req.auth)) return res.status(403).json({ message: 'This event is not assigned to your account' });
+    if (!req.file || !/\.docx$/i.test(req.file.originalname || '')) return res.status(400).json({ message: 'Choose a DOCX PO or Kitchen Menu' });
+    const documentType = req.body?.documentType === 'kitchen_menu' ? 'kitchen_menu' : 'po';
+    const metadata = await readDropboxDocxMetadata(req.file.buffer, { documentType, inspectBar: inspectBarDocument });
+    if (metadata.barReview?.status !== 'verified') return res.status(422).json({ message: `Needs review: ${(metadata.barReview?.issues || ['Document type could not be confirmed']).join('; ')}`, review: metadata.barReview });
+    const catalog = await BeverageItem.find({ active: { $ne: false } }).select('name aliases').lean();
+    res.json({ items: matchRecognizedItemsToCatalog(metadata.barItems, catalog), metadata: { ...metadata, eventName: metadata.eventTitle, eventNumber: metadata.eventId },
+      documentType: metadata.documentType, packoutType: metadata.packoutType, review: metadata.barReview, provider: 'openai' });
+  } catch (error) { sendApiError(res, error, { defaultStatus: 502, context: 'AI document reading failed', fallbackMessage: 'Document could not be verified. Previous quantities were preserved.' }); }
+});
+
 router.post(
   '/events/:id/packout/recognize',
   requireBarOperator,
@@ -1523,6 +1541,10 @@ router.post(
         text: documents.map((document) => document.text).join('\n'),
         tables: documents.flatMap((document) => document.tables),
       });
+      const tableLines = documents.flatMap((document) => document.tables || []).flatMap((table) => [...(table.headerRows || []), ...(table.bodyRows || [])]).map((row) => row.map((cell) => typeof cell === 'string' ? cell : String(cell?.text || '')).join('\t'));
+      const review = await inspectBarDocument({ text: tableLines.length ? tableLines.join('\n') : documents.map((document) => document.text).join('\n'), documentType: 'po', baseline: parsed.items });
+      if (review.status !== 'verified') return res.status(422).json({ message: `Needs review: ${review.issues.join('; ')}` });
+      parsed.items = review.items;
       if (!parsed.items.length) {
         return res.status(422).json({ message: 'No packout rows were recognized. Retake the photo straight-on in brighter light.' });
       }
@@ -1637,6 +1659,7 @@ router.post('/events/:id/packout', async (req, res) => {
       seriesStartDate: packoutSeriesPlan?.startDate || '',
       seriesEndDate: packoutSeriesPlan?.endDate || '',
     };
+    event.importReview = undefined;
     if (event.status === 'draft') event.status = 'ready';
     event.revision += 1;
     addAudit(event, req.auth, 'packout_imported', {

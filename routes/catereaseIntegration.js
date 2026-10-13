@@ -1,3 +1,5 @@
+import { inspectBarDocument } from '../utils/barDocumentAiService.js';
+import { blockUnverifiedBarImport } from '../utils/barImportReview.js';
 import { Router } from 'express';
 import crypto from 'node:crypto';
 import CatereaseFile from '../models/CatereaseFile.js';
@@ -226,6 +228,7 @@ const dashboardEventGuestCount = (event) => {
 const syncCatereaseBarItems = async (event) => {
   const sourceDocuments = (Array.isArray(event?.documents) ? event.documents : [])
     .filter((document) => String(document?.sourceProvider || '') === 'caterease');
+  if (await blockUnverifiedBarImport(event, sourceDocuments)) return false;
   const rawItems = sourceDocuments.flatMap((document) => Array.isArray(document?.barItems) ? document.barItems : []);
   const documentTypes = [...new Set(sourceDocuments.map((document) => String(document?.type || '')).filter(Boolean))];
   const guestCount = dashboardEventGuestCount(event);
@@ -266,6 +269,7 @@ const syncCatereaseBarItems = async (event) => {
     eventDate: String(event.date || ''),
     scheduledBy: 'Caterease automatic sync',
   });
+  barEvent.importReview = undefined;
   barEvent.items = merged.items;
   barEvent.packout = {
     fileName: sourceDocuments.map((document) => document.fileName).filter(Boolean).join(', ').slice(0, 500),
@@ -287,6 +291,7 @@ const syncCatereaseBarItems = async (event) => {
 };
 
 const syncCatereaseOperationalBarItems = async (event, snapshot) => {
+  if (await blockUnverifiedBarImport(event, event.documents || [])) return { synced: false, items: 0, reason: 'document_needs_review' };
   let barEvent = await BarEvent.findOne({ linkedEventId: event._id });
   const catereaseClient = String(snapshot?.client || '').trim().slice(0, 180);
   const dashboardGuestCount = dashboardEventGuestCount(event);
@@ -905,11 +910,11 @@ const syncOneEvent = async (event, eventId, rawFiles, stats) => {
     }
     try {
       const downloaded = await downloadCatereaseEventFile(file.uid);
-      let metadata = { kitchenItems: [], barItems: [], packoutType: '' };
+      let metadata = { kitchenItems: [], barItems: [], packoutType: '', barReview: { status: 'needs_review', issues: ['Document format needs manual review'] } };
       let parseWarning = '';
       if (isDocx(file.fileName, downloaded.contentType)) {
         try {
-          metadata = await readDropboxDocxMetadata(downloaded.buffer, { documentType: file.documentType });
+          metadata = await readDropboxDocxMetadata(downloaded.buffer, { documentType: file.documentType, inspectBar: inspectBarDocument });
         } catch (error) {
           parseWarning = String(error?.message || 'DOCX content could not be parsed').slice(0, 300);
         }
@@ -952,6 +957,7 @@ const syncOneEvent = async (event, eventId, rawFiles, stats) => {
           sourceSeries: file.sourceSeries,
           sourceRevision: revision,
           kitchenItems: file.documentType === 'kitchen_menu' ? metadata.kitchenItems : undefined,
+          barReview: metadata.barReview,
           barItems: Array.isArray(metadata.barItems) ? metadata.barItems : undefined,
         },
       ];
@@ -964,6 +970,7 @@ const syncOneEvent = async (event, eventId, rawFiles, stats) => {
           contentType: downloaded.contentType,
           size: downloaded.buffer.length,
           kitchenItems: metadata.kitchenItems,
+          barReview: metadata.barReview,
           barItems: metadata.barItems,
           packoutType: metadata.packoutType,
           status: 'imported',

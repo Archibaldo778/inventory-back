@@ -102,3 +102,12 @@ test('AI quantities survive normalization and KM missing quantities never become
   assert.equal(items.length, 1); assert.equal(items[0].scope, 'bar_support');
   assert.equal(items[0].sentQtyPending, true); assert.equal(items[0].sentQty, 0); assert.equal(items[0].cocktailServingsAuto, false);
 });
+
+test('generic KM water description and staff supply do not block tracked PO water', () => {
+  const menu = validateBarAiResult({ rows: [row(1, 'water', 'Flat and sparkling water')], issues: [] }, { lines: ['Flat and sparkling water'], documentType: 'kitchen_menu' });
+  assert.equal(menu.status, 'verified'); assert.deepEqual(menu.items, []);
+  const po = validateBarAiResult({ rows: [row(1, 'water', 'Staff water', 40, 1, '40'), row(2, 'water', 'Panna', 16, 2, '16'), row(3, 'water', 'Pellegrino', 10, 3, '10')], issues: [] }, { lines: ['Staff water\t40', 'Panna\t16', 'Pellegrino\t10'], documentType: 'po' });
+  assert.equal(po.status, 'verified'); assert.deepEqual(po.items.map((item) => [item.name, item.quantity]), [['Panna', 16], ['Pellegrino', 10]]);
+  const uncertain = validateBarAiResult({ rows: [row(1, 'water', 'Flat and sparkling water', 20, 1, '20')], issues: [] }, { lines: ['Flat and sparkling water\t20'], documentType: 'po' });
+  assert.equal(uncertain.status, 'needs_review');
+});

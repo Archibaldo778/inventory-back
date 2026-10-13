@@ -124,3 +124,33 @@ test('ice supplier note does not block a verified PO, genuine baseline drinks re
   assert.equal(missingWine.status, 'needs_review');
   assert.match(missingWine.issues.join(';'), /White Burgundy/);
 });
+
+test('generic menu service and client supply notes no longer disagree with legacy false positives', () => {
+  const lines = ['Client provide champagne, wine, and for cocktail the Mezcal and Aperol', 'PASSED: Champagne, Wine & Water', '187887-78287200', 'Dry Sherry'];
+  const baseline = [{ name: 'Client provide champagne, wine,', scope: 'alcohol' }, { name: 'PASSED: Champagne, Wine & Water', scope: 'alcohol' }, { name: 'Dry Sherry', scope: 'alcohol' }];
+  const rows = [row(1, 'note'), row(2, 'note'), row(3, 'note'), row(4, 'alcohol', 'Dry Sherry')];
+  const result = validateBarAiResult({ rows, issues: [] }, { lines, documentType: 'kitchen_menu', baseline });
+  assert.equal(result.status, 'verified', result.issues.join('; '));
+  assert.deepEqual(result.items.map((item) => item.name), ['Dry Sherry']);
+  const omitted = validateBarAiResult({ rows: [...rows.slice(0, 3), row(4, 'note')], issues: [] }, { lines, documentType: 'kitchen_menu', baseline });
+  assert.equal(omitted.status, 'needs_review');
+  assert.match(omitted.issues.join('; '), /Parser disagreement: Dry Sherry/);
+});
+
+test('food headings and units cannot become cocktails, but real drinks retain their PO counts', () => {
+  const lines = ["PASSED HORS D'OEUVRES\t52", 'SPECIALTY COCKTAILS\t1', 'case', 'WHISKEY SOUR\t70'];
+  const baseline = lines.slice(0, 3).map((line) => ({ name: line.split('\t')[0], scope: 'review', section: 'COCKTAIL' }));
+  const rows = [row(1, 'heading'), row(2, 'heading'), row(3, 'note'), row(4, 'cocktail', 'WHISKEY SOUR', 70, 4, '70')];
+  const result = validateBarAiResult({ rows, issues: [] }, { lines, documentType: 'po', baseline });
+  assert.equal(result.status, 'verified', result.issues.join('; '));
+  assert.deepEqual(result.items.map((item) => [item.name, item.quantity]), [['WHISKEY SOUR', 70]]);
+  assert.equal(validateBarAiResult({ rows: [row(1, 'cocktail', "PASSED HORS D'OEUVRES", 52, 1, '52'), ...rows.slice(1)], issues: [] }, { lines, documentType: 'po', baseline }).status, 'needs_review');
+});
+
+test('a supply note mentioning the same wine does not excuse dropping its separate inventory row', () => {
+  const result = validateBarAiResult({ rows: [row(1, 'note'), row(2, 'note')], issues: [] }, {
+    lines: ['Client provides Dry Sherry', 'Dry Sherry'], documentType: 'kitchen_menu', baseline: [{ name: 'Dry Sherry', scope: 'alcohol' }],
+  });
+  assert.equal(result.status, 'needs_review');
+  assert.match(result.issues.join('; '), /Parser disagreement: Dry Sherry/);
+});

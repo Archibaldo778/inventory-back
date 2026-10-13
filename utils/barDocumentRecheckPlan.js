@@ -1,11 +1,12 @@
 import crypto from 'node:crypto';
+import { selectLatestDropboxFileRevisions } from './dropboxDocuments.js';
 import { BAR_AI_VERSION } from './barDocumentAi.js';
 import { barItemsHaveRecordedReturns } from './barSourceChangeProtection.js';
 import { runImportedBarItemMergePipeline } from './barManualItems.js';
 import { getPreparedBeverageType } from './barPackoutScope.js';
 
 export const recheckSourceSignature = (documents, rulesRevision = 0) => crypto.createHash('sha256').update(JSON.stringify({
-  version: BAR_AI_VERSION, recheckVersion: 2, rulesRevision, model: process.env.BAR_DOCUMENT_AI_MODEL || 'gpt-5.6-luna',
+  version: BAR_AI_VERSION, recheckVersion: 3, rulesRevision, model: process.env.BAR_DOCUMENT_AI_MODEL || 'gpt-5.6-luna',
   sources: documents.map((d) => [String(d._id), d.type, d.sourceProvider, d.sourceId, d.sourceRevision, d.checksum]).sort(),
 })).digest('hex');
 
@@ -16,6 +17,12 @@ export const protectedBarRecheckReason = (bar = {}) => {
   if ((bar.audit || []).some((entry) => ['packout_imported', 'item_deleted', 'item_updated', 'manual_item_added', 'sent_quantity_changed', 'packout_item_updated', 'packout_item_deleted', 'return_updated', 'returns_batch_updated', 'returns_submitted', 'event_closed', 'returns_reviewed'].includes(entry.action))) return 'Office-reviewed or edited packout';
   return '';
 };
+
+// Historical copies can remain attached after an event folder is renamed.
+// Within this explicitly selected event, the same filename family is one PO/KM.
+export const selectRecheckDocumentVersions = (documents) => selectLatestDropboxFileRevisions(
+  documents.map((document) => ({ ...document, relativePath: document.fileName, modifiedAt: document.uploadedAt })),
+);
 
 const plainName = (value) => String(value || '').toLowerCase().replace(/\([^)]*\)/g, '').replace(/[^a-z0-9]/g, '');
 export function planBarDocumentRecheck(bar, importedItems, documentTypes) {
@@ -40,7 +47,7 @@ export async function prepareBarDocumentRecheck({ bar, documents, read, normaliz
   if (protectedReason) return { status: 'protected', reason: protectedReason };
   if (documents.length > 12) return { status: 'needs_review', issues: ['Too many distinct source documents for one automatic inspection'] };
   const parsed = [];
-  for (const document of documents) {
+  for (const document of selectRecheckDocumentVersions(documents)) {
     const metadata = await read(document);
     if (metadata.barReview?.status !== 'verified') return { status: metadata.barReview?.retryable ? 'retry' : 'needs_review', issues: (metadata.barReview?.issues || ['Document could not be verified']).map((issue) => `${document.fileName}: ${issue}`) };
     parsed.push({ ...document, barItems: metadata.barItems, barReview: metadata.barReview });

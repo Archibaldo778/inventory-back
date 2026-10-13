@@ -79,3 +79,24 @@ test('only the explicitly requested Dieter event can enter the historical queue'
   const { barDocumentRecheckQuery } = await import('../utils/barDocumentRecheckPlan.js');
   assert.deepEqual(barDocumentRecheckQuery(), { linkedEventId: { $in: ['6aa993cb55df57b2093ba0b2'] }, status: { $nin: ['submitted', 'reviewed', 'closed'] } });
 });
+
+
+test('renamed event folders and numbered menu revisions contribute one authoritative PO count', async () => {
+  const documents = [
+    { fileName: 'Dinner PO.docx', type: 'po', uploadedAt: '2026-10-01', sourcePath: '/old/Dinner PO.docx', quantity: 6 },
+    { fileName: 'Dinner PO.docx', type: 'po', uploadedAt: '2026-10-05', sourcePath: '/renamed/Dinner PO.docx', quantity: 12 },
+    { fileName: 'Dinner KM.docx', type: 'kitchen_menu', uploadedAt: '2026-10-01', quantity: null },
+    { fileName: 'Dinner KM REV1.docx', type: 'kitchen_menu', uploadedAt: '2026-10-05', quantity: null },
+  ];
+  const readNames = [];
+  const result = await prepareBarDocumentRecheck({ bar: { items: [] }, documents,
+    read: async (doc) => {
+      readNames.push(doc.fileName);
+      return { barReview: { status: 'verified' }, barItems: [{ name: 'Champagne', scope: 'alcohol', sentQty: doc.quantity || 0, sentQtyPending: doc.quantity === null }] };
+    }, normalize: async (items) => items,
+  });
+  assert.equal(result.status, 'ready');
+  assert.deepEqual(readNames, ['Dinner PO.docx', 'Dinner KM REV1.docx']);
+  assert.equal(result.items.length, 1);
+  assert.equal(result.items[0].sentQty, 12);
+});

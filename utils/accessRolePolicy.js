@@ -1,4 +1,5 @@
 import AccessRole from '../models/AccessRole.js';
+import { canTeachDocumentAi } from './assistantDocumentAccess.js';
 import { BUILTIN_ROLES, roleKeyForUser } from './accessRoleCatalog.js';
 import { isRoleOwner } from './roleOwners.js';
 
@@ -13,7 +14,7 @@ export const loadAccessRole = async (user) => {
   const saved = await AccessRole.findById(key).select('-audit').lean();
   const role = saved || BUILTIN_ROLES.find((entry) => entry._id === key);
   if (!role) throw Object.assign(new Error('Account role is unavailable'), { statusCode: 403 });
-  return { roleKey: key, baseRole: role.baseRole, accessPermissions: role.permissions || {}, canManageRoles: isRoleOwner(user) };
+  return { roleKey: key, baseRole: role.baseRole, accessPermissions: role.permissions || {}, canManageRoles: isRoleOwner(user), canTeachDocuments: canTeachDocumentAi(user) };
 };
 
 export const ACCESS_RESOURCES = {
@@ -51,6 +52,7 @@ export const requestAccessKeys = (req, auth = req.auth) => {
 
 export const requestPermission = (auth, req) => {
   if (isRoleOwner(auth)) return true;
+  if (canTeachDocumentAi(auth) && /^\/api\/assistant\/(?:bootstrap(?:[?]|$)|documents(?:\/|[?]|$))/i.test(String(req.originalUrl || ''))) return true;
   if (/^\/api\/assistant(?:\/|$)/i.test(String(req.originalUrl || '')) && Object.values(auth?.accessPermissions || {}).some((value) => value === false)) return false;
   const keys = requestAccessKeys(req, auth);
   if (!keys.length) return undefined;

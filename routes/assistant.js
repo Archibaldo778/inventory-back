@@ -1,4 +1,7 @@
 import { Router } from 'express';
+import assistantDocumentRoutes from './assistantDocuments.js';
+import { canTeachDocumentAi } from '../utils/assistantDocumentAccess.js';
+import { requestPermission } from '../utils/accessRolePolicy.js';
 import mongoose from 'mongoose';
 import AssistantIssue from '../models/AssistantIssue.js';
 import AssistantThread from '../models/AssistantThread.js';
@@ -17,6 +20,7 @@ import {
 } from '../utils/assistantDecorActions.js';
 
 const router = Router();
+router.use('/documents', assistantDocumentRoutes);
 const messageRateLimit = createMemoryRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 30,
@@ -132,6 +136,8 @@ router.get('/bootstrap', async (req, res) => {
     return res.json({
       configured: Boolean(clean(process.env.OPENAI_API_KEY, 2000)),
       owner: isOwner(req.auth),
+      canTeachDocuments: canTeachDocumentAi(req.auth),
+      generalChatAvailable: requestPermission(req.auth, { originalUrl: '/api/assistant/messages', method: 'POST' }) !== false,
       messages: (thread?.messages || []).slice(-50).map(serializeMessage),
       digest,
       issues: issues.map(serializeIssue),

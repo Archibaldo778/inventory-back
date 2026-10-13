@@ -498,6 +498,7 @@ import { ACCESS_RESOURCES } from './utils/accessRolePolicy.js';
 app.get('/api/access-profile', requireAuth, (req, res) => res.json({
   role: req.auth.role, roleKey: req.auth.roleKey, permissions: req.auth.accessPermissions,
   canManageRoles: req.auth.canManageRoles,
+  canTeachDocuments: req.auth.canTeachDocuments,
   resources: ACCESS_RESOURCES,
 }));
 app.get('/api/role-options', requireAuth, requireAdmin, async (_req, res, next) => {

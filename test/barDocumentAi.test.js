@@ -25,7 +25,7 @@ test('missing rows, invented quantities, recipe numbers, food and duplicate quan
     (rows) => { rows[2].quantityRow = 4; },
     (rows) => { rows[5].quantity = 45; rows[5].quantityRow = 6; },
     (rows) => { rows[7] = row(8, 'alcohol', 'Baby greens with aged sherry shallot vinaigrette', 20, 8, '20'); },
-    (rows) => { rows[2].quantity = null; },
+    (rows) => { rows[2].quantity = -1; },
     (rows) => { rows[3] = row(4, 'cocktail', 'Red Bordeaux (Chateau Gloria)', 20, 5, '20'); },
   ]) {
     const { lines, rows } = fixture(); mutate(rows);
@@ -301,5 +301,45 @@ test('AI source case units reach bottle conversion without treating cases as bot
     assert.equal(unknown.quantity, unit === 'Cases' ? 3 : 36);
     const known = convertPackoutCasesToBottles({ ...item, caseSize: 12 });
     assert.equal(known.quantity, 36); assert.equal(known.pending, false);
+  }
+});
+
+
+test('PO Qty survives an omitted AI count through normalization and replacement of zero KM placeholders', async (t) => {
+  const { normalizePackoutItems } = await import('../routes/bar.js');
+  const { prepareBarDocumentRecheck } = await import('../utils/barDocumentRecheckPlan.js');
+  const { default: BeverageItem } = await import('../models/BeverageItem.js');
+  const { default: CocktailRecipe } = await import('../models/CocktailRecipe.js');
+  t.mock.method(BeverageItem, 'find', () => ({ select: async () => [] }));
+  t.mock.method(CocktailRecipe, 'find', () => ({ select: () => ({ lean: async () => [] }) }));
+  const names = ["MIND'S EYE", 'Domaine Leflaive, Macon-Verze 2024', 'Croix Canon, Saint-Emilion Grand Cru 2018'];
+  const counts = [123, 40, 32];
+  const xmlRow = (cells) => '<w:tr>' + cells.map((text) => `<w:tc><w:p><w:r><w:t>${text}</w:t></w:r></w:p></w:tc>`).join('') + '</w:tr>';
+  const zip = new JSZip();
+  zip.file('word/document.xml', `<w:document><w:body><w:tbl>${xmlRow(['Name', 'Qty', 'Notes/Comments', 'Delivered', 'Returned'])}${names.map((name, i) => xmlRow([name, counts[i], '', '', ''])).join('')}${xmlRow(['Ivory Handled Steak Knives', '130', 'BACK UP', '', ''])}</w:tbl></w:body></w:document>`);
+  const buffer = await zip.generateAsync({ type: 'nodebuffer' });
+  const initial = names.map((name, i) => ({ name, scope: i === 0 ? 'bar_support' : 'alcohol', section: i === 0 ? 'COCKTAIL' : 'WINE', sentQty: 0, sentQtyPending: true, cocktailServingsAuto: false, entrySource: 'packout' }));
+  const plan = await prepareBarDocumentRecheck({
+    bar: { status: 'ready', items: initial, guestCount: 999 },
+    documents: [{ type: 'po', fileName: 'Dinner PO.docx', sourceProvider: 'dropbox' }],
+    read: () => readDropboxDocxMetadata(buffer, { documentType: 'po', inspectBar: async ({ text, documentType, baseline }) => validateBarAiResult({
+      rows: [row(1, 'heading'), ...names.map((name, i) => row(i + 2, i === 0 ? 'cocktail' : 'alcohol', name)), row(5, 'equipment')], issues: [],
+    }, { lines: barDocumentLines(text), documentType, baseline }) }),
+    normalize: normalizePackoutItems,
+  });
+  assert.equal(plan.status, 'ready', plan.issues?.join(';'));
+  assert.deepEqual(plan.items.map((item) => item.sentQty), counts);
+  assert.ok(plan.items.every((item) => item.sentQtyPending === false));
+  assert.deepEqual(initial.map((item) => item.sentQty), [0, 0, 0]);
+});
+test('AI missing quantities cannot be recovered from empty Qty, returns, notes or an unlabelled column', () => {
+  for (const lines of [
+    ['Name\tQty\tReturned', 'Dry Sherry\t\t4'],
+    ['Name\tNotes\tReturned', 'Dry Sherry\t4\t4'],
+    ['Dry Sherry\t4'],
+    ['Name\tQty', 'Dry Sherry\t4 or 12'],
+  ]) {
+    const rows = lines.map((line, i) => row(i + 1, line.startsWith('Dry Sherry') ? 'alcohol' : 'heading', line.startsWith('Dry Sherry') ? 'Dry Sherry' : ''));
+    assert.equal(validateBarAiResult({ rows, issues: [] }, { lines, documentType: 'po' }).status, 'needs_review');
   }
 });

@@ -236,3 +236,26 @@ test('a wrapped wine name remains one item with its original PO quantity', () =>
   assert.equal(result.status, 'verified', result.issues.join(';'));
   assert.equal(result.items.length, 1); assert.equal(result.items[0].quantity, 12);
 });
+
+
+test('empty leading DOCX cells do not turn client supply notes into parser disagreements', () => {
+  for (const name of ['Client provide champagne, wine,', 'PASSED: Champagne, Wine & Water']) {
+    const result = validateBarAiResult({ rows: [row(1, 'note')], issues: [] }, {
+      lines: [`\t${name}\t\t`], documentType: 'kitchen_menu', baseline: [{ name, scope: 'alcohol' }],
+    });
+    assert.equal(result.status, 'verified', result.issues.join(';'));
+    assert.deepEqual(result.items, []);
+  }
+});
+test('cutlery after wine and buckets of water cannot block or enter the bar packout', () => {
+  const lines = ['Name\tQty\tNotes/Comments\tDelivered\tReturned', 'Croix Canon, Saint-Emilion Grand Cru 2018\t32\t\t\t', 'Ivory Handled Steak Knives\t130\tBACK UP\t\t', '5 Gallon Buckets of Water\t3\t\t\t'];
+  const baseline = [{ name: 'Croix Canon, Saint-Emilion Grand Cru 2018', scope: 'alcohol' }, { name: 'Ivory Handled Steak Knives', scope: 'alcohol' }];
+  for (const supplyKind of ['equipment', 'water']) {
+    const rows = [row(1, 'heading'), row(2, 'alcohol', baseline[0].name, 32, 2, '32'), row(3, 'equipment'), row(4, supplyKind, '5 Gallon Buckets of Water', 3, 4, '3')];
+    const result = validateBarAiResult({ rows, issues: [] }, { lines, documentType: 'po', baseline });
+    assert.equal(result.status, 'verified', result.issues.join(';'));
+    assert.deepEqual(result.items.map((item) => [item.name, item.quantity]), [[baseline[0].name, 32]]);
+    rows[1] = row(2, 'equipment');
+    assert.equal(validateBarAiResult({ rows, issues: [] }, { lines, documentType: 'po', baseline }).status, 'needs_review');
+  }
+});

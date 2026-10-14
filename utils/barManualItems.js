@@ -5,6 +5,7 @@ const normalizedName = (value) => {
     .toLowerCase()
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s*\((?:cases?|bottles?)\)\s*$/g, '')
     .replace(/\b(?:signature|cocktails?)\b/g, ' ')
     .replace(/\b\d+(?:[.,]\d+)?\s*(?:bottles?|cases?)\b/g, ' ')
     .replace(/[^a-z0-9]+/g, ' ')
@@ -66,7 +67,7 @@ export const combineImportedBarItems = (items) => {
     if (!currentPending && !itemPending) {
       current.sentQty = Math.max(0, Number(current.sentQty) || 0) + Math.max(0, Number(item.sentQty) || 0);
       current.sentQtyText = String(current.sentQty);
-    } else if (currentPending && !itemPending) {
+    } else if (currentPending && (!itemPending || (Number(current.sentQty) === 0 && Number(item.sentQty) > 0))) {
       current.sentQty = Math.max(0, Number(item.sentQty) || 0);
       current.sentQtyText = String(item.sentQtyText || current.sentQty);
     }

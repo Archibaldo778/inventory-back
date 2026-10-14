@@ -210,3 +210,18 @@ test('a new authoritative catalog match replaces the catalog carried by the old 
   assert.equal(next[0].beverageItemId, 'new-catalog');
   assert.equal(next[0].unitCostSnapshot, 18);
 });
+
+
+test('KM packaging label merges with PO cases without losing pending case quantity in either order', () => {
+  const po = { name: 'La Caravelle', scope: 'alcohol', sentQty: 3, sentQtyText: '3 Cases · case size missing', sentQtyPending: true };
+  const km = { name: 'La Caravelle (CASES)', scope: 'alcohol', sentQty: 0, sentQtyPending: true };
+  for (const items of [[po, km], [km, po]]) {
+    const result = combineImportedBarItems(items);
+    assert.equal(result.length, 1);
+    assert.equal(result[0].sentQty, 3);
+    assert.equal(result[0].sentQtyText, po.sentQtyText);
+    assert.equal(result[0].sentQtyPending, true);
+  }
+  assert.equal(combineImportedBarItems([{ ...po, beverageItemId: 'bottle750' }, { ...km, beverageItemId: 'bottle1500' }]).length, 2);
+  assert.equal(combineImportedBarItems([po, { ...km, name: 'La Caravelle (Rose)' }]).length, 2);
+});

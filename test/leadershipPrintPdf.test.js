@@ -6,6 +6,7 @@ import {
   convertLeadershipFileToPdf,
   isLeadershipPrintFileSupported,
   mergeLeadershipPrintPdfs,
+  countLeadershipDocumentCopies,
   prepareLeadershipFileForPdf,
 } from '../utils/leadershipPrintPdf.js';
 import JSZip from 'jszip';
@@ -162,4 +163,22 @@ test('missing LibreOffice produces a clear configuration error', async () => {
     }),
     (error) => error?.statusCode === 503 && /not configured/i.test(error.message)
   );
+});
+
+
+test('leadership page overrides do not count sheets as document copies', async () => {
+  const source = await PDFDocument.create();
+  source.addPage([612, 792]);
+  source.addPage([612, 792]);
+  const documents = [{ fileName: 'Leadership.pdf', buffer: Buffer.from(await source.save()), copies: 60, pageCopies: [60, 60] }];
+  assert.equal(countLeadershipDocumentCopies(documents), 60);
+  const output = await mergeLeadershipPrintPdfs({ documents });
+  assert.equal((await PDFDocument.load(output)).getPageCount(), 120);
+});
+
+test('leadership document copy limit still includes overrides and inherited copies', async () => {
+  assert.equal(countLeadershipDocumentCopies([{ copies: 4, pageCopies: [null, 2, 6] }, { copies: 3 }]), 9);
+  const documents = [{ copies: 1, pageCopies: [60, 60] }, { copies: 41 }];
+  assert.equal(countLeadershipDocumentCopies(documents), 101);
+  await assert.rejects(mergeLeadershipPrintPdfs({ documents, convert: () => assert.fail('over-limit job must not convert files') }), /100 document copies/);
 });

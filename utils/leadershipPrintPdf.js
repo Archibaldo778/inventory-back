@@ -136,16 +136,19 @@ export const convertLeadershipFileToPdf = async ({
   }
 };
 
+// Page overrides change how many sets are needed, not how many documents exist.
+export const countLeadershipDocumentCopies = (documents = []) => documents.reduce((sum, document) => {
+  const copies = Math.max(1, Math.min(99, Math.trunc(Number(document?.copies) || 1)));
+  const pageCopies = Array.isArray(document?.pageCopies)
+    ? document.pageCopies.map((value) => Math.max(0, Math.min(99, Math.trunc(Number(value) || 0))))
+    : [];
+  return sum + pageCopies.reduce((maximum, value) => Math.max(maximum, value), copies);
+}, 0);
+
 export const mergeLeadershipPrintPdfs = async ({ documents, convert = convertLeadershipFileToPdf }) => {
   const printable = Array.isArray(documents) ? documents : [];
   if (!printable.length) throw httpError(400, 'Select at least one printable file');
-  const totalCopies = printable.reduce((sum, document) => {
-    const pageCopies = Array.isArray(document?.pageCopies)
-      ? document.pageCopies.map((value) => Math.max(0, Math.min(99, Math.trunc(Number(value) || 0))))
-      : [];
-    const customCopies = pageCopies.reduce((pageSum, value) => pageSum + value, 0);
-    return sum + (customCopies || Math.max(1, Number(document?.copies) || 1));
-  }, 0);
+  const totalCopies = countLeadershipDocumentCopies(printable);
   if (totalCopies > 100) throw httpError(400, 'The print job is limited to 100 document copies');
 
   const output = await PDFDocument.create();

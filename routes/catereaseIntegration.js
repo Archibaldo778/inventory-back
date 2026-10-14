@@ -129,6 +129,7 @@ import {
   createBoardPreviewsPdf,
   isLeadershipPrintFileSupported,
   mergeLeadershipPrintPdfs,
+  countLeadershipDocumentCopies,
 } from '../utils/leadershipPrintPdf.js';
 import { isRestrictedEventDocument } from '../utils/eventFileVisibility.js';
 
@@ -2057,7 +2058,7 @@ router.post('/operations/events/:id/leadership-print.pdf', requireAuth, leadersh
     const requested = Array.isArray(req.body?.files) ? req.body.files.slice(0, 40) : [];
     if (!requested.length) return res.status(400).json({ error: 'Select at least one file to print' });
 
-    const totalCopies = requested.reduce((sum, file) => sum + Math.max(1, Math.min(99, Math.trunc(Number(file?.copies) || 1))), 0);
+    const totalCopies = countLeadershipDocumentCopies(requested);
     if (totalCopies > 100) return res.status(400).json({ error: 'The print job is limited to 100 document copies' });
 
     const documents = [];

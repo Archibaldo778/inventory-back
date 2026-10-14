@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import JSZip from 'jszip';
+import { convertPackoutCasesToBottles } from '../utils/barCaseQuantities.js';
 import { barDocumentLines, validateBarAiResult, generateBarDocument } from '../utils/barDocumentAi.js';
 import { extractDropboxDocxLines, readDropboxDocxMetadata } from '../utils/dropboxDocxMetadata.js';
 import { blockUnverifiedBarImport } from '../utils/barImportReview.js';
@@ -257,5 +258,48 @@ test('cutlery after wine and buckets of water cannot block or enter the bar pack
     assert.deepEqual(result.items.map((item) => [item.name, item.quantity]), [[baseline[0].name, 32]]);
     rows[1] = row(2, 'equipment');
     assert.equal(validateBarAiResult({ rows, issues: [] }, { lines, documentType: 'po', baseline }).status, 'needs_review');
+  }
+});
+
+
+test('PO quantities use their own source cells when AI omits citations or formats text differently', () => {
+  const lines = ['Name\tQty\tNotes/Comments\tDelivered\tReturned', "MIND'S EYE\t123\t\t", 'Domaine Leflaive, Macon-Verze 2024\t40\t\t', 'Croix Canon, Saint-Emilion Grand Cru 2018\t32\t\t'];
+  const rows = [row(1, 'heading'), row(2, 'cocktail', "MIND'S EYE", 123, null, '123 servings'), row(3, 'alcohol', 'Domaine Leflaive, Macon-Verze 2024', 40, null, ''), row(4, 'alcohol', 'Croix Canon, Saint-Emilion Grand Cru 2018', 32, 4, '32 bottles')];
+  const result = validateBarAiResult({ rows, issues: [] }, { lines, documentType: 'po' });
+  assert.equal(result.status, 'verified', result.issues.join(';'));
+  assert.deepEqual(result.items.map((item) => [item.quantity, item.quantityText]), [[123, '123'], [40, '40'], [32, '32']]);
+  rows[2].quantity = 2024;
+  assert.equal(validateBarAiResult({ rows, issues: [] }, { lines, documentType: 'po' }).status, 'needs_review');
+});
+test('PO preserves cases from the adjacent unit cell without guessing bottle quantities', () => {
+  const result = validateBarAiResult({ rows: [row(1, 'heading'), row(2, 'alcohol', 'La Caravelle', 3, null, '3 Cases')], issues: [] }, {
+    lines: ['Name\tQty\tNotes/Comments\tDelivered\tReturned', 'La Caravelle\t3\tCases\t\t'], documentType: 'po',
+  });
+  assert.equal(result.status, 'verified', result.issues.join(';'));
+  assert.equal(result.items[0].quantity, 3);
+  assert.equal(result.items[0].quantityText, '3 Cases');
+});
+test('missing AI citation cannot use Returned, another row, or an unproven shared quantity', () => {
+  for (const line of ['Dry Sherry\t\t\t4', 'Dry Sherry\t3\t\t4']) {
+    const result = validateBarAiResult({ rows: [row(1, 'heading'), row(2, 'alcohol', 'Dry Sherry', 4, null, '4')], issues: [] }, {
+      lines: ['Name\tQty\tDelivered\tReturned', line], documentType: 'po',
+    });
+    assert.equal(result.status, 'needs_review');
+  }
+});
+
+
+test('AI source case units reach bottle conversion without treating cases as bottles', () => {
+  for (const unit of ['Cases', 'Cases of 12']) {
+    const result = validateBarAiResult({ rows: [row(1, 'heading'), row(2, 'alcohol', 'La Caravelle', 3, null, '3')], issues: [] }, {
+      lines: ['Name\tQty\tNotes/Comments', `La Caravelle\t3\t${unit}`], documentType: 'po',
+    });
+    assert.equal(result.status, 'verified');
+    const item = result.items[0];
+    const unknown = convertPackoutCasesToBottles(item);
+    assert.equal(unknown.pending, unit === 'Cases');
+    assert.equal(unknown.quantity, unit === 'Cases' ? 3 : 36);
+    const known = convertPackoutCasesToBottles({ ...item, caseSize: 12 });
+    assert.equal(known.quantity, 36); assert.equal(known.pending, false);
   }
 });

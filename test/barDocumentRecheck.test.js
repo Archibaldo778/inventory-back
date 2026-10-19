@@ -163,3 +163,39 @@ test('menu-only recheck cannot silently remove a previous positive PO quantity',
   assert.equal(result.status, 'needs_review');
   assert.match(result.issues[0], /Previous PO quantity/);
 });
+
+
+test('manual KM upload does not freeze subsequent PO quantities; prepared menu items survive', async () => {
+  const { selectAutomaticRecheckSources, canCommitBarRecheck } = await import('../utils/barDocumentRecheckPlan.js');
+  const menu = { type: 'kitchen_menu', fileName: 'Dinner KM REV1.docx' };
+  const documents = [...source, menu];
+  const bar = { status: 'ready', revision: 1, items: [wine, cocktail],
+    audit: [{ action: 'packout_imported', details: { fileName: menu.fileName } }] };
+  assert.equal(protectedBarRecheckReason(bar), '');
+  assert.deepEqual(selectAutomaticRecheckSources(documents), source);
+  for (const quantity of [12, 18]) {
+    const result = await prepareBarDocumentRecheck({ bar, documents: selectAutomaticRecheckSources(documents),
+      read: async () => ({ barReview: { status: 'verified' }, barItems: [{ ...wine, sentQty: quantity, sentQtyPending: false }] }),
+      normalize: async (items) => items });
+    assert.equal(result.status, 'ready');
+    assert.equal(result.items.find((i) => i.name === wine.name).sentQty, quantity);
+    assert.ok(result.items.find((i) => i.name === cocktail.name));
+    bar.items = result.items;
+  }
+  assert.equal(canCommitBarRecheck({ beforeBar: bar, currentBar: bar, beforeDocuments: documents,
+    currentDocuments: documents, rulesRevision: 0, signature: recheckSourceSignature(source) }), true);
+  assert.ok(protectedBarRecheckReason({ ...bar, items: [{ ...wine, updatedBy: 'Sam' }] }));
+  assert.ok(protectedBarRecheckReason({ ...bar, items: [{ ...wine, returnConfirmed: true }] }));
+});
+
+test('manual PO and unidentified uploads remain protected; stale automatic KM cannot override uploaded KM', async () => {
+  const { selectAutomaticRecheckSources } = await import('../utils/barDocumentRecheckPlan.js');
+  assert.deepEqual(selectAutomaticRecheckSources([...source, { type: 'po' }]), []);
+  assert.deepEqual(selectAutomaticRecheckSources([...source, { type: 'unknown' }]), []);
+  assert.deepEqual(selectAutomaticRecheckSources([{ type: 'kitchen_menu' }]), []);
+  assert.deepEqual(selectAutomaticRecheckSources([...source,
+    { type: 'kitchen_menu', sourceProvider: 'dropbox' }, { type: 'kitchen_menu' }]), source);
+  for (const fileName of ['Dinner PO.docx', '', 'Dinner.docx']) {
+    assert.ok(protectedBarRecheckReason({ audit: [{ action: 'packout_imported', details: { fileName } }] }));
+  }
+});

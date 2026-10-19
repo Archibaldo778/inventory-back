@@ -6,15 +6,28 @@ import { runImportedBarItemMergePipeline } from './barManualItems.js';
 import { getPreparedBeverageType } from './barPackoutScope.js';
 
 export const recheckSourceSignature = (documents, rulesRevision = 0) => crypto.createHash('sha256').update(JSON.stringify({
-  version: BAR_AI_VERSION, recheckVersion: 7, rulesRevision, model: process.env.BAR_DOCUMENT_AI_MODEL || 'gpt-5.6-luna',
+  version: BAR_AI_VERSION, recheckVersion: 8, rulesRevision, model: process.env.BAR_DOCUMENT_AI_MODEL || 'gpt-5.6-luna',
   sources: documents.map((d) => [String(d._id), d.type, d.sourceProvider, d.sourceId, d.sourceRevision, d.checksum]).sort(),
 })).digest('hex');
+
+const isMenuUpload = (entry) => entry.action === 'packout_imported'
+  && /\bKM(?:\s+REV\s*\d+)?\.docx$/i.test(entry.details?.fileName || '');
+
+export const selectAutomaticRecheckSources = (documents = []) => {
+  const automatic = documents.filter((d) => ['dropbox', 'caterease'].includes(d.sourceProvider) && ['po', 'kitchen_menu'].includes(d.type));
+  const manual = documents.filter((d) => !automatic.includes(d));
+  if (!manual.length) return automatic;
+  // A manually uploaded menu must not freeze quantities from the operational PO.
+  // Unknown uploads and manual POs remain authoritative.
+  if (manual.some((d) => d.type !== 'kitchen_menu') || !automatic.some((d) => d.type === 'po')) return [];
+  return automatic.filter((d) => d.type === 'po');
+};
 
 export const protectedBarRecheckReason = (bar = {}) => {
   if (barItemsHaveRecordedReturns(bar)) return 'Confirmed report or recorded returns';
   if (bar.packout?.seriesEventIds?.length > 1 || bar.items?.some((item) => item.carryover?.sourceEventId)) return 'Shared packout or carryover';
   if (bar.items?.some((item) => item.entrySource === 'manual' || item.updatedBy || item.updatedAt || item.deliveredQty !== null && item.deliveredQty !== undefined)) return 'Manual edits or received quantities';
-  if ((bar.audit || []).some((entry) => ['packout_imported', 'item_deleted', 'item_updated', 'manual_item_added', 'sent_quantity_changed', 'packout_item_updated', 'packout_item_deleted', 'return_updated', 'returns_batch_updated', 'returns_submitted', 'event_closed', 'returns_reviewed'].includes(entry.action))) return 'Office-reviewed or edited packout';
+  if ((bar.audit || []).some((entry) => ['packout_imported', 'item_deleted', 'item_updated', 'manual_item_added', 'sent_quantity_changed', 'packout_item_updated', 'packout_item_deleted', 'return_updated', 'returns_batch_updated', 'returns_submitted', 'event_closed', 'returns_reviewed'].includes(entry.action) && !isMenuUpload(entry))) return 'Office-reviewed or edited packout';
   return '';
 };
 
@@ -50,7 +63,7 @@ export function planBarDocumentRecheck(bar, importedItems, documentTypes) {
     if (missingCounts.length) return { status: 'needs_review', issues: missingCounts.map((item) => `Previous PO quantity has no current PO source: ${item.name}`) };
   }
   const merged = runImportedBarItemMergePipeline({ existingItems: bar.items || [], importedItems: items,
-    documentTypes: ['po', 'kitchen_menu'], eventDate: bar.eventDate, scheduledBy: 'Automatic document recheck' });
+    documentTypes: (bar.audit || []).some(isMenuUpload) && documentTypes.includes('po') ? ['po'] : ['po', 'kitchen_menu'], eventDate: bar.eventDate, scheduledBy: 'Automatic document recheck' });
   return { status: 'ready', items: merged.items };
 }
 
@@ -86,7 +99,7 @@ export const canCommitBarRecheck = ({ beforeBar, currentBar, beforeDocuments, cu
   && currentBar.revision === beforeBar.revision
   && JSON.stringify(currentBar.items) === JSON.stringify(beforeBar.items)
   && JSON.stringify(currentDocuments) === JSON.stringify(beforeDocuments)
-  && recheckSourceSignature(currentDocuments.filter((d) => ['dropbox', 'caterease'].includes(d.sourceProvider)), rulesRevision) === signature
+  && recheckSourceSignature(selectAutomaticRecheckSources(currentDocuments), rulesRevision) === signature
 );
 
 // Repair today's and future automatic imports; never reopen past events.

@@ -14,9 +14,8 @@ import { readDropboxDocxMetadata } from './dropboxDocxMetadata.js';
 import { inspectBarDocument } from './barDocumentAiService.js';
 import { normalizePackoutItems } from '../routes/bar.js';
 import { selectDropboxBarSourceDocuments } from './dropboxBarSync.js';
-import { prepareBarDocumentRecheck, protectedBarRecheckReason, recheckSourceSignature, canCommitBarRecheck, barDocumentRecheckQuery } from './barDocumentRecheckPlan.js';
+import { prepareBarDocumentRecheck, selectAutomaticRecheckSources, protectedBarRecheckReason, recheckSourceSignature, canCommitBarRecheck, barDocumentRecheckQuery } from './barDocumentRecheckPlan.js';
 
-const sourceDocuments = (event) => (event.documents || []).filter((d) => ['dropbox', 'caterease'].includes(d.sourceProvider) && ['po', 'kitchen_menu'].includes(d.type));
 const chooseDocuments = (documents) => [...selectDropboxBarSourceDocuments(documents), ...documents.filter((d) => d.sourceProvider === 'caterease')];
 const sameSource = (a, b) => String(a._id) === String(b._id) || (a.type === b.type && a.checksum && a.checksum === b.checksum);
 let running = null;
@@ -34,9 +33,8 @@ async function runBatch() {
   const candidates = bars.flatMap((bar) => {
     const event = byId.get(String(bar.linkedEventId));
     if (!event || protectedBarRecheckReason(bar)) return [];
-    const documents = sourceDocuments(event);
-    // Office uploads remain authoritative; do not combine them with stale automatic sources.
-    if (!documents.length || documents.length !== event.documents.length) return [];
+    const documents = selectAutomaticRecheckSources(event.documents);
+    if (!documents.length) return [];
     const signature = recheckSourceSignature(documents, rulesRevision);
     const job = jobById.get(String(event._id));
     if (job?.lockedUntil > now || (job?.signature === signature && (['done', 'protected', 'needs_review'].includes(job.status) || job.nextAttemptAt > now))) return [];
@@ -87,8 +85,8 @@ async function runBatch() {
             });
             const savedEvent = await Event.updateOne({ _id: event._id, documents: freshEvent.documents }, { $set: { documents: replacements } }, { session });
             if (savedEvent.matchedCount !== 1) throw new Error('Source documents changed during inspection');
-            for (const document of replacements) {
-              if (!document.barReview) continue;
+            for (const document of plan.documents) {
+              if (!document.barReview || !document.sourceId || !['dropbox', 'caterease'].includes(document.sourceProvider)) continue;
               const Model = document.sourceProvider === 'dropbox' ? DropboxDocument : CatereaseFile;
               const filter = document.sourceProvider === 'dropbox' ? { dropboxId: document.sourceId, rev: document.sourceRevision } : { uid: document.sourceId };
               await Model.updateOne(filter, { $set: { barItems: document.barItems, barReview: document.barReview } }, { session });

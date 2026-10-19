@@ -120,7 +120,7 @@ test('impossible imported quantities never enter bar accounting', () => {
 
 
 test('standalone mixers are excluded even when the legacy parser assigns alcohol scope', () => {
-  for (const name of ['Club Soda', 'Tonic', 'Tonic Water', 'Bitters']) assert.equal(isBarAccountingItem({ name, scope: 'alcohol', sentQty: 12 }), false);
+  for (const name of ['Club Soda', 'Tonic', 'Tonic Water', 'Bitters', 'Ginger Beer']) assert.equal(isBarAccountingItem({ name, scope: 'alcohol', sentQty: 12 }), false);
   assert.equal(isBarAccountingItem({ name: 'Dry Sherry', scope: 'alcohol', sentQty: 3 }), true);
   assert.equal(isBarAccountingItem({ name: 'Panna', scope: 'bar_support', sentQty: 12 }), true);
 });

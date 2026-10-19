@@ -357,3 +357,14 @@ test('Junto PO mixers cannot block wine and cocktail quantities or enter captain
     assert.equal(validateBarAiResult({ rows, issues: [] }, { lines, documentType: 'po', baseline }).status, 'needs_review');
   }
 });
+
+
+test('Ginger Beer without a PO quantity is excluded while actual beer keeps its quantity', () => {
+  const lines = ['Name\tQty', 'Ginger Beer\t', 'Lager\t24'];
+  for (const kind of ['ingredient', 'alcohol']) {
+    const result = validateBarAiResult({ rows: [row(1, 'heading'), row(2, kind, 'Ginger Beer', null, null, ''), row(3, 'alcohol', 'Lager', 24, 3, '24')], issues: [] },
+      { lines, documentType: 'po', baseline: [{ name: 'Ginger Beer', scope: 'alcohol' }, { name: 'Lager', scope: 'alcohol' }] });
+    assert.equal(result.status, 'verified', result.issues.join(';'));
+    assert.deepEqual(result.items.map((item) => [item.name, item.quantity]), [['Lager', 24]]);
+  }
+});

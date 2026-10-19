@@ -343,3 +343,17 @@ test('AI missing quantities cannot be recovered from empty Qty, returns, notes o
     assert.equal(validateBarAiResult({ rows, issues: [] }, { lines, documentType: 'po' }).status, 'needs_review');
   }
 });
+
+
+test('Junto PO mixers cannot block wine and cocktail quantities or enter captain returns', () => {
+  const lines = ['Name\tQty', 'Club Soda\t12', 'Tonic\t12', 'Bitters\t2', 'Grey Goose Vodka\t3', 'AGAVE SPICE\t12'];
+  const baseline = [{ name: 'Club Soda', scope: 'alcohol' }, { name: 'Tonic', scope: 'alcohol' }, { name: 'Bitters', scope: 'alcohol' }, { name: 'Grey Goose Vodka', scope: 'alcohol' }];
+  for (const kind of ['ingredient', 'alcohol']) {
+    const rows = [row(1, 'heading'), row(2, kind, 'Club Soda', 12, 2, '12'), row(3, kind, 'Tonic', 12, 3, '12'), row(4, kind, 'Bitters', 2, 4, '2'), row(5, 'alcohol', 'Grey Goose Vodka', 3, 5, '3'), row(6, 'cocktail', 'AGAVE SPICE', 12, 6, '12')];
+    const result = validateBarAiResult({ rows, issues: [] }, { lines, documentType: 'po', baseline });
+    assert.equal(result.status, 'verified', result.issues.join(';'));
+    assert.deepEqual(result.items.map((item) => [item.name, item.quantity]), [['Grey Goose Vodka', 3], ['AGAVE SPICE', 12]]);
+    rows[4] = row(5, 'ingredient');
+    assert.equal(validateBarAiResult({ rows, issues: [] }, { lines, documentType: 'po', baseline }).status, 'needs_review');
+  }
+});

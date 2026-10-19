@@ -107,8 +107,11 @@ export const isGenericBarCategoryItem = (item = {}) => {
   ).test(name);
 };
 
+export const isBarReturnMixer = (item = {}) => /^(?:club\s+soda|tonic(?:\s+water)?|bitters)$/i.test(String(item.name || '').trim());
+
 export const isBarAccountingItem = (item = {}) => (
-  !isExternalJelloItem(item)
+  !isBarReturnMixer(item)
+  && !isExternalJelloItem(item)
   && !isBarGarnishItem(item)
   && !isBarGlasswareItem(item)
   && !isBarInstructionItem(item)

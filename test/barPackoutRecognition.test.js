@@ -108,7 +108,6 @@ test('spirit words in cocktail names do not turn prepared cocktails into returna
 
   assert.deepEqual(result.items.map((item) => [item.name, item.scope, item.returnRequired]), [
     ['GIN BASIL SMASH', 'bar_support', false],
-    ['Bitters', 'alcohol', true],
   ]);
 });
 
@@ -165,12 +164,12 @@ test('equipment containing wine champagne or rose words is excluded from captain
         ['RISER', '', '', '', ''],
         ['Charleston Wine/Champagne Bucket', '1', '', '', ''],
         ['ADDITIONAL', '', '', '', ''],
-        ['Bitters', '2', '', '', ''],
+        ['Dry Sherry', '2', '', '', ''],
       ],
     }],
   });
 
-  assert.deepEqual(result.items.map((item) => item.name), ['Bitters']);
+  assert.deepEqual(result.items.map((item) => item.name), ['Dry Sherry']);
 });
 
 test('garnishes are never included in the Bar PO even inside an alcohol section', () => {

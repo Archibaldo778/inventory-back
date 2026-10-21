@@ -368,3 +368,35 @@ test('Ginger Beer without a PO quantity is excluded while actual beer keeps its 
     assert.deepEqual(result.items.map((item) => [item.name, item.quantity]), [['Lager', 24]]);
   }
 });
+
+test('Sabyasachi ice delivery rows cannot block the seven counted PO beverages', () => {
+  const drinks = [['Panna', 64, 'water'], ['Pellegrino', 84, 'water'], ['MAPLE OLD FASHIONED', 300, 'cocktail'], ['SPICY TAMARIND MARGARITA', 300, 'cocktail'], ['YUZU LYCHEE DREAM', 300, 'mocktail'], ['GUAVA COOLER', 300, 'mocktail'], ['Dom Perignon 2017', 40, 'alcohol']];
+  const supplies = ['ICE', 'Standard from United', 'Crushed from United', '2 x 2 Cubes from United'];
+  const lines = ['Name\tQty\tNotes/Comments\tDelivered\tReturned', ...drinks.map(([name, qty]) => `${name}\t${qty}\t\t\t`), ...supplies.map((name) => `${name}\t20\t\t\t`)];
+  const rows = [row(1, 'heading'), ...drinks.map(([name, qty, kind], i) => row(i + 2, kind, name, qty, i + 2, String(qty))), ...supplies.map((name, i) => row(i + 9, 'equipment', name))];
+  const baseline = [...drinks.map(([name]) => ({ name, scope: 'alcohol' })), ...supplies.map((name) => ({ name, scope: 'alcohol' }))];
+  const result = validateBarAiResult({ rows, issues: [] }, { lines, documentType: 'po', baseline });
+  assert.equal(result.status, 'verified', result.issues.join(';'));
+  assert.deepEqual(result.items.map((i) => [i.name, i.quantity]), drinks.map(([name, qty]) => [name, qty]));
+  rows[7] = row(8, 'note', 'Dom Perignon 2017');
+  assert.equal(validateBarAiResult({ rows, issues: [] }, { lines, documentType: 'po', baseline }).status, 'needs_review');
+});
+
+test('MOCKTAIL MIX in the KM Comment column is not another drink; the named mocktail is required', () => {
+  const lines = ['Qty\tItem\tComment\tLabel', '\tGUAVA COOLER\tMOCKTAIL MIX\t'];
+  const baseline = [{ name: 'GUAVA COOLER', scope: 'bar_support', section: 'MOCKTAIL' }, { name: 'MOCKTAIL MIX', scope: 'bar_support', section: 'MOCKTAIL' }];
+  const rows = [row(1, 'heading'), row(2, 'mocktail', 'GUAVA COOLER')];
+  const result = validateBarAiResult({ rows, issues: [] }, { lines, documentType: 'kitchen_menu', baseline });
+  assert.equal(result.status, 'verified', result.issues.join(';'));
+  assert.deepEqual(result.items.map((i) => i.name), ['GUAVA COOLER']);
+  rows[1] = row(2, 'note');
+  assert.equal(validateBarAiResult({ rows, issues: [] }, { lines, documentType: 'kitchen_menu', baseline }).status, 'needs_review');
+  const named = validateBarAiResult({ rows, issues: [] }, { lines: ['Qty\tItem\tComment\tLabel', '\tMOCKTAIL MIX\t\t'], documentType: 'kitchen_menu', baseline: [baseline[1]] });
+  assert.equal(named.status, 'needs_review');
+});
+
+test('supplier-looking names outside an ICE block are not silently discarded', () => {
+  const result = validateBarAiResult({ rows: [row(1, 'heading'), row(2, 'note', 'Crushed from United')], issues: [] },
+    { lines: ['Name\tQty', 'Crushed from United\t6'], documentType: 'po', baseline: [{ name: 'Crushed from United', scope: 'alcohol' }] });
+  assert.equal(result.status, 'needs_review');
+});

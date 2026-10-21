@@ -699,15 +699,16 @@ export const normalizePackoutItems = async (items, { allowFinancials = false, gu
         section: cleanString(item?.section, 160),
         scope,
         included: cleanBoolean(item?.included ?? item?.includedByDefault, scope !== 'non_bar'),
-        sentQty,
-        sentQtyText: cleanString(caseConversion?.quantityText ?? item?.sentQtyText ?? item?.quantityText ?? sentQty, 80),
-        sentQtyPending: caseConversion ? caseConversion.pending : cleanBoolean(item?.sentQtyPending, false),
+        clientProvided: item?.clientProvided === true,
+        sentQty: item?.clientProvided === true ? 0 : sentQty,
+        sentQtyText: item?.clientProvided === true ? '0' : cleanString(caseConversion?.quantityText ?? item?.sentQtyText ?? item?.quantityText ?? sentQty, 80),
+        sentQtyPending: item?.clientProvided === true ? false : caseConversion ? caseConversion.pending : cleanBoolean(item?.sentQtyPending, false),
         deliveredQty: cleanNumber(item?.deliveredQty ?? item?.delivered, { fallback: null }),
         returnedFullQty: cleanNumber(item?.returnedFullQty, { fallback: 0 }),
         returnedOpenQty: cleanNumber(item?.returnedOpenQty, { fallback: 0 }),
         lostDamagedQty: cleanNumber(item?.lostDamagedQty, { fallback: 0 }),
         returnConfirmed: preparedBeverageType ? true : cleanBoolean(item?.returnConfirmed, false),
-        unitCostSnapshot: preparedRate ?? (allowFinancials && hasExplicitUnitCost
+        unitCostSnapshot: item?.clientProvided === true ? 0 : preparedRate ?? (allowFinancials && hasExplicitUnitCost
           ? cleanNumber(item?.unitCostSnapshot, { fallback: costFallback?.unitCost ?? catalogUnitCost })
           : (catalogItem ? catalogUnitCost : (costFallback?.unitCost ?? 0))),
         costEstimate: preparedRate !== null
@@ -2206,6 +2207,7 @@ router.post('/events/:id/submit', async (req, res) => {
       item.included !== false
       && isBarAccountingItem(item)
       && requiresBarReturn(item)
+      && item.clientProvided !== true
       && item.returnConfirmed !== true
     ));
     if (unconfirmed.length) {

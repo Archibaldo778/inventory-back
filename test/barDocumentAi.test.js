@@ -132,7 +132,9 @@ test('generic menu service and client supply notes no longer disagree with legac
   const rows = [row(1, 'note'), row(2, 'note'), row(3, 'note'), row(4, 'alcohol', 'Dry Sherry')];
   const result = validateBarAiResult({ rows, issues: [] }, { lines, documentType: 'kitchen_menu', baseline });
   assert.equal(result.status, 'verified', result.issues.join('; '));
-  assert.deepEqual(result.items.map((item) => item.name), ['Dry Sherry']);
+  assert.deepEqual(result.items.map((item) => item.name), [lines[0], 'Dry Sherry']);
+  assert.equal(result.items[0].clientProvided, true);
+  assert.equal(result.items[0].quantity, 0);
   const omitted = validateBarAiResult({ rows: [...rows.slice(0, 3), row(4, 'note')], issues: [] }, { lines, documentType: 'kitchen_menu', baseline });
   assert.equal(omitted.status, 'needs_review');
   assert.match(omitted.issues.join('; '), /Parser disagreement: Dry Sherry/);
@@ -245,7 +247,7 @@ test('empty leading DOCX cells do not turn client supply notes into parser disag
       lines: [`\t${name}\t\t`], documentType: 'kitchen_menu', baseline: [{ name, scope: 'alcohol' }],
     });
     assert.equal(result.status, 'verified', result.issues.join(';'));
-    assert.deepEqual(result.items, []);
+    assert.deepEqual(result.items.map((item) => item.name), name.startsWith('Client') ? [name] : []);
   }
 });
 test('cutlery after wine and buckets of water cannot block or enter the bar packout', () => {
@@ -399,4 +401,14 @@ test('supplier-looking names outside an ICE block are not silently discarded', (
   const result = validateBarAiResult({ rows: [row(1, 'heading'), row(2, 'note', 'Crushed from United')], issues: [] },
     { lines: ['Name\tQty', 'Crushed from United\t6'], documentType: 'po', baseline: [{ name: 'Crushed from United', scope: 'alcohol' }] });
   assert.equal(result.status, 'needs_review');
+});
+
+test('client supplied note remains optional zero stock alongside all office PO quantities', () => {
+  const lines = ['Name\tQty', 'Wine & champagne by client\t', 'Panna\t32', 'ALONE WITH YOU\t100', 'Champagne\t36'];
+  const rows = [row(1, 'heading'), row(2, 'note'), row(3, 'water', 'Panna', 32, 3, '32'), row(4, 'cocktail', 'ALONE WITH YOU', 100, 4, '100'), row(5, 'alcohol', 'Champagne', 36, 5, '36')];
+  const result = validateBarAiResult({ rows, issues: [] }, { lines, documentType: 'po', baseline: [{ name: 'Wine & champagne by client', scope: 'alcohol' }] });
+  assert.equal(result.status, 'verified', result.issues.join(';'));
+  assert.deepEqual(result.items.map((i) => [i.name, i.quantity]), [['Wine & champagne by client', 0], ['Panna', 32], ['ALONE WITH YOU', 100], ['Champagne', 36]]);
+  assert.equal(result.items[0].clientProvided, true);
+  assert.equal(result.items[0].sentQtyPending, false);
 });

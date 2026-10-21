@@ -35,7 +35,7 @@ export const calculateBarItemAccounting = (item = {}) => {
   const consumedQty = round(Math.max(0, outboundQty - returnedQty - lostDamagedQty));
   const overReturnedQty = round(Math.max(0, returnedQty - outboundQty));
   const overAccountedQty = round(Math.max(0, returnedQty + lostDamagedQty - outboundQty));
-  const unitCost = getPreparedBeverageRate(item) ?? toNonNegativeNumber(item.unitCostSnapshot);
+  const unitCost = item.clientProvided === true ? 0 : getPreparedBeverageRate(item) ?? toNonNegativeNumber(item.unitCostSnapshot);
   const actualCost = round(usedQty * unitCost, 2);
   return {
     sentQty,
@@ -152,7 +152,7 @@ export const calculateBarEventAccounting = (event = {}) => {
     packageAccounting,
     includedItemCount: includedLines.length,
     confirmedItemCount: includedLines.filter(({ item, accounting }) => (
-      !accounting.returnRequired || item?.returnConfirmed === true
+      !accounting.returnRequired || item.clientProvided === true || item?.returnConfirmed === true
     )).length,
   };
 };

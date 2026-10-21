@@ -177,3 +177,27 @@ for (const apply of [applyGuestReceivedRows, applyGuestReturnRows]) {
     assert.equal(audit.length, 2);
   });
 }
+
+test('client stock may be omitted or counted voluntarily without changing zero sent or skipping office stock', () => {
+  const items = [{ _id: 'own', name: 'Panna', scope: 'alcohol', sentQty: 32 },
+    { _id: 'client', name: 'Wine by client', scope: 'alcohol', clientProvided: true, sentQty: 0 }];
+  assert.equal(prepareGuestReturnRows(items, [{ itemId: 'own', returnedQty: 5 }]).valid, true);
+  assert.equal(prepareGuestReturnRows(items, [{ itemId: 'client', returnedQty: 5 }]).valid, false);
+  assert.equal(applyGuestReceivedRows(items, [{ itemId: 'own', deliveredQty: 32 }]).valid, true);
+  const result = applyGuestReturnRows(items, [{ itemId: 'own', deliveredQty: 32, returnedQty: 5 },
+    { itemId: 'client', sentQty: 99, deliveredQty: 12, returnedQty: 3 }]);
+  assert.equal(result.valid, true);
+  assert.equal(items[1].sentQty, 0);
+  assert.equal(items[1].deliveredQty, 12);
+  assert.equal(items[1].returnedOpenQty, 3);
+});
+
+test('optional client stock stays in a PO refresh and has no OCC inventory cost', async () => {
+  const { mergePackoutDocumentItems } = await import('../utils/barManualItems.js');
+  const { calculateBarItemAccounting } = await import('../utils/barEventAccounting.js');
+  const client = { name: 'Wine by client', scope: 'alcohol', clientProvided: true, sentQty: 0, deliveredQty: 12, returnedFullQty: 3, unitCostSnapshot: 100 };
+  const items = mergePackoutDocumentItems([client], [{ name: 'Panna', scope: 'alcohol', sentQty: 32 }], ['po']);
+  assert.equal(items.length, 2);
+  assert.equal(items[0].clientProvided, true);
+  assert.equal(calculateBarItemAccounting(client).actualCost, 0);
+});

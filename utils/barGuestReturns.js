@@ -32,7 +32,7 @@ const indexGuestRows = (required, rows, action) => {
     }
     byId.set(id, row);
   }
-  const missing = required.filter((item) => !byId.has(itemId(item))).map(itemName);
+  const missing = required.filter((item) => item.clientProvided !== true && !byId.has(itemId(item))).map(itemName);
   if (missing.length) return { valid: false, message: `Missing ${action} quantity for: ${missing.join(', ')}`, byId };
   if (duplicates.length) return { valid: false, message: `Duplicate ${action} item: ${duplicates.join(', ')}`, byId };
   if (unexpected.length) return { valid: false, message: `Unexpected ${action} item: ${unexpected.join(', ')}`, byId };
@@ -49,8 +49,9 @@ export const applyGuestReceivedRows = (items, rows, { at = new Date(), by = '', 
   const updates = [];
   for (const item of required) {
     const row = byId.get(String(item?._id || item?.id || ''));
+    if (item.clientProvided === true && !row) continue;
     const deliveredQty = Number(row?.deliveredQty);
-    const sentQty = row?.sentQty === undefined
+    const sentQty = item.clientProvided === true ? 0 : row?.sentQty === undefined
       ? (item?.sentQtyPending === true ? deliveredQty : Number(item?.sentQty || 0))
       : Number(row.sentQty);
     if (!Number.isFinite(sentQty) || sentQty < 0) {
@@ -86,6 +87,7 @@ export const prepareGuestReturnRows = (items, rows) => {
   for (const item of required) {
     const itemId = String(item?._id || item?.id || '');
     const row = byId.get(itemId);
+    if (item.clientProvided === true && !row) continue;
     const deliveredValue = row?.deliveredQty;
     const savedDeliveredQty = item?.deliveredQty === null || item?.deliveredQty === undefined || item?.deliveredQty === ''
       ? null
@@ -95,7 +97,7 @@ export const prepareGuestReturnRows = (items, rows) => {
       : Number(deliveredValue);
     const returnedQty = Number(row?.returnedQty);
     const sentValue = row?.sentQty;
-    const sentQty = sentValue === undefined
+    const sentQty = item.clientProvided === true ? 0 : sentValue === undefined
       ? (item?.sentQtyPending === true
         ? Math.max(Number(item.sentQty || 0), deliveredQty ?? 0, returnedQty)
         : Number(item.sentQty || 0))

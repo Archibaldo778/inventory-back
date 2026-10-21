@@ -137,7 +137,7 @@ export const mergePackoutDocumentItems = (existingItems, importedItems, document
   const manualKeys = new Set(manualItems.map(barItemIdentityKey).filter(Boolean));
   const manualNames = new Set(manualItems.map(barItemNameKey).filter(Boolean));
   const retained = source
-    .filter((item) => item?.entrySource !== 'manual' && Boolean(getPreparedBeverageType(item)) === preservePrepared)
+    .filter((item) => item?.entrySource !== 'manual' && (Boolean(getPreparedBeverageType(item)) === preservePrepared || preservePrepared && item.clientProvided === true))
     .map((item) => typeof item?.toObject === 'function' ? item.toObject() : { ...item });
   const incoming = (Array.isArray(importedItems) ? importedItems : [])
     .filter((item) => {

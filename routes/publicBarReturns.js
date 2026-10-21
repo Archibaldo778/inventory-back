@@ -297,6 +297,7 @@ export const serializeGuestBarItem = (item) => ({
     ? null
     : Number(item.deliveredQty),
   returnedQty: Number(item?.returnedFullQty || 0) + Number(item?.returnedOpenQty || 0),
+  clientProvided: item?.clientProvided === true,
   returnConfirmed: item?.returnConfirmed === true,
   returnRequired: item?.included !== false && requiresBarReturn(item),
   carryover: item?.carryover?.sourceEventId ? {

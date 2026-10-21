@@ -199,3 +199,16 @@ test('manual PO and unidentified uploads remain protected; stale automatic KM ca
     assert.ok(protectedBarRecheckReason({ audit: [{ action: 'packout_imported', details: { fileName } }] }));
   }
 });
+
+test('pricing-only refresh during AI inspection does not discard PO quantities; operational changes still conflict', async () => {
+  const { canCommitBarRecheck } = await import('../utils/barDocumentRecheckPlan.js');
+  const beforeBar = { revision: 3, status: 'ready', guestCount: 300, items: [wine], audit: [], clientCharge: 0 };
+  const currentBar = { ...beforeBar, revision: 4, clientCharge: 21200, updatedAt: new Date(),
+    audit: [{ action: 'caterease_client_pricing_synced' }], clientChargeDetails: { total: 21200 } };
+  const input = { beforeBar, currentBar, beforeDocuments: source, currentDocuments: source, rulesRevision: 0, signature: recheckSourceSignature(source) };
+  assert.equal(canCommitBarRecheck(input), true);
+  for (const change of [{ items: [{ ...wine, sentQty: 99 }] }, { guestCount: 400 }, { status: 'submitted' },
+    { audit: [{ action: 'client_charge_updated' }] }, { packout: { fileName: 'New PO.docx' } }]) {
+    assert.equal(canCommitBarRecheck({ ...input, currentBar: { ...currentBar, ...change } }), false);
+  }
+});

@@ -77,7 +77,7 @@ async function runBatch() {
           const owned = await BarDocumentRecheck.findOne({ _id: event._id, lease }).session(session).lean();
           if (!owned || owned.lockedUntil < new Date()) throw new Error('Inspection lease expired');
           if (plan.status !== 'ready') {
-            await BarEvent.updateOne({ _id: bar._id, revision: bar.revision }, { $set: { importReview: { status: 'needs_review', issues: plan.issues || [plan.reason] } }, $inc: { revision: 1 } }, { session });
+            await BarEvent.updateOne({ _id: bar._id, revision: freshBar.revision }, { $set: { importReview: { status: 'needs_review', issues: plan.issues || [plan.reason] } }, $inc: { revision: 1 } }, { session });
           } else {
             const replacements = event.documents.map((d) => {
               const parsed = plan.documents.find((p) => sameSource(d, p));
@@ -91,7 +91,7 @@ async function runBatch() {
               const filter = document.sourceProvider === 'dropbox' ? { dropboxId: document.sourceId, rev: document.sourceRevision } : { uid: document.sourceId };
               await Model.updateOne(filter, { $set: { barItems: document.barItems, barReview: document.barReview } }, { session });
             }
-            await BarEvent.updateOne({ _id: bar._id, revision: bar.revision }, {
+            await BarEvent.updateOne({ _id: bar._id, revision: freshBar.revision }, {
               $set: { items: plan.items, status: bar.status === 'draft' ? 'ready' : bar.status },
               $unset: { importReview: '', sourceChangedAfterReturns: '' }, $inc: { revision: 1 },
               $push: { audit: { $each: [{ action: 'document_ai_rechecked', username: 'Automatic document recheck', at: new Date(), details: { signature, before: bar.items?.length || 0, after: plan.items.length } }], $slice: -200 } },

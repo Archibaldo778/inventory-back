@@ -6,7 +6,7 @@ import { runImportedBarItemMergePipeline } from './barManualItems.js';
 import { getPreparedBeverageType } from './barPackoutScope.js';
 
 export const recheckSourceSignature = (documents, rulesRevision = 0) => crypto.createHash('sha256').update(JSON.stringify({
-  version: BAR_AI_VERSION, recheckVersion: 8, rulesRevision, model: process.env.BAR_DOCUMENT_AI_MODEL || 'gpt-5.6-luna',
+  version: BAR_AI_VERSION, recheckVersion: 9, rulesRevision, model: process.env.BAR_DOCUMENT_AI_MODEL || 'gpt-5.6-luna',
   sources: documents.map((d) => [String(d._id), d.type, d.sourceProvider, d.sourceId, d.sourceRevision, d.checksum]).sort(),
 })).digest('hex');
 
@@ -94,9 +94,21 @@ export async function prepareBarDocumentRecheck({ bar, documents, read, normaliz
   return { ...planBarDocumentRecheck(bar, imported, [...new Set(documents.map((d) => d.type))]), documents: parsed };
 }
 
+const onlyPricingChanged = (before, current) => {
+  const previousAudit = before.audit || [];
+  const currentAudit = current.audit || [];
+  const added = currentAudit.slice(previousAudit.length);
+  if (!added.length || added.some((entry) => entry.action !== 'caterease_client_pricing_synced')
+    || JSON.stringify(currentAudit.slice(0, previousAudit.length)) !== JSON.stringify(previousAudit)) return false;
+  const pricingFields = new Set(['revision', '__v', 'updatedAt', 'audit', 'clientCharge', 'clientChargeDetails', 'catereaseClientChargeSnapshot']);
+  return [...new Set([...Object.keys(before), ...Object.keys(current)])]
+    .filter((key) => !pricingFields.has(key))
+    .every((key) => JSON.stringify(before[key]) === JSON.stringify(current[key]));
+};
+
 export const canCommitBarRecheck = ({ beforeBar, currentBar, beforeDocuments, currentDocuments, rulesRevision, signature }) => Boolean(
   currentBar && !protectedBarRecheckReason(currentBar)
-  && currentBar.revision === beforeBar.revision
+  && (currentBar.revision === beforeBar.revision || onlyPricingChanged(beforeBar, currentBar))
   && JSON.stringify(currentBar.items) === JSON.stringify(beforeBar.items)
   && JSON.stringify(currentDocuments) === JSON.stringify(beforeDocuments)
   && recheckSourceSignature(selectAutomaticRecheckSources(currentDocuments), rulesRevision) === signature

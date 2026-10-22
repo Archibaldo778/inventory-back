@@ -49,3 +49,11 @@ test('product PATCH persists category and catalog together without replacing the
     Product.findByIdAndUpdate = update;
   }
 });
+
+for (const inventoryType of ['decor', undefined]) {
+  test(`Disposable category moves ${inventoryType || 'legacy decor'} stock without replacing data`, () => {
+    const item = { _id: 'same', inventoryType, category: 'Trays', inventoryCode: 'OCC00001', quantity: 12, images: ['photo.jpg'] };
+    assert.deepEqual({ ...item, ...productCategoryUpdate(item, ' disposable ') }, { ...item, category: 'disposable', inventoryType: 'disposable' });
+    assert.equal(productCategoryUpdate(item, 'Disposable / event purchase').inventoryType, undefined);
+  });
+}

@@ -9,5 +9,8 @@ export const productCategoryUpdate = (current, category) => {
     && !/^__event_board_tape_library__(?::|$)/i.test(requested)) {
     updates.inventoryType = 'decor';
   }
+  if (current.inventoryType !== 'disposable' && requested.toLowerCase() === 'disposable') {
+    updates.inventoryType = 'disposable';
+  }
   return updates;
 };

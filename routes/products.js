@@ -6,6 +6,7 @@ import { Router } from 'express';
 import { Readable } from 'stream';
 import { fileURLToPath } from 'url';
 import Product from '../models/Product.js';
+import { productCategoryUpdate } from '../utils/productCategoryUpdate.js';
 import { cleanupManagedImageSafely } from '../utils/managedImageCleanup.js';
 import { INVALID_IMAGE_UPLOAD_RESPONSE, isAllowedImageUpload } from '../utils/imageSignature.js';
 import { clearApiCacheGroups, createGroupedApiCache } from '../utils/apiCache.js';
@@ -544,7 +545,7 @@ router.patch('/:id', upload.single('image'), async (req, res) => {
     let nextCategoryValue = String(currentDoc.category || '').trim() || 'Trays';
     if (typeof req.body.category !== 'undefined') {
       nextCategoryValue = String(req.body.category || '').trim() || 'Trays';
-      updates.category = nextCategoryValue;
+      Object.assign(updates, productCategoryUpdate(currentDoc, req.body.category));
     }
 
     if (typeof req.body.material !== 'undefined') updates.material = req.body.material || '';

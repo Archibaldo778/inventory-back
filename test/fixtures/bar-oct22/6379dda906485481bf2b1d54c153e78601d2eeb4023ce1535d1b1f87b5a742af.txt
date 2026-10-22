@@ -1,0 +1,20 @@
+Event:	Event Date: Thursday, October 22, 2026
+Sales Rep: Olivier Cheng	Event Timing: 7:00 pm - 11:00 PM
+Guests: 450	Delivery Time: 10:00 AM
+Event Number: E22295	Date PO Modified: 10/20/2026 (2:23 pm)
+DRY GOODS DELIVERS WEDNESDAY @ 3PM
+Name	Qty	Notes/Comments	Delivered	Returned
+COFFEE EQUIPMENT				
+Milk (Quart)	1			
+Skim Milk (Quart)	1			
+Almond Milk	1			
+Oat Milk	1			
+Sweet and Low /splenda	1	1/2 pint combined		
+Sugar Cubes	1			
+Assorted Tea Bags	50			
+Coffee per 50 cups	1			
+Decaf per 50 cups	1			
+Tea kettle				
+Poland Spring	100			
+Cans of Coke	48			
+Cans of Diet Coke	48			

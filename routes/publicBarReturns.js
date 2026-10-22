@@ -1,3 +1,4 @@
+import { barDocumentExclusion } from '../utils/barDocumentSources.js';
 import { inspectBarDocument } from '../utils/barDocumentAiService.js';
 import { readDropboxDocxMetadata } from '../utils/dropboxDocxMetadata.js';
 import crypto from 'node:crypto';
@@ -297,6 +298,7 @@ export const serializeGuestBarItem = (item) => ({
     ? null
     : Number(item.deliveredQty),
   returnedQty: Number(item?.returnedFullQty || 0) + Number(item?.returnedOpenQty || 0),
+  beverageKind: item?.beverageKind || '',
   clientProvided: item?.clientProvided === true,
   returnConfirmed: item?.returnConfirmed === true,
   returnRequired: item?.included !== false && requiresBarReturn(item),
@@ -586,6 +588,8 @@ export const createGuestBarDocumentReader = ({ readMetadata = readDropboxDocxMet
     if (!req.file || !/\.docx$/i.test(req.file.originalname || '')) {
       return res.status(400).json({ message: 'Choose a DOCX PO or Kitchen Menu' });
     }
+    const exclusion = barDocumentExclusion({ fileName: req.file.originalname }, event);
+    if (exclusion) return res.status(422).json({ message: exclusion });
     const metadata = await readMetadata(req.file.buffer, { documentType: 'po', inspectBar: inspectBarDocument });
     if (metadata.barReview?.status !== 'verified') {
       return res.status(422).json({

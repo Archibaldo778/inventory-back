@@ -1,3 +1,6 @@
+import { buildBarImportReview } from '../utils/barImportReview.js';
+import { resolveBarOfficeReview } from '../utils/barOfficeReview.js';
+import { barDocumentExclusion } from '../utils/barDocumentSources.js';
 import { inspectBarDocument } from '../utils/barDocumentAiService.js';
 import { readDropboxDocxMetadata } from '../utils/dropboxDocxMetadata.js';
 import { loadBarReturnCaptains, deliverBarReturnReminder } from '../utils/barReturnReminders.js';
@@ -699,6 +702,7 @@ export const normalizePackoutItems = async (items, { allowFinancials = false, gu
         section: cleanString(item?.section, 160),
         scope,
         included: cleanBoolean(item?.included ?? item?.includedByDefault, scope !== 'non_bar'),
+        beverageKind: ['alcohol', 'water', 'cocktail', 'mocktail'].includes(item.beverageKind) ? item.beverageKind : '',
         clientProvided: item?.clientProvided === true,
         sentQty: item?.clientProvided === true ? 0 : sentQty,
         sentQtyText: item?.clientProvided === true ? '0' : cleanString(caseConversion?.quantityText ?? item?.sentQtyText ?? item?.quantityText ?? sentQty, 80),
@@ -1496,6 +1500,24 @@ router.post('/events/:id/packout/match', requireBarOperator, async (req, res) =>
   }
 });
 
+router.post('/events/:id/document-review', requireBarManager, async (req, res) => {
+  try {
+    const event = await loadEvent(req, res);
+    if (!event) return;
+    const decision = resolveBarOfficeReview(event, req.body || {});
+    const items = decision.item ? await normalizePackoutItems([decision.item], { allowFinancials: false }) : [];
+    if (decision.item && !items.length) return res.status(400).json({ message: 'This row is not a supported bar drink' });
+    const next = await BarEvent.findOneAndUpdate({ _id: event._id, revision: event.revision }, {
+      $set: { importReview: decision.review }, $inc: { revision: 1 },
+      $push: { ...(items.length ? { items: { $each: items } } : {}), audit: { $each: [{ action: 'document_row_reviewed',
+        userId: String(req.auth?.userId || ''), username: String(req.auth?.username || req.auth?.email || ''), at: new Date(),
+        details: { row: decision.row, action: req.body.action, item: decision.item } }], $slice: -200 } },
+    }, { new: true, runValidators: true });
+    if (!next) return res.status(409).json({ message: 'Event changed. Refresh before confirming.' });
+    return res.json(serializeBarEvent(next, { includeFinancials: canSeeBarFinancials(req.auth) }));
+  } catch (error) { return sendApiError(res, error, { context: 'Bar document review failed', fallbackMessage: 'Could not save review' }); }
+});
+
 const docxAiUpload = multer({ storage: multer.memoryStorage(), limits: { files: 1, fileSize: 12 * 1024 * 1024, fields: 1 } });
 router.post('/events/:id/packout/read-document', requireBarOperator, limitPackoutRecognition, docxAiUpload.single('file'), async (req, res) => {
   try {
@@ -1503,6 +1525,8 @@ router.post('/events/:id/packout/read-document', requireBarOperator, limitPackou
     if (!event) return;
     if (!canOperateEvent(event, req.auth)) return res.status(403).json({ message: 'This event is not assigned to your account' });
     if (!req.file || !/\.docx$/i.test(req.file.originalname || '')) return res.status(400).json({ message: 'Choose a DOCX PO or Kitchen Menu' });
+    const excluded = barDocumentExclusion({ fileName: req.file.originalname }, event);
+    if (excluded) return res.status(422).json({ message: excluded, review: { status: 'excluded', issues: [excluded] } });
     const documentType = req.body?.documentType === 'kitchen_menu' ? 'kitchen_menu' : 'po';
     const metadata = await readDropboxDocxMetadata(req.file.buffer, { documentType, inspectBar: inspectBarDocument });
     if (metadata.barReview?.status !== 'verified') return res.status(422).json({ message: `Needs review: ${(metadata.barReview?.issues || ['Document type could not be confirmed']).join('; ')}`, review: metadata.barReview });
@@ -1586,7 +1610,23 @@ router.post('/events/:id/packout', async (req, res) => {
     if (!manager && event.items.some((item) => item.entrySource !== 'manual')) {
       return res.status(409).json({ message: 'A packout already exists. Ask a bar admin to replace it.' });
     }
+    let submittedReview;
+    if (Array.isArray(req.body?.reviews)) {
+      const documents = req.body.reviews.slice(0, 500).map((d) => ({ fileName: cleanString(d.fileName, 240),
+        barReview: { status: d.barReview?.status === 'verified' ? 'verified' : 'needs_review',
+          issues: (Array.isArray(d.barReview?.issues) ? d.barReview.issues : []).map((v) => cleanString(v, 1000)),
+          warnings: (Array.isArray(d.barReview?.warnings) ? d.barReview.warnings : []).map((v) => cleanString(v, 1000)),
+          rows: (Array.isArray(d.barReview?.rows) ? d.barReview.rows : []).slice(0, 600).map((row) => ({ row: Number(row.row), name: cleanString(row.name, 240), sourceText: cleanString(row.sourceText, 2000), reason: cleanString(row.reason, 1000) })) } }));
+      submittedReview = buildBarImportReview(documents);
+    }
     const sourceItems = Array.isArray(req.body?.items) ? req.body.items : [];
+    if (!sourceItems.length && submittedReview && manager) {
+      event.importReview = submittedReview;
+      event.revision += 1;
+      addAudit(event, req.auth, 'document_review_saved', { fileName: cleanString(req.body?.fileName, 240) });
+      await event.save();
+      return res.json(serializeBarEvent(event, { includeFinancials: canSeeBarFinancials(req.auth) }));
+    }
     if (!sourceItems.length) return res.status(400).json({ message: 'Packout items are required' });
     if (sourceItems.length > MAX_PACKOUT_ITEMS) {
       return res.status(413).json({ message: `Packout is limited to ${MAX_PACKOUT_ITEMS} items` });
@@ -1660,7 +1700,7 @@ router.post('/events/:id/packout', async (req, res) => {
       seriesStartDate: packoutSeriesPlan?.startDate || '',
       seriesEndDate: packoutSeriesPlan?.endDate || '',
     };
-    event.importReview = undefined;
+    if (Array.isArray(req.body?.reviews)) event.importReview = submittedReview;
     if (event.status === 'draft') event.status = 'ready';
     event.revision += 1;
     addAudit(event, req.auth, 'packout_imported', {

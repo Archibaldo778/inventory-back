@@ -1,5 +1,7 @@
+import { selectBarDocumentsForEvent } from '../utils/barDocumentSources.js';
+import { protectedBarRecheckReason } from '../utils/barDocumentRecheckPlan.js';
 import { inspectBarDocument } from '../utils/barDocumentAiService.js';
-import { blockUnverifiedBarImport } from '../utils/barImportReview.js';
+import { blockUnverifiedBarImport, buildBarImportReview, preserveUninspectedBarItems } from '../utils/barImportReview.js';
 import { Router } from 'express';
 import crypto from 'node:crypto';
 import CatereaseFile from '../models/CatereaseFile.js';
@@ -227,9 +229,9 @@ const dashboardEventGuestCount = (event) => {
 };
 
 const syncCatereaseBarItems = async (event) => {
-  const sourceDocuments = (Array.isArray(event?.documents) ? event.documents : [])
-    .filter((document) => String(document?.sourceProvider || '') === 'caterease');
-  if (await blockUnverifiedBarImport(event, sourceDocuments)) return false;
+  const inspectedDocuments = selectBarDocumentsForEvent((event.documents || []).filter((d) => d.sourceProvider === 'caterease'), event);
+  const sourceDocuments = inspectedDocuments.filter((d) => d.barReview?.status === 'verified');
+  if (await blockUnverifiedBarImport(event, inspectedDocuments)) return false;
   const rawItems = sourceDocuments.flatMap((document) => Array.isArray(document?.barItems) ? document.barItems : []);
   const documentTypes = [...new Set(sourceDocuments.map((document) => String(document?.type || '')).filter(Boolean))];
   const guestCount = dashboardEventGuestCount(event);
@@ -262,6 +264,7 @@ const syncCatereaseBarItems = async (event) => {
     if (protectedResult.changed) await barEvent.save();
     return protectedResult.changed;
   }
+  if (protectedBarRecheckReason(barEvent)) return false;
   const existingItems = Array.isArray(barEvent.items) ? barEvent.items : [];
   const merged = runImportedBarItemMergePipeline({
     existingItems,
@@ -270,8 +273,8 @@ const syncCatereaseBarItems = async (event) => {
     eventDate: String(event.date || ''),
     scheduledBy: 'Caterease automatic sync',
   });
-  barEvent.importReview = undefined;
-  barEvent.items = merged.items;
+  barEvent.importReview = buildBarImportReview(inspectedDocuments, barEvent.audit);
+  barEvent.items = preserveUninspectedBarItems(existingItems, merged.items, inspectedDocuments);
   barEvent.packout = {
     fileName: sourceDocuments.map((document) => document.fileName).filter(Boolean).join(', ').slice(0, 500),
     contentType: sourceDocuments.map((document) => document.contentType).find(Boolean) || 'application/octet-stream',
@@ -292,7 +295,6 @@ const syncCatereaseBarItems = async (event) => {
 };
 
 const syncCatereaseOperationalBarItems = async (event, snapshot) => {
-  if (await blockUnverifiedBarImport(event, event.documents || [])) return { synced: false, items: 0, reason: 'document_needs_review' };
   let barEvent = await BarEvent.findOne({ linkedEventId: event._id });
   const catereaseClient = String(snapshot?.client || '').trim().slice(0, 180);
   const dashboardGuestCount = dashboardEventGuestCount(event);
@@ -344,6 +346,7 @@ const syncCatereaseOperationalBarItems = async (event, snapshot) => {
     }
     return { synced: protectedResult.changed, items: 0, reason: 'returns_locked' };
   }
+  if (protectedBarRecheckReason(barEvent)) return { synced: false, items: 0, reason: 'office_edits_protected' };
   const existingItems = Array.isArray(barEvent.items) ? barEvent.items : [];
   const merged = runImportedBarItemMergePipeline({
     existingItems,

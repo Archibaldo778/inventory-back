@@ -61,6 +61,8 @@ export const getPreparedBeverageRate = (item = {}) => (
 );
 
 export const isTrackedBarWater = (item = {}) => (
+  item.beverageKind === 'water'
+  ||
   /\b(?:acqua\s+)?panna\b|\b(?:s\.?\s*)?pellegrino\b/i.test(String(item?.name || '').trim())
   || /^(?:(?:bottled|still|sparkling)\s+)?waters?(?:\s+(?:bottles?|cases?|\d[\w .-]*))?$/i.test(String(item?.name || '').trim())
 );

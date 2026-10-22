@@ -13,10 +13,8 @@ import { downloadCatereaseEventFile } from './catereaseApi.js';
 import { readDropboxDocxMetadata } from './dropboxDocxMetadata.js';
 import { inspectBarDocument } from './barDocumentAiService.js';
 import { normalizePackoutItems } from '../routes/bar.js';
-import { selectDropboxBarSourceDocuments } from './dropboxBarSync.js';
 import { prepareBarDocumentRecheck, selectAutomaticRecheckSources, protectedBarRecheckReason, recheckSourceSignature, canCommitBarRecheck, barDocumentRecheckQuery } from './barDocumentRecheckPlan.js';
 
-const chooseDocuments = (documents) => [...selectDropboxBarSourceDocuments(documents), ...documents.filter((d) => d.sourceProvider === 'caterease')];
 const sameSource = (a, b) => String(a._id) === String(b._id) || (a.type === b.type && a.checksum && a.checksum === b.checksum);
 let running = null;
 
@@ -33,7 +31,7 @@ async function runBatch() {
   const candidates = bars.flatMap((bar) => {
     const event = byId.get(String(bar.linkedEventId));
     if (!event || protectedBarRecheckReason(bar)) return [];
-    const documents = selectAutomaticRecheckSources(event.documents);
+    const documents = selectAutomaticRecheckSources(event.documents, bar);
     if (!documents.length) return [];
     const signature = recheckSourceSignature(documents, rulesRevision);
     const job = jobById.get(String(event._id));
@@ -64,7 +62,13 @@ async function runBatch() {
       const claimed = await BarDocumentRecheck.findOneAndUpdate({ _id: event._id, ...(candidate.job ? { updatedAt: candidate.job.updatedAt } : { status: { $exists: false } }), $or: [{ lockedUntil: { $lte: now } }, { lockedUntil: null }] },
         { $set: { signature, status: 'processing', lease, attempts, lockedUntil: new Date(Date.now() + 30 * 60_000) } }, { upsert: true, new: true });
       if (!claimed) continue;
-      const plan = await prepareBarDocumentRecheck({ bar, documents: chooseDocuments(documents), read, normalize: normalizePackoutItems });
+      const plan = await prepareBarDocumentRecheck({ bar, documents, read, normalize: normalizePackoutItems,
+        onDocument: async () => {
+          const renewed = await BarDocumentRecheck.updateOne({ _id: event._id, lease, lockedUntil: { $gt: new Date() } },
+            { $set: { lockedUntil: new Date(Date.now() + 30 * 60_000) } });
+          if (renewed.matchedCount !== 1) throw new Error('Inspection lease expired');
+        },
+      });
       if (plan.status === 'retry' && attempts >= 3) plan.status = 'needs_review';
       const session = await mongoose.startSession();
       try {
@@ -92,12 +96,12 @@ async function runBatch() {
               await Model.updateOne(filter, { $set: { barItems: document.barItems, barReview: document.barReview } }, { session });
             }
             await BarEvent.updateOne({ _id: bar._id, revision: freshBar.revision }, {
-              $set: { items: plan.items, status: bar.status === 'draft' ? 'ready' : bar.status },
-              $unset: { importReview: '', sourceChangedAfterReturns: '' }, $inc: { revision: 1 },
+              $set: { items: plan.items, packout: { ...plan.packout, importedAt: new Date() }, status: bar.status === 'draft' ? 'ready' : bar.status, ...(plan.review ? { importReview: plan.review } : {}) },
+              $unset: { ...(!plan.review ? { importReview: '' } : {}), sourceChangedAfterReturns: '' }, $inc: { revision: 1 },
               $push: { audit: { $each: [{ action: 'document_ai_rechecked', username: 'Automatic document recheck', at: new Date(), details: { signature, before: bar.items?.length || 0, after: plan.items.length } }], $slice: -200 } },
             }, { session, runValidators: true });
           }
-          await BarDocumentRecheck.updateOne({ _id: event._id, lease }, { $set: { status: plan.status === 'ready' ? 'done' : plan.status, lockedUntil: null, nextAttemptAt: plan.status === 'retry' ? new Date(Date.now() + 30 * 60_000) : null, message: (plan.issues || []).join('; ').slice(0, 1000) } }, { session });
+          await BarDocumentRecheck.updateOne({ _id: event._id, lease }, { $set: { status: plan.status === 'ready' ? (plan.retryable && attempts < 3 ? 'retry' : 'done') : plan.status, lockedUntil: null, nextAttemptAt: (plan.status === 'retry' || plan.retryable && attempts < 3) ? new Date(Date.now() + 30 * 60_000) : null, message: (plan.issues || []).join('; ').slice(0, 1000) } }, { session });
         });
       } finally { await session.endSession(); }
       if (plan.status === 'ready') summary.updated += 1; else summary.review += 1;

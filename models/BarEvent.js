@@ -24,6 +24,7 @@ const barPackoutItemSchema = new mongoose.Schema(
     section: { type: String, default: '', trim: true },
     scope: { type: String, enum: BAR_ITEM_SCOPES, default: 'review' },
     included: { type: Boolean, default: true },
+    beverageKind: { type: String, enum: ['', 'alcohol', 'water', 'cocktail', 'mocktail'], default: '' },
     clientProvided: { type: Boolean, default: false },
     sentQty: { type: Number, default: 0, min: 0 },
     sentQtyOriginal: { type: Number, min: 0 },

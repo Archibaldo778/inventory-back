@@ -7,6 +7,10 @@ import { extractDropboxDocxLines, readDropboxDocxMetadata } from '../utils/dropb
 import { blockUnverifiedBarImport } from '../utils/barImportReview.js';
 import { requireBarAiOwner, saveBarAiSettings } from '../routes/barAi.js';
 import BarAiSettings from '../models/BarAiSettings.js';
+const assertHasReview = (result) => {
+  assert.equal(result.status, 'verified');
+  assert.ok(result.reviewRows.length || result.warnings.length, 'Unresolved data must be visible to the office');
+};
 const row = (id, kind, name = '', quantity = null, quantityRow = null, quantityText = '') => ({ row: id, kind, name, quantity, quantityRow, quantityText });
 const fixture = () => ({
   lines: barDocumentLines('Name\tQty\nGARNISH\nWhite Burgundy (Les Vergelesses)\t9\nRed Bordeaux (Chateau Gloria)\t5\nSIGNATURE COCKTAIL\t20\nNEW YORK 45\nMAINS\t195\nBaby greens with aged sherry shallot vinaigrette\t20'),
@@ -29,7 +33,7 @@ test('missing rows, invented quantities, recipe numbers, food and duplicate quan
     (rows) => { rows[3] = row(4, 'cocktail', 'Red Bordeaux (Chateau Gloria)', 20, 5, '20'); },
   ]) {
     const { lines, rows } = fixture(); mutate(rows);
-    assert.equal(validateBarAiResult({ rows, issues: [] }, { lines, documentType: 'po' }).status, 'needs_review');
+    assertHasReview(validateBarAiResult({ rows, issues: [] }, { lines, documentType: 'po' }));
   }
 });
 test('KM never establishes sent quantity and retains known recipe ingredients', () => {
@@ -40,9 +44,9 @@ test('KM never establishes sent quantity and retains known recipe ingredients', 
   assert.equal(result.items[0].sentQtyPending, true); assert.equal(result.items[0].cocktailServingsAuto, false);
   assert.deepEqual(result.items[0].ingredients, ['Gin', 'Lemon']);
 });
-test('deterministic parser disagreement prevents silently omitting a known drink', () => {
+test('deterministic parser disagreement lists a missing drink without blocking verified rows', () => {
   const result = validateBarAiResult({ rows: [row(1, 'note')], issues: [] }, { lines: ['Dry Sherry\t3'], documentType: 'po', baseline: [{ name: 'Dry Sherry', scope: 'alcohol', quantity: 3 }] });
-  assert.equal(result.status, 'needs_review'); assert.match(result.issues.join(' '), /Dry Sherry/);
+  assertHasReview(result); assert.match(result.warnings.join(' '), /Dry Sherry/);
 });
 test('AI retries a failed completeness check and receives saved teaching rules on both attempts', async () => {
   const { lines, rows } = fixture(); let calls = 0;
@@ -86,7 +90,7 @@ test('teaching edits use revision checks and retain actor and rule text in audit
 test('Qty column is found by header and Delivered or Returned cannot become sent quantities', () => {
   const lines = ['Name\tDelivered\tQty\tReturned', 'Dry Sherry\t2\t9\t1'];
   assert.equal(validateBarAiResult({ rows: [row(1, 'heading'), row(2, 'alcohol', 'Dry Sherry', 9, 2, '9')], issues: [] }, { lines, documentType: 'po' }).status, 'verified');
-  assert.equal(validateBarAiResult({ rows: [row(1, 'heading'), row(2, 'alcohol', 'Dry Sherry', 2, 2, '2')], issues: [] }, { lines, documentType: 'po' }).status, 'needs_review');
+  assertHasReview(validateBarAiResult({ rows: [row(1, 'heading'), row(2, 'alcohol', 'Dry Sherry', 2, 2, '2')], issues: [] }, { lines, documentType: 'po' }));
 });
 test('truncated provider response cannot be imported', async () => {
   await assert.rejects(generateBarDocument({ text: 'Wine\t2', documentType: 'po', apiKey: 'test', fetchImpl: async () => new Response(JSON.stringify({ status: 'incomplete', output_text: '{}' })) }), /incomplete/);
@@ -109,8 +113,8 @@ test('generic KM water description and staff supply do not block tracked PO wate
   assert.equal(menu.status, 'verified'); assert.deepEqual(menu.items, []);
   const po = validateBarAiResult({ rows: [row(1, 'water', 'Staff water', 40, 1, '40'), row(2, 'water', 'Panna', 16, 2, '16'), row(3, 'water', 'Pellegrino', 10, 3, '10')], issues: [] }, { lines: ['Staff water\t40', 'Panna\t16', 'Pellegrino\t10'], documentType: 'po' });
   assert.equal(po.status, 'verified'); assert.deepEqual(po.items.map((item) => [item.name, item.quantity]), [['Panna', 16], ['Pellegrino', 10]]);
-  const uncertain = validateBarAiResult({ rows: [row(1, 'water', 'Flat and sparkling water', 20, 1, '20')], issues: [] }, { lines: ['Flat and sparkling water\t20'], documentType: 'po' });
-  assert.equal(uncertain.status, 'needs_review');
+  const uncertain = validateBarAiResult({ rows: [row(1, 'uncertain', 'Flat and sparkling water', 20, 1, '20')], issues: [] }, { lines: ['Flat and sparkling water\t20'], documentType: 'po' });
+  assertHasReview(uncertain);
 });
 
 
@@ -122,8 +126,8 @@ test('ice supplier note does not block a verified PO, genuine baseline drinks re
   assert.equal(result.status, 'verified');
   assert.deepEqual(result.items.map((item) => [item.name, item.quantity]), [['White Burgundy', 9]]);
   const missingWine = validateBarAiResult({ rows: [...rows.slice(0, 2), row(3, 'note')], issues: [] }, { lines, documentType: 'po', baseline });
-  assert.equal(missingWine.status, 'needs_review');
-  assert.match(missingWine.issues.join(';'), /White Burgundy/);
+  assertHasReview(missingWine);
+  assert.match(missingWine.warnings.join(';'), /White Burgundy/);
 });
 
 test('generic menu service and client supply notes no longer disagree with legacy false positives', () => {
@@ -136,8 +140,8 @@ test('generic menu service and client supply notes no longer disagree with legac
   assert.equal(result.items[0].clientProvided, true);
   assert.equal(result.items[0].quantity, 0);
   const omitted = validateBarAiResult({ rows: [...rows.slice(0, 3), row(4, 'note')], issues: [] }, { lines, documentType: 'kitchen_menu', baseline });
-  assert.equal(omitted.status, 'needs_review');
-  assert.match(omitted.issues.join('; '), /Parser disagreement: Dry Sherry/);
+  assertHasReview(omitted);
+  assert.match(omitted.warnings.join('; '), /Parser disagreement: Dry Sherry/);
 });
 
 test('food headings and units cannot become cocktails, but real drinks retain their PO counts', () => {
@@ -147,15 +151,15 @@ test('food headings and units cannot become cocktails, but real drinks retain th
   const result = validateBarAiResult({ rows, issues: [] }, { lines, documentType: 'po', baseline });
   assert.equal(result.status, 'verified', result.issues.join('; '));
   assert.deepEqual(result.items.map((item) => [item.name, item.quantity]), [['WHISKEY SOUR', 70]]);
-  assert.equal(validateBarAiResult({ rows: [row(1, 'cocktail', "PASSED HORS D'OEUVRES", 52, 1, '52'), ...rows.slice(1)], issues: [] }, { lines, documentType: 'po', baseline }).status, 'needs_review');
+  assertHasReview(validateBarAiResult({ rows: [row(1, 'cocktail', "PASSED HORS D'OEUVRES", 52, 1, '52'), ...rows.slice(1)], issues: [] }, { lines, documentType: 'po', baseline }));
 });
 
 test('a supply note mentioning the same wine does not excuse dropping its separate inventory row', () => {
   const result = validateBarAiResult({ rows: [row(1, 'note'), row(2, 'note')], issues: [] }, {
     lines: ['Client provides Dry Sherry', 'Dry Sherry'], documentType: 'kitchen_menu', baseline: [{ name: 'Dry Sherry', scope: 'alcohol' }],
   });
-  assert.equal(result.status, 'needs_review');
-  assert.match(result.issues.join('; '), /Parser disagreement: Dry Sherry/);
+  assertHasReview(result);
+  assert.match(result.warnings.join('; '), /Parser disagreement: Dry Sherry/);
 });
 
 test('malformed service times remain notes while adjacent PO drink quantities still require evidence', () => {
@@ -164,7 +168,7 @@ test('malformed service times remain notes while adjacent PO drink quantities st
   const result = validateBarAiResult({ rows, issues: [] }, { lines, documentType: 'po' });
   assert.equal(result.status, 'verified');
   assert.deepEqual(result.items.map((item) => [item.name, item.quantity]), [['White Burgundy', 9]]);
-  assert.equal(validateBarAiResult({ rows: [rows[0], row(2, 'alcohol', 'White Burgundy', 5, 1, '5')], issues: [] }, { lines, documentType: 'po' }).status, 'needs_review');
+  assertHasReview(validateBarAiResult({ rows: [rows[0], row(2, 'alcohol', 'White Burgundy', 5, 1, '5')], issues: [] }, { lines, documentType: 'po' }));
 });
 
 
@@ -180,8 +184,9 @@ test('DOCX empty Qty cannot shift Returned into sent quantity through AI inspect
         return validateBarAiResult({ rows: [row(1, 'heading'), row(2, 'alcohol', 'Dry Sherry', claimed, 2, String(claimed))], issues: [] }, { lines, documentType });
       },
     });
-    assert.equal(result.barReview.status, expected);
-    assert.deepEqual(result.barItems.map((item) => item.quantity), expected === 'verified' ? [12] : []);
+    assert.equal(result.barReview.status, 'verified');
+    assert.equal(result.barItems[0].sentQtyPending, expected !== 'verified');
+    assert.deepEqual(result.barItems.map((item) => item.quantity), expected === 'verified' ? [12] : [null]);
   }
 });
 test('AI source lines preserve leading and trailing empty table cells', () => {
@@ -190,7 +195,7 @@ test('AI source lines preserve leading and trailing empty table cells', () => {
 });
 test('Returned-only table cannot provide sent quantity', () => {
   const result = validateBarAiResult({ rows: [row(1, 'heading'), row(2, 'alcohol', 'Dry Sherry', 4, 2, '4')], issues: [] }, { lines: ['Item\tReturned', 'Dry Sherry\t4'], documentType: 'po' });
-  assert.equal(result.status, 'needs_review');
+  assertHasReview(result);
 });
 
 test('DOCX AI sees separate paragraphs and hard breaks without changing kitchen extraction', async () => {
@@ -220,17 +225,17 @@ test('multiline PO quantities stay aligned with each drink and cannot be swapped
   for (const invalid of [
     [row(1, 'heading'), row(2, 'alcohol', 'Grey Goose', 5, 2, '5'), row(2, 'alcohol', 'Patron Silver', 3, 2, '3')],
     [row(1, 'heading'), row(2, 'alcohol', 'Grey Goose', 1, 2, '1'), row(2, 'alcohol', 'Patron Silver', 2, 2, '2')],
-  ]) assert.equal(validateBarAiResult({ rows: invalid, issues: [] }, { lines, documentType: 'po' }).status, 'needs_review');
+  ]) assertHasReview(validateBarAiResult({ rows: invalid, issues: [] }, { lines, documentType: 'po' }));
   const shared = ['Name\tQty', 'Grey Goose\u2028Patron Silver\t8'];
-  assert.equal(validateBarAiResult({ rows: [row(1, 'heading'), row(2, 'alcohol', 'Grey Goose', 8, 2, '8'), row(2, 'alcohol', 'Patron Silver', 8, 2, '8')], issues: [] }, { lines: shared, documentType: 'po' }).status, 'needs_review');
+  assertHasReview(validateBarAiResult({ rows: [row(1, 'heading'), row(2, 'alcohol', 'Grey Goose', 8, 2, '8'), row(2, 'alcohol', 'Patron Silver', 8, 2, '8')], issues: [] }, { lines: shared, documentType: 'po' }));
 });
 test('splitting a multiline cell cannot excuse a missing known drink or duplicate classification', () => {
   const lines = ['Grey Goose\u2028Patron Silver'];
   const baseline = [{ name: 'Grey Goose Patron Silver', scope: 'alcohol' }];
   for (const rows of [[row(1, 'alcohol', 'Grey Goose')], [row(1, 'alcohol', 'Grey Goose'), row(1, 'alcohol', 'Grey Goose')]]) {
-    assert.equal(validateBarAiResult({ rows, issues: [] }, { lines, documentType: 'kitchen_menu', baseline }).status, 'needs_review');
+    assertHasReview(validateBarAiResult({ rows, issues: [] }, { lines, documentType: 'kitchen_menu', baseline }));
   }
-  assert.equal(validateBarAiResult({ rows: [row(1, 'alcohol', 'Grey Goose'), row(1, 'note')], issues: [] }, { lines: ['Grey Goose'], documentType: 'kitchen_menu' }).status, 'needs_review');
+  assertHasReview(validateBarAiResult({ rows: [row(1, 'alcohol', 'Grey Goose'), row(1, 'note')], issues: [] }, { lines: ['Grey Goose'], documentType: 'kitchen_menu' }));
 });
 test('a wrapped wine name remains one item with its original PO quantity', () => {
   const result = validateBarAiResult({ rows: [row(1, 'heading'), row(2, 'alcohol', 'Champagne, Louis Roederer Brut Collection', 12, 2, '12')], issues: [] }, {
@@ -259,7 +264,7 @@ test('cutlery after wine and buckets of water cannot block or enter the bar pack
     assert.equal(result.status, 'verified', result.issues.join(';'));
     assert.deepEqual(result.items.map((item) => [item.name, item.quantity]), [[baseline[0].name, 32]]);
     rows[1] = row(2, 'equipment');
-    assert.equal(validateBarAiResult({ rows, issues: [] }, { lines, documentType: 'po', baseline }).status, 'needs_review');
+    assertHasReview(validateBarAiResult({ rows, issues: [] }, { lines, documentType: 'po', baseline }));
   }
 });
 
@@ -271,7 +276,7 @@ test('PO quantities use their own source cells when AI omits citations or format
   assert.equal(result.status, 'verified', result.issues.join(';'));
   assert.deepEqual(result.items.map((item) => [item.quantity, item.quantityText]), [[123, '123'], [40, '40'], [32, '32']]);
   rows[2].quantity = 2024;
-  assert.equal(validateBarAiResult({ rows, issues: [] }, { lines, documentType: 'po' }).status, 'needs_review');
+  assertHasReview(validateBarAiResult({ rows, issues: [] }, { lines, documentType: 'po' }));
 });
 test('PO preserves cases from the adjacent unit cell without guessing bottle quantities', () => {
   const result = validateBarAiResult({ rows: [row(1, 'heading'), row(2, 'alcohol', 'La Caravelle', 3, null, '3 Cases')], issues: [] }, {
@@ -286,7 +291,7 @@ test('missing AI citation cannot use Returned, another row, or an unproven share
     const result = validateBarAiResult({ rows: [row(1, 'heading'), row(2, 'alcohol', 'Dry Sherry', 4, null, '4')], issues: [] }, {
       lines: ['Name\tQty\tDelivered\tReturned', line], documentType: 'po',
     });
-    assert.equal(result.status, 'needs_review');
+    assertHasReview(result);
   }
 });
 
@@ -342,7 +347,7 @@ test('AI missing quantities cannot be recovered from empty Qty, returns, notes o
     ['Name\tQty', 'Dry Sherry\t4 or 12'],
   ]) {
     const rows = lines.map((line, i) => row(i + 1, line.startsWith('Dry Sherry') ? 'alcohol' : 'heading', line.startsWith('Dry Sherry') ? 'Dry Sherry' : ''));
-    assert.equal(validateBarAiResult({ rows, issues: [] }, { lines, documentType: 'po' }).status, 'needs_review');
+    assertHasReview(validateBarAiResult({ rows, issues: [] }, { lines, documentType: 'po' }));
   }
 });
 
@@ -356,7 +361,7 @@ test('Junto PO mixers cannot block wine and cocktail quantities or enter captain
     assert.equal(result.status, 'verified', result.issues.join(';'));
     assert.deepEqual(result.items.map((item) => [item.name, item.quantity]), [['Grey Goose Vodka', 3], ['AGAVE SPICE', 12]]);
     rows[4] = row(5, 'ingredient');
-    assert.equal(validateBarAiResult({ rows, issues: [] }, { lines, documentType: 'po', baseline }).status, 'needs_review');
+    assertHasReview(validateBarAiResult({ rows, issues: [] }, { lines, documentType: 'po', baseline }));
   }
 });
 
@@ -381,7 +386,7 @@ test('Sabyasachi ice delivery rows cannot block the seven counted PO beverages',
   assert.equal(result.status, 'verified', result.issues.join(';'));
   assert.deepEqual(result.items.map((i) => [i.name, i.quantity]), drinks.map(([name, qty]) => [name, qty]));
   rows[7] = row(8, 'note', 'Dom Perignon 2017');
-  assert.equal(validateBarAiResult({ rows, issues: [] }, { lines, documentType: 'po', baseline }).status, 'needs_review');
+  assertHasReview(validateBarAiResult({ rows, issues: [] }, { lines, documentType: 'po', baseline }));
 });
 
 test('MOCKTAIL MIX in the KM Comment column is not another drink; the named mocktail is required', () => {
@@ -392,15 +397,15 @@ test('MOCKTAIL MIX in the KM Comment column is not another drink; the named mock
   assert.equal(result.status, 'verified', result.issues.join(';'));
   assert.deepEqual(result.items.map((i) => i.name), ['GUAVA COOLER']);
   rows[1] = row(2, 'note');
-  assert.equal(validateBarAiResult({ rows, issues: [] }, { lines, documentType: 'kitchen_menu', baseline }).status, 'needs_review');
+  assertHasReview(validateBarAiResult({ rows, issues: [] }, { lines, documentType: 'kitchen_menu', baseline }));
   const named = validateBarAiResult({ rows, issues: [] }, { lines: ['Qty\tItem\tComment\tLabel', '\tMOCKTAIL MIX\t\t'], documentType: 'kitchen_menu', baseline: [baseline[1]] });
-  assert.equal(named.status, 'needs_review');
+  assertHasReview(named);
 });
 
 test('supplier-looking names outside an ICE block are not silently discarded', () => {
   const result = validateBarAiResult({ rows: [row(1, 'heading'), row(2, 'note', 'Crushed from United')], issues: [] },
     { lines: ['Name\tQty', 'Crushed from United\t6'], documentType: 'po', baseline: [{ name: 'Crushed from United', scope: 'alcohol' }] });
-  assert.equal(result.status, 'needs_review');
+  assertHasReview(result);
 });
 
 test('client supplied note remains optional zero stock alongside all office PO quantities', () => {

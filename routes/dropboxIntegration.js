@@ -1,5 +1,7 @@
+import { selectBarDocumentsForEvent } from '../utils/barDocumentSources.js';
+import { protectedBarRecheckReason } from '../utils/barDocumentRecheckPlan.js';
 import { inspectBarDocument } from '../utils/barDocumentAiService.js';
-import { blockUnverifiedBarImport } from '../utils/barImportReview.js';
+import { blockUnverifiedBarImport, buildBarImportReview, preserveUninspectedBarItems } from '../utils/barImportReview.js';
 import { Router } from 'express';
 import DropboxIntegration from '../models/DropboxIntegration.js';
 import DropboxDocument from '../models/DropboxDocument.js';
@@ -326,8 +328,9 @@ const loadChargeLinkedBarSeriesContext = async (barEvent) => {
 const syncDropboxBarItems = async (event, { force = false } = {}) => {
   let barEvent = await BarEvent.findOne({ linkedEventId: event._id });
   const seriesContext = await loadDropboxBarSeriesContext(event, barEvent?.items || []);
-  const sourceDocuments = seriesContext?.documents || selectDropboxBarSourceDocuments(event?.documents);
-  if (await blockUnverifiedBarImport(event, sourceDocuments)) return false;
+  const inspectedDocuments = selectBarDocumentsForEvent(seriesContext?.documents || (event.documents || []).filter((d) => d.sourceProvider === 'dropbox'), event);
+  const sourceDocuments = inspectedDocuments.filter((d) => d.barReview?.status === 'verified');
+  if (await blockUnverifiedBarImport(event, inspectedDocuments)) return false;
   let rawItems = sourceDocuments.flatMap((document) => (
     Array.isArray(document?.barItems) ? document.barItems : []
   ));
@@ -346,7 +349,7 @@ const syncDropboxBarItems = async (event, { force = false } = {}) => {
   }
   const activeSeriesContext = seriesContext || chargeSeriesContext;
   const normalizedItems = await normalizePackoutItems(rawItems, { allowFinancials: false, guestCount });
-  const sourceChecksum = buildDropboxBarSourceChecksum(sourceDocuments);
+  const sourceChecksum = buildDropboxBarSourceChecksum(inspectedDocuments);
   if (
     !force
     && barEvent
@@ -376,6 +379,7 @@ const syncDropboxBarItems = async (event, { force = false } = {}) => {
     if (protectedResult.changed) await barEvent.save();
     return protectedResult.changed;
   }
+  if (protectedBarRecheckReason(barEvent)) return false;
   const existingItems = Array.isArray(barEvent.items) ? barEvent.items : [];
   const merged = runImportedBarItemMergePipeline({
     existingItems,
@@ -384,8 +388,8 @@ const syncDropboxBarItems = async (event, { force = false } = {}) => {
     eventDate: String(event.date || ''),
     scheduledBy: 'Dropbox automatic sync',
   });
-  barEvent.importReview = undefined;
-  barEvent.items = merged.items;
+  barEvent.importReview = buildBarImportReview(inspectedDocuments, barEvent.audit);
+  barEvent.items = preserveUninspectedBarItems(existingItems, merged.items, inspectedDocuments);
   barEvent.packout = {
     fileName: (chargeSeriesContext?.fileName || sourceDocuments.map((document) => document.fileName).filter(Boolean).join(', ')).slice(0, 500),
     contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',

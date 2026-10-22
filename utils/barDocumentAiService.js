@@ -19,12 +19,12 @@ export async function inspectBarDocument(input) {
   try { return await task; } finally { pending.delete(key); }
 }
 
-// Failed inspection blocks automatic replacement, while preserving the original document.
+// Only classified rows are importable; unresolved rows remain attached for office review.
 export async function inspectBarMetadata(metadata, text, inspect = inspectBarDocument) {
   try {
     const result = await inspect({ text, documentType: metadata.documentType, baseline: metadata.barItems || [] });
     return { ...metadata, barItems: result.status === 'verified' ? result.items : [],
-      barReview: { status: result.status, issues: result.issues, rulesRevision: result.rulesRevision || 0 } };
+      barReview: { status: result.status, issues: result.issues, warnings: result.warnings || [], rows: result.reviewRows || [], rulesRevision: result.rulesRevision || 0 } };
   } catch (error) {
     return { ...metadata, barItems: [], barReview: { status: 'needs_review', retryable: true, issues: [String(error.message || 'AI inspection failed').slice(0, 300)] } };
   }

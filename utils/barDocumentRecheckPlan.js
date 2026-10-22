@@ -1,3 +1,5 @@
+import { barDocumentExclusion, selectBarDocumentsForEvent } from './barDocumentSources.js';
+import { buildBarImportReview } from './barImportReview.js';
 import crypto from 'node:crypto';
 import { selectLatestDropboxFileRevisions } from './dropboxDocuments.js';
 import { BAR_AI_VERSION } from './barDocumentAi.js';
@@ -6,14 +8,15 @@ import { runImportedBarItemMergePipeline } from './barManualItems.js';
 import { getPreparedBeverageType } from './barPackoutScope.js';
 
 export const recheckSourceSignature = (documents, rulesRevision = 0) => crypto.createHash('sha256').update(JSON.stringify({
-  version: BAR_AI_VERSION, recheckVersion: 9, rulesRevision, model: process.env.BAR_DOCUMENT_AI_MODEL || 'gpt-5.6-luna',
+  version: BAR_AI_VERSION, recheckVersion: 10, rulesRevision, model: process.env.BAR_DOCUMENT_AI_MODEL || 'gpt-5.6-luna',
   sources: documents.map((d) => [String(d._id), d.type, d.sourceProvider, d.sourceId, d.sourceRevision, d.checksum]).sort(),
 })).digest('hex');
 
 const isMenuUpload = (entry) => entry.action === 'packout_imported'
   && /\bKM(?:\s+REV\s*\d+)?\.docx$/i.test(entry.details?.fileName || '');
 
-export const selectAutomaticRecheckSources = (documents = []) => {
+export const selectAutomaticRecheckSources = (documents = [], event = {}) => {
+  documents = documents.filter((d) => !barDocumentExclusion(d, event));
   const automatic = documents.filter((d) => ['dropbox', 'caterease'].includes(d.sourceProvider) && ['po', 'kitchen_menu'].includes(d.type));
   const manual = documents.filter((d) => !automatic.includes(d));
   if (!manual.length) return automatic;
@@ -33,7 +36,8 @@ export const protectedBarRecheckReason = (bar = {}) => {
 
 // Historical copies can remain attached after an event folder is renamed.
 // Within this explicitly selected event, the same filename family is one PO/KM.
-export const selectRecheckDocumentVersions = (documents) => {
+export const selectRecheckDocumentVersions = (documents, event = {}) => {
+  documents = selectBarDocumentsForEvent(documents, event);
   const kitchenPackout = (document) => /\bkpo\b/i.test(document.fileName || '');
   const hasSeparatePo = documents.some((document) => document.type === 'po' && !kitchenPackout(document));
   return selectLatestDropboxFileRevisions(
@@ -67,18 +71,23 @@ export function planBarDocumentRecheck(bar, importedItems, documentTypes) {
   return { status: 'ready', items: merged.items };
 }
 
-export async function prepareBarDocumentRecheck({ bar, documents, read, normalize }) {
+export async function prepareBarDocumentRecheck({ bar, documents, read, normalize, onDocument = async () => {} }) {
   const protectedReason = protectedBarRecheckReason(bar);
   if (protectedReason) return { status: 'protected', reason: protectedReason };
-  if (documents.length > 12) return { status: 'needs_review', issues: ['Too many distinct source documents for one automatic inspection'] };
   const parsed = [];
-  for (const document of selectRecheckDocumentVersions(documents)) {
-    const metadata = await read(document);
-    if (metadata.barReview?.status !== 'verified') return { status: metadata.barReview?.retryable ? 'retry' : 'needs_review', issues: (metadata.barReview?.issues || ['Document could not be verified']).map((issue) => `${document.fileName}: ${issue}`) };
-    parsed.push({ ...document, barItems: metadata.barItems, barReview: metadata.barReview });
+  for (const document of selectRecheckDocumentVersions(documents, bar)) {
+    let metadata;
+    try { metadata = await read(document); }
+    catch (error) { metadata = { barReview: { status: 'needs_review', retryable: true, issues: [String(error.message || error)] } }; }
+    await onDocument(document);
+    parsed.push({ ...document, barItems: metadata.barReview?.status === 'verified' ? metadata.barItems || [] : [], barReview: metadata.barReview || { status: 'needs_review', issues: ['Document could not be verified'] } });
   }
-  const poWines = parsed.filter((d) => d.type === 'po').flatMap((d) => d.barItems).filter((item) => item.scope === 'alcohol');
-  const sourceItems = parsed.flatMap((document) => (document.barItems || []).map((item) => {
+  const review = buildBarImportReview(parsed, bar.audit);
+  const accepted = parsed.filter((d) => d.barReview.status === 'verified');
+  if (!accepted.length) return { status: parsed.some((d) => d.barReview.retryable) ? 'retry' : 'needs_review', documents: parsed, issues: review?.issues || ['No eligible verified bar documents'], review };
+
+  const poWines = accepted.filter((d) => d.type === 'po').flatMap((d) => d.barItems).filter((item) => item.scope === 'alcohol');
+  const sourceItems = accepted.flatMap((document) => (document.barItems || []).map((item) => {
     if (document.type !== 'kitchen_menu' || item.scope !== 'alcohol') return item;
     // KM "Chateau Gloria- Red" and PO "Red Bordeaux (Chateau Gloria)" are one wine.
     // Require the full named alias, matching color, and exactly one PO name.
@@ -91,7 +100,17 @@ export async function prepareBarDocumentRecheck({ bar, documents, read, normaliz
     return names.length === 1 ? { ...item, name: names[0] } : item;
   }));
   const imported = await normalize(sourceItems, { guestCount: bar.guestCount, allowFinancials: false });
-  return { ...planBarDocumentRecheck(bar, imported, [...new Set(documents.map((d) => d.type))]), documents: parsed };
+  const plan = planBarDocumentRecheck(bar, imported, [...new Set(accepted.map((d) => d.type))]);
+  if (plan.status === 'ready' && accepted.length < parsed.length) {
+    // A failed neighbour must neither block verified counts nor erase existing counts.
+    const names = new Set(plan.items.map((item) => plainName(item.name)));
+    plan.items.push(...(bar.items || []).filter((item) => !names.has(plainName(item.name)) && !item.sentQtyPending && Number(item.sentQty) > 0));
+  }
+  return { ...plan, documents: parsed, review, issues: review?.issues || [], retryable: parsed.some((d) => d.barReview.retryable),
+    packout: { ...bar.packout, fileName: accepted.map((d) => d.fileName).filter(Boolean).join(', ').slice(0, 500),
+      packoutType: accepted.some((d) => d.type === 'po') ? 'general' : 'bar_only',
+      importedBy: 'Automatic document recheck' } };
+
 }
 
 const onlyPricingChanged = (before, current) => {
@@ -111,7 +130,7 @@ export const canCommitBarRecheck = ({ beforeBar, currentBar, beforeDocuments, cu
   && (currentBar.revision === beforeBar.revision || onlyPricingChanged(beforeBar, currentBar))
   && JSON.stringify(currentBar.items) === JSON.stringify(beforeBar.items)
   && JSON.stringify(currentDocuments) === JSON.stringify(beforeDocuments)
-  && recheckSourceSignature(selectAutomaticRecheckSources(currentDocuments), rulesRevision) === signature
+  && recheckSourceSignature(selectAutomaticRecheckSources(currentDocuments, currentBar), rulesRevision) === signature
 );
 
 // Repair today's and future automatic imports; never reopen past events.

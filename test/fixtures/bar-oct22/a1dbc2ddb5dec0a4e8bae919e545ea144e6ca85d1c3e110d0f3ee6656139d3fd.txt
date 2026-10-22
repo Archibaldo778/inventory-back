@@ -1,0 +1,42 @@
+Event: Cleary Gottlieb Steen & Hamilton 80th Anniversary Party_BEVERAGE	Event Date: Thursday, October 22, 2026
+Sales Rep: Olivier Cheng	Event Timing: 7:00 pm - 11:00 PM
+Guests: 450	Delivery Time: 10:00 AM
+Event Number: E22295	Date PO Modified: 10/20/2026 (2:15 pm)
+DRY GOODS DELIVERS WEDNESDAY @ 3PM
+Name	Qty	Notes/Comments	Delivered	Returned
+ICE				
+Standard from United	50			
+WATER				
+Panna	400			
+Pellegrino	130			
+SODA				
+Coke	24			
+Diet Coke	24			
+Ginger Ale	24			
+Club Soda	32			
+Tonic	32			
+JUICE				
+Orange Juice	4			
+Grapefruit Juice	4			
+Cranberry Juice	4			
+Lemon Juice	4			
+Lime Juice	8			
+Simple Syrup	8			
+Quart Container	16			
+Squeeze Bottle (12 oz)	16			
+GARNISH				
+Lime Wheels	500			
+Lemon Wheels	200			
+Lime Wedges	100			
+Whole Limes	1	BOX		
+Whole Lemons	10			
+Maraschino Cherries	1			
+Martini Olives	2			
+SPECIALTY COCKTAILS				
+AGAVE SPICE	450			
+GARNISH: Cucumber Slice	450			
+GARNISH: JalapeÒos Slice	450			
+MAPLE OLD FASHIONED				
+GARNISH: Cinnamon Stick	450			
+NON-ALCOHOLIC FRENCH 75				
+GARNISH: Lemon Twist	450			

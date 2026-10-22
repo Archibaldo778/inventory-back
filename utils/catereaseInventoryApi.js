@@ -1,3 +1,4 @@
+import { normalizeProductImages } from './productImages.js';
 const clean = (value) => String(value ?? '').trim();
 
 export function createInventoryClient({ key = process.env.CATEREASE_INVENTORY_API_KEY, fetchImpl = fetch } = {}) {
@@ -62,10 +63,14 @@ export function inventoryDestination(menus, types, locNum = '00001') {
   return { locNum, menuNum: matches[0].MenuNum, itemType: equipment[0].ID };
 }
 
+export const isExportableInventoryProduct = (product) => !String(product?.category || '').startsWith('__event_board_tape_library__:');
+
 export function inventoryPayload(product, destination) {
   if (!clean(product.name) || !/^OCC\d+$/i.test(clean(product.inventoryCode))) throw new Error('Product needs a name and an OCC inventory code');
+  const photo = normalizeProductImages(product)[0];
   return {
     ...destination,
+    ...(photo && /^https:\/\//i.test(photo) ? { url: photo } : {}),
     itemName: product.name,
     itemID: clean(product.inventoryCode).toUpperCase(),
     description: clean(product.description),

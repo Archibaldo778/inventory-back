@@ -128,3 +128,15 @@ test('same-named OCCDecks outside Account Rep PO is never selected', () => {
   assert.throws(() => inventoryDestination(menus.map(m => m.ID === 2 ? { ...m, Title: 'Kitchen PO' } : m), types), /was not found/);
   assert.throws(() => inventoryDestination(menus.map(m => m.ID === 1 ? { ...m, Inactive: true } : m), types), /was not found/);
 });
+
+import { isExportableInventoryProduct } from '../utils/catereaseInventoryApi.js';
+test('export carries the primary photo link without replacing it with a gallery image', () => {
+  const result = inventoryPayload({ ...product, image: 'https://res.cloudinary.com/main.png', imageUrl: 'https://res.cloudinary.com/old.png', images: ['https://res.cloudinary.com/gallery.png'] }, destination);
+  assert.equal(result.url, 'https://res.cloudinary.com/main.png');
+  assert.equal(inventoryPayload({ ...product, imageUrl: 'https://res.cloudinary.com/fallback.png' }, destination).url, 'https://res.cloudinary.com/fallback.png');
+  assert.equal('url' in inventoryPayload({ ...product, image: '/uploads/local.png' }, destination), false);
+});
+test('internal board tape swatches are not catalog inventory while disposable products are exportable', () => {
+  assert.equal(isExportableInventoryProduct({ category: '__event_board_tape_library__:tape-swatches-colors' }), false);
+  assert.equal(isExportableInventoryProduct({ ...product, inventoryType: 'disposable' }), true);
+});

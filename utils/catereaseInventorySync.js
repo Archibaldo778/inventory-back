@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import Product from '../models/Product.js';
 import { InventorySyncSettings, InventorySyncJob } from '../models/CatereaseInventorySync.js';
-import { createInventoryClient, inventoryDestination, inventoryPayload, deliverInventoryJob } from './catereaseInventoryApi.js';
+import { createInventoryClient, inventoryDestination, inventoryPayload, deliverInventoryJob, isExportableInventoryProduct } from './catereaseInventoryApi.js';
 
-const products = () => Product.find({}).select('name inventoryCode description category').sort({ _id: 1 }).lean();
+const products = async () => (await Product.find({}).select('name inventoryCode description category image imageUrl images').sort({ _id: 1 }).lean()).filter(isExportableInventoryProduct);
 export async function previewInventorySync() {
   const client = createInventoryClient();
   const [menus, types, items, settings, jobs] = await Promise.all([

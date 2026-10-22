@@ -2,6 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createInventoryClient, inventoryDestination, inventoryPayload, existingInventoryItem, deliverInventoryJob } from '../utils/catereaseInventoryApi.js';
 
+const catalogMenus = () => [
+  { Title: 'Pack Out New', ID: 1, ParentID: null, LocNum: '00001' },
+  { Title: 'Account Rep PO', ID: 2, ParentID: 1, LocNum: '00001' },
+  { Title: 'OCCDecks', ID: 3, ParentID: 2, MenuNum: 'occ-menu', LocNum: '00001' },
+];
 const destination = { locNum: '00001', menuNum: 'occ-menu', itemType: 4 };
 const product = { name: '11 oz Silver Traditional', inventoryCode: 'OCC00764', quantity: 200, description: 'Silver', category: 'Glassware' };
 const payload = inventoryPayload(product, destination);
@@ -12,12 +17,12 @@ test('inventory export preserves the exact name and OCC code without inventing p
   assert.deepEqual(payload, { ...destination, itemName: product.name, itemID: 'OCC00764', description: 'Silver', category: 'Glassware', inactive: false });
   assert.throws(() => inventoryPayload({ name: 'No code' }, destination), /OCC inventory code/);
 });
-test('destination is the unique active OCC Inventory catalog at our location and Equipment type', () => {
-  const menus = [{ Title: 'Equipment', MenuNum: 'existing', LocNum: '00001' }, { Title: 'OCC Inventory', MenuNum: 'occ-menu', LocNum: '00001' }];
+test('destination is the unique active OCCDecks catalog at the full path at our location and Equipment type', () => {
+  const menus = catalogMenus();
   const types = [{ Caption: 'Equipment', Active: true, LocNum: '00001', ID: 4 }];
   assert.deepEqual(inventoryDestination(menus, types), destination);
-  assert.throws(() => inventoryDestination(menus.slice(0, 1), types), /Create an active/);
-  assert.throws(() => inventoryDestination([...menus, menus[1]], types), /Multiple/);
+  assert.throws(() => inventoryDestination(menus.slice(0, 1), types), /was not found/);
+  assert.throws(() => inventoryDestination([...menus, { ...menus[2], ID: 4 }], types), /Multiple/);
 });
 test('same code in a different catalog does not get changed; duplicate or renamed destination items require review', () => {
   assert.equal(existingInventoryItem([{ ...remote, MenuNum: 'other' }], payload), null);
@@ -82,7 +87,7 @@ test('worker automatically discovers a new product, saves delivery before the ne
     return { modifiedCount: 1 };
   };
   const client = {
-    async list(resource) { reads++; return resource === 'menu' ? [{ Title: 'OCC Inventory', LocNum: '00001', MenuNum: 'occ-menu' }] : resource === 'foodservtype' ? [{ Caption: 'Equipment', LocNum: '00001', ID: 4, Active: true }] : []; },
+    async list(resource) { reads++; return resource === 'menu' ? catalogMenus() : resource === 'foodservtype' ? [{ Caption: 'Equipment', LocNum: '00001', ID: 4, Active: true }] : []; },
     async create() { writes++; assert.equal(stored.status, 'sending'); return { itemNum: 'created' }; },
   };
   try {
@@ -114,4 +119,12 @@ test('manual retry only requeues explicitly rejected jobs using a fresh key and 
     assert.deepEqual(await retryRejectedInventoryJobs(), { queued: 1 });
     assert.equal(updated.status, 'pending'); assert.deepEqual(updated.payload, payload); assert.ok(updated.idempotencyKey);
   } finally { Product.find = saved.pf; InventorySyncSettings.findById = saved.sf; InventorySyncJob.find = saved.jf; InventorySyncJob.updateOne = saved.ju; }
+});
+
+test('same-named OCCDecks outside Account Rep PO is never selected', () => {
+  const menus = catalogMenus();
+  const types = [{ Caption: 'Equipment', Active: true, LocNum: '00001', ID: 4 }];
+  assert.deepEqual(inventoryDestination([...menus, { Title: 'OCCDecks', ID: 99, ParentID: null, MenuNum: 'wrong', LocNum: '00001' }], types), destination);
+  assert.throws(() => inventoryDestination(menus.map(m => m.ID === 2 ? { ...m, Title: 'Kitchen PO' } : m), types), /was not found/);
+  assert.throws(() => inventoryDestination(menus.map(m => m.ID === 1 ? { ...m, Inactive: true } : m), types), /was not found/);
 });

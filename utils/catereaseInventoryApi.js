@@ -43,8 +43,20 @@ export function createInventoryClient({ key = process.env.CATEREASE_INVENTORY_AP
 }
 
 export function inventoryDestination(menus, types, locNum = '00001') {
-  const matches = menus.filter(m => clean(m.Title).toLowerCase() === 'occ inventory' && m.LocNum === locNum && !m.Inactive);
-  if (matches.length !== 1) throw new Error(matches.length ? 'Multiple OCC Inventory catalogs found' : 'Create an active OCC Inventory catalog in Caterease first');
+  const path = ['Pack Out New', 'Account Rep PO', 'OCCDecks'];
+  const matchesPath = (menu) => {
+    let current = menu;
+    for (let i = path.length - 1; i >= 0; i--) {
+      if (!current || current.LocNum !== locNum || current.Inactive || clean(current.Title) !== path[i]) return false;
+      if (i === 0) return current.ParentID == null || current.ParentID === 0;
+      const parents = menus.filter(m => m.LocNum === locNum && m.ID === current.ParentID);
+      if (parents.length !== 1) return false;
+      current = parents[0];
+    }
+    return false;
+  };
+  const matches = menus.filter(matchesPath);
+  if (matches.length !== 1) throw new Error(matches.length ? 'Multiple OCCDecks catalogs found at the configured path' : 'Active catalog Pack Out New → Account Rep PO → OCCDecks was not found');
   const equipment = types.filter(t => t.LocNum === locNum && t.Active && clean(t.Caption).toLowerCase() === 'equipment');
   if (equipment.length !== 1) throw new Error('A unique active Equipment item type is required');
   return { locNum, menuNum: matches[0].MenuNum, itemType: equipment[0].ID };

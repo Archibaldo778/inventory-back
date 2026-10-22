@@ -49,7 +49,7 @@ export async function runInventorySync({ client = createInventoryClient() } = {}
     const completed = new Set(existingJobs.filter(j => ['sent', 'failed'].includes(j.status)).map(j => String(j._id)));
     if (localProducts.every(p => completed.has(String(p._id)))) return;
     const destination = inventoryDestination(await client.list('menu'), await client.list('foodservtype'));
-    if (JSON.stringify(destination) !== JSON.stringify(settings.destination)) throw new Error('OCC Inventory destination changed; preview and enable again');
+    if (JSON.stringify(destination) !== JSON.stringify(settings.destination)) throw new Error('OCCDecks destination changed; preview and enable again');
     const remote = await client.list('menuitem');
     await renew();
     for (const product of localProducts) {

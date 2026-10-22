@@ -13,7 +13,9 @@ export const barDocumentExclusion = (document, event = {}) => {
 };
 export const selectBarDocumentsForEvent = (documents = [], event = {}) => {
   const seen = new Set();
-  return selectLatestDropboxFileRevisions(documents
+  // Event documents can be Mongoose subdocuments; spreading them loses their fields.
+  const sources = documents.map(d => typeof d?.toObject === 'function' ? d.toObject() : d);
+  return selectLatestDropboxFileRevisions(sources
     .filter((d) => ['po', 'kitchen_menu'].includes(d.type) && !barDocumentExclusion(d, event))
     .map((d) => ({ ...d, relativePath: d.fileName, modifiedAt: d.uploadedAt })))
     .filter((d) => { const key = d.checksum ? d.type + ':' + d.checksum : d.sourceId || d._id; if (!key) return true; if (seen.has(String(key))) return false; seen.add(String(key)); return true; });

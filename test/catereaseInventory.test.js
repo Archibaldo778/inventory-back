@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createInventoryClient, inventoryDestination, inventoryPayload, existingInventoryItem, deliverInventoryJob } from '../utils/catereaseInventoryApi.js';
+import { createInventoryClient, inventoryDestination, inventoryCategoryDestination, inventoryPayload, existingInventoryItem, deliverInventoryJob } from '../utils/catereaseInventoryApi.js';
 
 const catalogMenus = () => [
   { Title: 'Pack Out New', ID: 1, ParentID: null, LocNum: '00001' },
@@ -117,7 +117,7 @@ test('manual retry only requeues explicitly rejected jobs using a fresh key and 
   InventorySyncJob.find = filter => { assert.deepEqual(filter, { status: 'failed' }); return query([{ _id: 'p1' }]); };
   InventorySyncJob.updateOne = async (filter, update) => { assert.deepEqual(filter, { _id: 'p1', status: 'failed' }); updated = update.$set; return { modifiedCount: 1 }; };
   try {
-    assert.deepEqual(await retryRejectedInventoryJobs(), { queued: 1 });
+    assert.deepEqual(await retryRejectedInventoryJobs({ client: { list: async () => catalogMenus() } }), { queued: 1 });
     assert.equal(updated.status, 'pending'); assert.deepEqual(updated.payload, payload); assert.ok(updated.idempotencyKey);
   } finally { Product.find = saved.pf; InventorySyncSettings.findById = saved.sf; InventorySyncJob.find = saved.jf; InventorySyncJob.updateOne = saved.ju; }
 });
@@ -140,4 +140,22 @@ test('export carries the primary photo link without replacing it with a gallery 
 test('internal board tape swatches are not catalog inventory while disposable products are exportable', () => {
   assert.equal(isExportableInventoryProduct({ category: '__event_board_tape_library__:tape-swatches-colors' }), false);
   assert.equal(isExportableInventoryProduct({ ...product, inventoryType: 'disposable' }), true);
+});
+
+
+test('approved categories route only to their direct OCCDecks submenu; other categories stay at the root', () => {
+  const menus = [...catalogMenus(),
+    { ID: 4, ParentID: 3, LocNum: '00001', Title: 'Trays', MenuNum: 'trays' },
+    { ID: 5, ParentID: 3, LocNum: '00001', Title: 'Additional supplies', MenuNum: 'supplies' },
+    { ID: 6, ParentID: 3, LocNum: '00001', Title: 'Bar Equipment', MenuNum: 'bar' },
+    { ID: 7, ParentID: 99, LocNum: '00001', Title: 'Trays', MenuNum: 'wrong-parent' },
+  ];
+  for (const [category, menuNum] of [['Trays', 'trays'], ['Additional supplies', 'supplies'], ['Bar Equipment', 'bar']]) {
+    const routed = inventoryCategoryDestination({ category }, destination, menus);
+    assert.deepEqual(routed, { ...destination, menuNum });
+  }
+  assert.deepEqual(inventoryCategoryDestination({ category: 'Bowls' }, destination, menus), destination);
+  assert.throws(() => inventoryCategoryDestination({ category: 'Trays' }, destination, menus.filter(m => m.MenuNum !== 'trays')), /unique active/);
+  assert.throws(() => inventoryCategoryDestination({ category: 'Trays' }, destination, [...menus, { ...menus[3], ID: 8 }]), /unique active/);
+  assert.throws(() => inventoryCategoryDestination({ category: 'Trays' }, destination, menus.map(m => m.MenuNum === 'trays' ? { ...m, Inactive: true } : m)), /unique active/);
 });

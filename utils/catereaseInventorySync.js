@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import Product from '../models/Product.js';
 import { InventorySyncSettings, InventorySyncJob } from '../models/CatereaseInventorySync.js';
-import { createInventoryClient, inventoryDestination, inventoryPayload, deliverInventoryJob, isExportableInventoryProduct } from './catereaseInventoryApi.js';
+import { createInventoryClient, inventoryDestination, inventoryCategoryDestination, inventoryPayload, deliverInventoryJob, isExportableInventoryProduct } from './catereaseInventoryApi.js';
 
 const products = async () => (await Product.find({}).select('name inventoryCode description category image imageUrl images').sort({ _id: 1 }).lean()).filter(isExportableInventoryProduct);
 export async function previewInventorySync() {
@@ -15,7 +15,7 @@ export async function previewInventorySync() {
   return {
     enabled: Boolean(settings?.enabled), destination, error, lastError: settings?.lastError || '', lastRunAt: settings?.lastRunAt,
     products: items.map(p => {
-      try { if (destination) inventoryPayload(p, destination); else inventoryPayload(p, {}); return { id: String(p._id), name: p.name, code: p.inventoryCode }; }
+      try { if (destination) inventoryPayload(p, inventoryCategoryDestination(p, destination, menus)); else inventoryPayload(p, {}); return { id: String(p._id), name: p.name, code: p.inventoryCode }; }
       catch (e) { return { id: String(p._id), name: p.name, code: p.inventoryCode, error: e.message }; }
     }), jobs,
   };
@@ -49,7 +49,8 @@ export async function runInventorySync({ client = createInventoryClient() } = {}
     const known = new Set(existingJobs.map(j => String(j._id)));
     const completed = new Set(existingJobs.filter(j => ['sent', 'failed'].includes(j.status)).map(j => String(j._id)));
     if (localProducts.every(p => completed.has(String(p._id)))) return;
-    const destination = inventoryDestination(await client.list('menu'), await client.list('foodservtype'));
+    const menus = await client.list('menu');
+    const destination = inventoryDestination(menus, await client.list('foodservtype'));
     if (JSON.stringify(destination) !== JSON.stringify(settings.destination)) throw new Error('OCCDecks destination changed; preview and enable again');
     const remote = await client.list('menuitem');
     await renew();
@@ -57,7 +58,7 @@ export async function runInventorySync({ client = createInventoryClient() } = {}
       if (known.has(String(product._id))) continue;
       await renew();
       let payload;
-      try { payload = inventoryPayload(product, destination); }
+      try { payload = inventoryPayload(product, inventoryCategoryDestination(product, destination, menus)); }
       catch (e) {
         await InventorySyncJob.updateOne({ _id: String(product._id) }, { $setOnInsert: { status: 'failed', error: e.message, payload: { itemName: product.name, itemID: product.inventoryCode } } }, { upsert: true });
         continue;
@@ -91,16 +92,17 @@ export async function runInventorySync({ client = createInventoryClient() } = {}
   }
 }
 
-export async function retryRejectedInventoryJobs() {
+export async function retryRejectedInventoryJobs({ client = createInventoryClient() } = {}) {
   const settings = await InventorySyncSettings.findById('inventory').lean();
   if (!settings?.destination) throw Object.assign(new Error('Preview and enable a catalog first'), { statusCode: 409 });
+  const menus = await client.list('menu');
   const localProducts = new Map((await products()).map(p => [String(p._id), p]));
   let queued = 0;
   for (const job of await InventorySyncJob.find({ status: 'failed' }).lean()) {
     const product = localProducts.get(job._id);
     if (!product) continue;
     let payload;
-    try { payload = inventoryPayload(product, settings.destination); } catch { continue; }
+    try { payload = inventoryPayload(product, inventoryCategoryDestination(product, settings.destination, menus)); } catch { continue; }
     const result = await InventorySyncJob.updateOne({ _id: job._id, status: 'failed' }, {
       $set: { payload, idempotencyKey: randomUUID(), status: 'pending', error: '' },
     });

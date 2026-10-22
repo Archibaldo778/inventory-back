@@ -63,6 +63,18 @@ export function inventoryDestination(menus, types, locNum = '00001') {
   return { locNum, menuNum: matches[0].MenuNum, itemType: equipment[0].ID };
 }
 
+// Only categories explicitly enabled for submenus are routed away from the root.
+export function inventoryCategoryDestination(product, destination, menus) {
+  const category = clean(product.category).toLowerCase();
+  if (!['trays', 'additional supplies', 'bar equipment'].includes(category)) return destination;
+  const roots = menus.filter(m => m.LocNum === destination.locNum && m.MenuNum === destination.menuNum && !m.Inactive);
+  if (roots.length !== 1) throw new Error('OCCDecks root is missing or ambiguous');
+  const matches = menus.filter(m => m.LocNum === destination.locNum && m.ParentID === roots[0].ID
+    && !m.Inactive && clean(m.Title).toLowerCase() === category);
+  if (matches.length !== 1) throw new Error(`A unique active OCCDecks submenu is required for ${product.category}`);
+  return { ...destination, menuNum: matches[0].MenuNum };
+}
+
 export const isExportableInventoryProduct = (product) => !String(product?.category || '').startsWith('__event_board_tape_library__:');
 
 export function inventoryPayload(product, destination) {

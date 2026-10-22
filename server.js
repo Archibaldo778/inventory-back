@@ -1,3 +1,5 @@
+import catereaseInventoryRoutes from './routes/catereaseInventory.js';
+import { runInventorySync } from './utils/catereaseInventorySync.js';
 import { runBarDocumentRechecks } from './utils/barDocumentRecheck.js';
 import dotenv from 'dotenv';
 import express from 'express';
@@ -549,6 +551,7 @@ app.use('/api/automation-alerts', requireAuth, requireAdmin, automationAlertRout
 app.use('/api/bar-ai', requireAuth, barAiRoutes);
 app.use('/api/bar', requireAuth, barRoutes);
 app.use('/api/integrations/dropbox', dropboxIntegrationRoutes);
+app.use('/api/integrations/caterease-inventory/sync', catereaseInventoryRoutes);
 app.use('/api/integrations/caterease', catereaseIntegrationRoutes);
 app.use('/api/integrations/slack', slackIntegrationRoutes);
 
@@ -671,6 +674,11 @@ export const startServer = async () => {
   const server = app.listen(PORT, () => {
     console.log(`Сервер запущен на порту ${PORT}`);
   });
+
+  const inventorySyncTimer = setInterval(() => {
+    runInventorySync().catch(error => console.error('Caterease inventory sync failed:', error.message));
+  }, 60_000);
+  inventorySyncTimer.unref?.();
 
   let nowstaSyncTimer = null;
   let nowstaStartupTimer = null;
@@ -837,6 +845,7 @@ export const startServer = async () => {
     console.log(`${signal} received, shutting down`);
     if (nowstaStartupTimer) clearTimeout(nowstaStartupTimer);
     if (nowstaSyncTimer) clearInterval(nowstaSyncTimer);
+    clearInterval(inventorySyncTimer);
     clearTimeout(barDocumentRecheckStartup);
     clearInterval(barDocumentRecheckTimer);
     if (dropboxStartupTimer) clearTimeout(dropboxStartupTimer);

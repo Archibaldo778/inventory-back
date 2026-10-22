@@ -46,6 +46,7 @@ export async function runInventorySync({ client = createInventoryClient() } = {}
   try {
     const localProducts = await products();
     const existingJobs = await InventorySyncJob.find({}).select('_id status').lean();
+    const known = new Set(existingJobs.map(j => String(j._id)));
     const completed = new Set(existingJobs.filter(j => ['sent', 'failed'].includes(j.status)).map(j => String(j._id)));
     if (localProducts.every(p => completed.has(String(p._id)))) return;
     const destination = inventoryDestination(await client.list('menu'), await client.list('foodservtype'));
@@ -53,6 +54,7 @@ export async function runInventorySync({ client = createInventoryClient() } = {}
     const remote = await client.list('menuitem');
     await renew();
     for (const product of localProducts) {
+      if (known.has(String(product._id))) continue;
       await renew();
       let payload;
       try { payload = inventoryPayload(product, destination); }

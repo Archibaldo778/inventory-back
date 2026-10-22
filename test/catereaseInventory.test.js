@@ -72,7 +72,7 @@ test('enabling inventory export requires integration edit and sync permissions',
 
 test('worker automatically discovers a new product, saves delivery before the next run, and does not resend', async () => {
   const saved = { pf: Product.find, pi: Product.findById, sf: InventorySyncSettings.findOneAndUpdate, su: InventorySyncSettings.updateOne, jf: InventorySyncJob.find, ju: InventorySyncJob.updateOne, key: process.env.CATEREASE_INVENTORY_API_KEY };
-  let stored = null, writes = 0, reads = 0;
+  let stored = null, writes = 0, reads = 0, inserts = 0;
   const query = value => ({ select() { return this; }, sort() { return this; }, limit() { return this; }, async lean() { return value; } });
   process.env.CATEREASE_INVENTORY_API_KEY = 'test';
   Product.find = () => query([{ ...product, _id: 'p1' }]);
@@ -82,6 +82,7 @@ test('worker automatically discovers a new product, saves delivery before the ne
   InventorySyncJob.find = filter => query(!stored ? [] : !filter.status || stored.status === filter.status || filter.status?.$in?.includes(stored.status) ? [{ ...stored }] : []);
   InventorySyncJob.updateOne = async (filter, update) => {
     if (filter.status && stored?.status !== filter.status) return { modifiedCount: 0 };
+    if (update.$setOnInsert) inserts++;
     if (!stored && update.$setOnInsert) stored = { _id: 'p1', ...update.$setOnInsert };
     if (update.$set) Object.assign(stored, update.$set);
     return { modifiedCount: 1 };
@@ -97,7 +98,7 @@ test('worker automatically discovers a new product, saves delivery before the ne
     assert.equal(writes, 1); assert.equal(reads, 3);
     stored.status = 'sending';
     await runInventorySync({ client });
-    assert.equal(stored.status, 'review'); assert.equal(writes, 1);
+    assert.equal(stored.status, 'review'); assert.equal(writes, 1); assert.equal(inserts, 1);
   } finally {
     Product.find = saved.pf; Product.findById = saved.pi;
     InventorySyncSettings.findOneAndUpdate = saved.sf; InventorySyncSettings.updateOne = saved.su;

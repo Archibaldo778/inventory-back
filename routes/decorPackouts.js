@@ -1,3 +1,4 @@
+import { serializeDecorPackoutCreation } from '../utils/decorPackoutCreationQueue.js';
 import mongoose from 'mongoose';
 import { Router } from 'express';
 import Deck from '../models/Deck.js';
@@ -14,7 +15,6 @@ import {
   decorPackoutNeedsBoardSync,
   preserveUnplacedDecorPackoutItems,
   removeGeneratedDecorPackoutDuplicates,
-  selectReusableDecorPackoutDraft,
 } from '../utils/decorPackoutBoard.js';
 import { requireAuth } from '../middleware/auth.js';
 import { renderCatereaseOperationalDocx } from '../utils/catereaseOperations.js';
@@ -61,9 +61,19 @@ const resolvePackoutTarget = async (eventId, requestedDeckId, requestedPageId) =
   return { deck, page };
 };
 
-const loadPackout = (id) => (
-  isObjectId(id) ? DecorPackout.findById(id) : null
-);
+const loadPackout = async (id) => {
+  if (!isObjectId(id)) return null;
+  let packout = await DecorPackout.findById(id);
+  const eventId = String(packout?.eventId || '');
+  const seen = new Set();
+  while (packout?.supersededBy) {
+    if (seen.has(String(packout._id))) throw new Error('Invalid packout history link');
+    seen.add(String(packout._id));
+    packout = await DecorPackout.findById(packout.supersededBy);
+    if (packout && String(packout.eventId) !== eventId) throw new Error('Invalid packout history event');
+  }
+  return packout;
+};
 
 const syncPackoutPage = async (packout, pageId, items, manualQuantityOverrides) => {
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -201,6 +211,7 @@ const mergePackoutItemsFromEventBoards = async (packout) => {
   const draftPackoutRows = await DecorPackout.find({
     eventId: packout.eventId,
     status: 'draft',
+    supersededBy: null,
   }).select('_id deckId').lean();
   const draftPackoutDeckIds = new Map(draftPackoutRows.map((entry) => (
     [String(entry._id), String(entry.deckId || '')]
@@ -351,14 +362,16 @@ const mergePackoutItemsFromEventBoards = async (packout) => {
 
 router.get('/', async (req, res) => {
   try {
-    const query = {};
+    const query = { supersededBy: null };
     if (req.query.eventId) {
       if (!isObjectId(req.query.eventId)) return res.status(400).json({ error: 'Invalid event id' });
       query.eventId = req.query.eventId;
     }
     if (req.query.deckId) {
       if (!isObjectId(req.query.deckId)) return res.status(400).json({ error: 'Invalid deck id' });
-      query.deckId = req.query.deckId;
+      const deck = await Deck.findById(req.query.deckId).select('eventId').lean();
+      if (!deck || (query.eventId && String(query.eventId) !== String(deck.eventId))) return res.json([]);
+      query.eventId = deck.eventId;
     }
     if (req.query.status && ['draft', 'complete'].includes(String(req.query.status))) {
       query.status = String(req.query.status);
@@ -377,37 +390,34 @@ router.post('/', async (req, res) => {
   try {
     const eventId = String(req.body?.eventId || '').trim();
     if (!isObjectId(eventId)) return res.status(400).json({ error: 'Valid eventId is required' });
-    const event = await Event.findById(eventId);
-    if (!event) return res.status(404).json({ error: 'Event not found' });
+    return await serializeDecorPackoutCreation(eventId, async () => {
+      const event = await Event.findById(eventId);
+      if (!event) return res.status(404).json({ error: 'Event not found' });
 
-    const { deck, page } = await resolvePackoutTarget(event._id, req.body?.deckId, req.body?.pageId);
-    const existingDrafts = await DecorPackout.find({
-      eventId: event._id,
-      deckId: deck._id,
-      status: 'draft',
-    }).sort({ updatedAt: -1, createdAt: -1 });
-    const existing = selectReusableDecorPackoutDraft(existingDrafts);
-    if (existing) {
-      existing.eventTitle = event.title || existing.eventTitle || '';
-      existing.eventDate = event.date || existing.eventDate || '';
-      existing.eventClient = event.client || existing.eventClient || '';
-      if (!existing.pageId) existing.pageId = page._id;
-      await existing.save();
+      const existing = await DecorPackout.findOne({ eventId: event._id, supersededBy: null })
+        .sort({ updatedAt: -1, createdAt: -1 });
+      if (existing) {
+        existing.eventTitle = event.title || existing.eventTitle || '';
+        existing.eventDate = event.date || existing.eventDate || '';
+        existing.eventClient = event.client || existing.eventClient || '';
+        await existing.save();
+        clearCaches();
+        return res.json(existing);
+      }
+      const { deck, page } = await resolvePackoutTarget(event._id, req.body?.deckId, req.body?.pageId);
+      const packout = await DecorPackout.create({
+        eventId: event._id,
+        deckId: deck._id,
+        pageId: page._id,
+        eventTitle: event.title || '',
+        eventDate: event.date || '',
+        eventClient: event.client || '',
+        createdByUserId: String(req.auth?.userId || ''),
+        createdBy: actorName(req.auth),
+      });
       clearCaches();
-      return res.json(existing);
-    }
-    const packout = await DecorPackout.create({
-      eventId: event._id,
-      deckId: deck._id,
-      pageId: page._id,
-      eventTitle: event.title || '',
-      eventDate: event.date || '',
-      eventClient: event.client || '',
-      createdByUserId: String(req.auth?.userId || ''),
-      createdBy: actorName(req.auth),
+      return res.status(201).json(packout);
     });
-    clearCaches();
-    return res.status(201).json(packout);
   } catch (error) {
     return sendApiError(res, error, {
       context: 'Decor packout creation failed',

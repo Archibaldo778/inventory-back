@@ -28,6 +28,8 @@ const decorPackoutSchema = new mongoose.Schema(
     eventId: { type: mongoose.Schema.Types.ObjectId, ref: 'Event', required: true, index: true },
     deckId: { type: mongoose.Schema.Types.ObjectId, ref: 'Deck', required: true, index: true },
     pageId: { type: mongoose.Schema.Types.ObjectId, ref: 'Page', required: true },
+    supersededBy: { type: mongoose.Schema.Types.ObjectId, ref: 'DecorPackout', default: null },
+    supersededAt: { type: Date, default: null },
     eventTitle: { type: String, trim: true, default: '' },
     eventDate: { type: String, trim: true, default: '' },
     eventClient: { type: String, trim: true, default: '' },

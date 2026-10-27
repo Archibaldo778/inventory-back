@@ -89,7 +89,7 @@ export function inventoryCategoryDestination(product, destination, menus) {
     'Beverage Tubs', 'Bowls', 'Candle Holders Votives', 'Cutting Board', 'Decor',
     'Inserts', 'Kitchen Equipment', 'Knives', 'Plates', 'Platter',
     'Electrical Equipment & Power Supplies', 'Risers', 'Side Serveware', 'Tabletop',
-    'Staff Items', 'Disposable', 'Caviar Servers',
+    'Staff Items', 'Disposable', 'Caviar Servers', 'Cake Stands',
   ];
   const target = category === 'candle holders / votives' ? 'candle holders votives' : category;
   if (!submenuTitles.some(title => title.toLowerCase() === target)) return destination;

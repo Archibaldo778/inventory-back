@@ -171,7 +171,7 @@ test('approved categories route only to their direct OCCDecks submenu; other cat
 });
 
  test('all configured category submenus route by exact title with the approved Votives alias', () => {
-  const titles = ['Staff Items', 'Disposable', 'Caviar Servers', 'Basket', 'Beverage Serveware', 'Beverage Tubs', 'Bowls', 'Candle Holders Votives', 'Cutting Board', 'Decor', 'Inserts', 'Kitchen Equipment', 'Knives', 'Plates', 'Platter', 'Electrical Equipment & Power Supplies', 'Risers', 'Side Serveware', 'Tabletop'];
+  const titles = ['Cake Stands', 'Staff Items', 'Disposable', 'Caviar Servers', 'Basket', 'Beverage Serveware', 'Beverage Tubs', 'Bowls', 'Candle Holders Votives', 'Cutting Board', 'Decor', 'Inserts', 'Kitchen Equipment', 'Knives', 'Plates', 'Platter', 'Electrical Equipment & Power Supplies', 'Risers', 'Side Serveware', 'Tabletop'];
   const menus = [...catalogMenus(), ...titles.map((Title, i) => ({ ID: i + 10, ParentID: 3, LocNum: '00001', Title, MenuNum: `sub-${i}` }))];
   for (const [i, title] of titles.entries()) {
     const category = title === 'Candle Holders Votives' ? 'Candle Holders / Votives' : title;

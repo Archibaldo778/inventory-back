@@ -4,7 +4,7 @@ import EventReport from '../models/EventReport.js';
 import EventReportReminder from '../models/EventReportReminder.js';
 import NowstaScheduleEntry from '../models/NowstaScheduleEntry.js';
 import User from '../models/Users.js';
-import { captainAssignedShifts, isCaptainPosition } from './captainEventDuties.js';
+import { captainAssignedShifts, isReportLeadPosition } from './captainEventDuties.js';
 import { buildActiveDashboardBarEventQuery } from './barDashboardSync.js';
 import { captainReportIdentity, openCaptainReport } from './captainReports.js';
 import { eventReportUrl } from './slackEventChannels.js';
@@ -37,7 +37,7 @@ export const captainReportReminderStage = (endsAt, now = new Date()) => {
 export const assignedReportCaptains = (schedule, users) => users.filter((user) => (
   user.isActive !== false && ['captain', 'bar captain'].includes(user.role)
   && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(user.email || '')
-  && captainAssignedShifts(schedule, user).some((shift) => isCaptainPosition(shift.position))
+  && captainAssignedShifts(schedule, user).some((shift) => isReportLeadPosition(shift.position))
 ));
 
 export const captainReminderEmail = ({ event, user, report, endsAt, hours }) => {

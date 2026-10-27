@@ -222,9 +222,9 @@ const serializeBarEvent = (source, { includeFinancials = false } = {}) => {
   const booking = captainBookings.get(source);
   if (booking) {
     event.bookingPositions = booking.positions;
-    event.canUseCaptainReport = booking.captainAssigned;
+    event.canUseCaptainReport = Boolean(booking.reportAssigned);
     event.canOperateBar = booking.canOperateBar;
-    event.reportRequired = event.reportRequired && booking.reportRequired !== false && booking.captainAssigned;
+    event.reportRequired = event.reportRequired && booking.reportRequired !== false && Boolean(booking.reportAssigned);
   }
   const totals = calculateBarEventAccounting(event);
   const captainSyncAudit = [...(Array.isArray(event.audit) ? event.audit : [])].reverse().find((entry) => (
@@ -372,7 +372,7 @@ const loadEvent = async (req, res) => {
   }
   if (isCaptain(req.auth) && isObjectId(event.linkedEventId)) {
     const dashboardEvent = await Event.findById(event.linkedEventId).select('title meta.nowsta meta.captainReportDisabled').lean();
-    rememberCaptainBooking(event, dashboardEvent ? await loadCaptainEventDuties(dashboardEvent, req.auth) : { captainAssigned: false, positions: [] }, req.auth);
+    rememberCaptainBooking(event, dashboardEvent ? await loadCaptainEventDuties(dashboardEvent, req.auth) : { captainAssigned: false, reportAssigned: false, positions: [] }, req.auth);
   }
   return event;
 };
@@ -384,7 +384,7 @@ const attachCaptainBookings = async (events, auth) => {
   const dashboardEvents = await Event.find({ _id: { $in: ids } }).select('title meta.nowsta meta.captainReportDisabled').lean();
   const bookings = await loadCaptainEventDutiesBatch(dashboardEvents, auth);
   for (const event of events) {
-    if (isObjectId(event.linkedEventId)) rememberCaptainBooking(event, bookings.get(String(event.linkedEventId)) || { captainAssigned: false, positions: [] }, auth);
+    if (isObjectId(event.linkedEventId)) rememberCaptainBooking(event, bookings.get(String(event.linkedEventId)) || { captainAssigned: false, reportAssigned: false, positions: [] }, auth);
   }
 };
 
@@ -1343,8 +1343,8 @@ router.post('/events/:id/captain-report-link', async (req, res) => {
     if (!isBarManager(req.auth) && !eventAssignedToAuth(barEvent, req.auth)) {
       return res.status(403).json({ message: 'You can only open a report for an event assigned to your account' });
     }
-    if (!isBarManager(req.auth) && captainBookings.get(barEvent)?.captainAssigned === false) {
-      return res.status(403).json({ message: 'A confirmed Captain booking is required for this event' });
+    if (!isBarManager(req.auth) && captainBookings.get(barEvent)?.reportAssigned === false) {
+      return res.status(403).json({ message: 'A confirmed Captain or Maitre D booking is required for this event' });
     }
     if (!isObjectId(barEvent.linkedEventId)) {
       return res.status(409).json({ message: 'This bar report is not linked to a Dashboard event' });

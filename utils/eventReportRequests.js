@@ -2,7 +2,7 @@ import User from '../models/Users.js';
 import NowstaScheduleEntry from '../models/NowstaScheduleEntry.js';
 import EventReport from '../models/EventReport.js';
 import EventReportReminder from '../models/EventReportReminder.js';
-import { captainAssignedShifts, isCaptainPosition } from './captainEventDuties.js';
+import { captainAssignedShifts, isReportLeadPosition } from './captainEventDuties.js';
 import { captainReportIdentity } from './captainReports.js';
 import { CAPTAIN_REPORT_REMINDERS_START_DATE, canManuallyRemindCaptain } from './captainReportReminders.js';
 import { requiresCaptainReport } from './eventReportRequirement.js';
@@ -40,7 +40,7 @@ export const buildEventReportRequests = ({ event, schedule, users, reports }) =>
     if (!assigned.length || reports.some((report) => matchesUser(report, user))) continue;
     let reason = '';
     if (!requiresCaptainReport(event, schedule)) reason = 'Captain’s Report is optional. No reminders will be sent.';
-    else if (!assigned.some(isCaptainPosition)) reason = 'Not booked as a Captain on this event.';
+    else if (!assigned.some(isReportLeadPosition)) reason = 'Not booked as a Captain or Maitre D on this event.';
     items.push({
       id: `planned:${user._id}`, userId: String(user._id), eventId: String(event._id),
       eventTitle: event.title, eventDate: event.date, reportType: 'captain',

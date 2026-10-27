@@ -5,6 +5,8 @@ import { nowstaPersonKeys } from './nowstaCaptainAssignments.js';
 
 export const isCaptainPosition = (position) => /\bcaptain\b/i.test(String(position || '').replace(/[_-]+/g, ' '));
 
+export const isReportLeadPosition = (position) => isCaptainPosition(position) || /\bmaitre[\s_-]*d\b/i.test(String(position || '').normalize('NFD').replace(/[\u0300-\u036f]/g, ''));
+
 export const captainAssignedShifts = (schedule, user) => {
   if (schedule?.archived || schedule?.excluded) return [];
   const email = String(user?.email || '').trim().toLowerCase();
@@ -24,6 +26,7 @@ export const captainEventDuties = ({ event, schedule, user }) => {
   return {
     reportRequired: requiresCaptainReport(event, schedule),
     captainAssigned: !hasBooking || shifts.some((shift) => isCaptainPosition(shift.position)),
+    reportAssigned: !hasBooking || shifts.some((shift) => isReportLeadPosition(shift.position)),
     positions: [...new Set(shifts.map((shift) => shift.position).filter(Boolean))],
   };
 };
@@ -53,5 +56,5 @@ export const reportCaptainStillAssigned = async (report, event) => {
   const user = accountId ? await User.findById(accountId).select('username nowstaName email isActive').lean()
     : { username: report.reporterName, email: report.reporterEmail };
   if (!user || user.isActive === false) return false;
-  return (await loadCaptainEventDuties(event, user)).captainAssigned;
+  return (await loadCaptainEventDuties(event, user)).reportAssigned;
 };

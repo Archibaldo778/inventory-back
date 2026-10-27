@@ -36,7 +36,7 @@ test('event duties use the confirmed booking position, not the account role or a
   }
   const mixed = schedule('Bartender');
   mixed.shifts.push({ position: 'Captain', workers: [{ ...worker, email: 'other@example.com' }, { ...worker, status: 'declined' }] });
-  assert.deepEqual(captainEventDuties({ event, schedule: mixed, user }), { reportRequired: true, captainAssigned: false, positions: ['Bartender'] });
+  assert.deepEqual(captainEventDuties({ event, schedule: mixed, user }), { reportRequired: true, captainAssigned: false, reportAssigned: false, positions: ['Bartender'] });
   mixed.shifts.push({ position: 'Captain', workers: [{ ...worker, status: 'assigned' }] });
   assert.equal(captainEventDuties({ event, schedule: mixed, user }).captainAssigned, true);
   assert.equal(captainEventDuties({ event, schedule: { ...mixed, archived: true }, user }).captainAssigned, false);
@@ -76,6 +76,12 @@ test('a bartender booking stays visible but cannot open a captain report, share 
   }
   assert.equal(canOperateEvent(barEvent, user), false);
   assert.equal(canOperateEvent(barEvent, { role: 'bar admin' }), true);
+  booking = schedule('Maître d’');
+  const maitre = response();
+  await handler(router, '/events/:id', 'get')(req, maitre);
+  assert.equal(maitre.body.canUseCaptainReport, true);
+  assert.equal(maitre.body.canOperateBar, false);
+  assert.equal(canOperateEvent(barEvent, user), false);
   booking = schedule('Captain');
   const captain = response();
   await handler(router, '/events/:id', 'get')(req, captain);
@@ -135,4 +141,16 @@ test('manual report opt-out keeps optional captain feedback and bar return dutie
   assert.equal(res.body.reportRequired, false);
   assert.equal(res.body.canUseCaptainReport, true);
   assert.equal(res.body.canOperateBar, true);
+});
+
+ test('confirmed Maitre D bookings can complete reports without gaining captain bar permissions', () => {
+  for (const position of ["Maitre D", "Maître d’", "MAITRE-D", "Maitre D - Working"]) {
+    const booking = schedule(position);
+    const duties = captainEventDuties({ event, schedule: booking, user });
+    assert.equal(duties.reportAssigned, true, position);
+    assert.equal(duties.captainAssigned, false, position);
+    assert.equal(assignedReportCaptains(booking, [user]).length, 1);
+    booking.shifts[0].workers = [{ ...worker, status: 'declined' }];
+    assert.equal(captainEventDuties({ event, schedule: booking, user }).reportAssigned, false);
+  }
 });

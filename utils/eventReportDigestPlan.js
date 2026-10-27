@@ -1,6 +1,6 @@
 // Planning only. This module performs no API calls and sends no email.
 import crypto from 'node:crypto';
-import { isCaptainPosition } from './captainEventDuties.js';
+import { isReportLeadPosition } from './captainEventDuties.js';
 import { kitchenReportPosition } from './eventStaffAccess.js';
 import { workerMatchesStaff } from './staffPortal.js';
 import { normalizeNowstaPersonName } from './nowstaCaptainAssignments.js';
@@ -18,7 +18,7 @@ export const eventDigestReadiness = ({ event, schedule, users = [], reports = []
   const requirements = new Map();
   if (hasNowsta) {
     for (const shift of schedule.shifts) {
-      const type = isCaptainPosition(shift.position) ? 'captain' : kitchenReportPosition(null, [shift]) ? 'kitchen' : '';
+      const type = isReportLeadPosition(shift.position) ? 'captain' : kitchenReportPosition(null, [shift]) ? 'kitchen' : '';
       if (!type) continue;
       for (const worker of shift.workers || []) {
         if (!['confirmed', 'assigned'].includes(email(worker.status)) || worker.removed_at) continue;

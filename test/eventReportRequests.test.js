@@ -79,7 +79,7 @@ test('every Captain position requires a report on either side of the reminder ro
   }
   const [waiter] = buildEventReportRequests({ event: { ...event, date: '2026-09-30' }, schedule: { shifts: [{ position: 'VIP Waiter', workers: [{ email: user.email, status: 'confirmed' }] }] }, users: [user], reports: [] });
   assert.equal(waiter.status, 'not_required');
-  assert.equal(waiter.requirementReason, 'Not booked as a Captain on this event.');
+  assert.equal(waiter.requirementReason, 'Not booked as a Captain or Maitre D on this event.');
 });
 
 test('opening/refreshing reports only reads assignments and cannot create reports or send mail', async (t) => {

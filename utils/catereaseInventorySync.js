@@ -1,14 +1,15 @@
+import { inventoryStockPayload, syncInventoryStock } from './catereaseInventoryStock.js';
 import { randomUUID } from 'node:crypto';
 import Product from '../models/Product.js';
 import { InventorySyncSettings, InventorySyncJob } from '../models/CatereaseInventorySync.js';
 import { createInventoryClient, inventoryDestination, inventoryCategoryDestination, inventoryPayload, deliverInventoryJob, isExportableInventoryProduct } from './catereaseInventoryApi.js';
 
-const products = async () => (await Product.find({}).select('name inventoryCode description category image imageUrl images').sort({ _id: 1 }).lean()).filter(isExportableInventoryProduct);
+const products = async () => (await Product.find({}).select('name inventoryCode description category image imageUrl images quantity').sort({ _id: 1 }).lean()).filter(isExportableInventoryProduct);
 export async function previewInventorySync() {
   const client = createInventoryClient();
   const [menus, types, items, settings, jobs] = await Promise.all([
     client.list('menu'), client.list('foodservtype'), products(),
-    InventorySyncSettings.findById('inventory').lean(), InventorySyncJob.find({}).select('status itemNum error payload.itemID payload.itemName').lean(),
+    InventorySyncSettings.findById('inventory').lean(), InventorySyncJob.find({}).select('status itemNum error stockError stockQuantity payload.itemID payload.itemName').lean(),
   ]);
   let destination = null, error = '';
   try { destination = inventoryDestination(menus, types); } catch (e) { error = e.message; }
@@ -31,7 +32,7 @@ export async function enableInventorySync(expectedDestination, userId) {
   }, { upsert: true });
 }
 
-export async function runInventorySync({ client = createInventoryClient() } = {}) {
+export async function runInventorySync({ client = createInventoryClient(), stockOnly = false } = {}) {
   if (!process.env.CATEREASE_INVENTORY_API_KEY) return;
   const lease = randomUUID();
   const settings = await InventorySyncSettings.findOneAndUpdate({
@@ -45,7 +46,26 @@ export async function runInventorySync({ client = createInventoryClient() } = {}
   };
   try {
     const localProducts = await products();
-    const existingJobs = await InventorySyncJob.find({}).select('_id status').lean();
+    const existingJobs = await InventorySyncJob.find({}).select('_id status itemNum payload stockQuantity stockCheckedAt stockError').lean();
+    const stockJobs = existingJobs.filter(j => j.status === 'sent' && j.itemNum)
+      .sort((a, b) => new Date(a.stockCheckedAt || 0) - new Date(b.stockCheckedAt || 0));
+    let stockCount = 0;
+    for (const job of stockJobs) {
+      const product = localProducts.find(p => String(p._id) === String(job._id));
+      if (!product) continue;
+      try {
+        if (job.stockQuantity === inventoryStockPayload(product).invInstock && !job.stockError) continue;
+      } catch { /* Record invalid quantities without writing zero. */ }
+      if (stockCount++ >= 40) break;
+      await renew();
+      try {
+        const stockQuantity = await syncInventoryStock(product, job, client);
+        await InventorySyncJob.updateOne({ _id: job._id, status: 'sent', itemNum: job.itemNum }, { $set: { stockQuantity, stockError: '', stockCheckedAt: new Date() } });
+      } catch (error) {
+        await InventorySyncJob.updateOne({ _id: job._id, status: 'sent', itemNum: job.itemNum }, { $set: { stockError: error.message, stockCheckedAt: new Date() } });
+      }
+    }
+    if (stockOnly) return;
     const known = new Set(existingJobs.map(j => String(j._id)));
     const completed = new Set(existingJobs.filter(j => ['sent', 'failed'].includes(j.status)).map(j => String(j._id)));
     if (localProducts.every(p => completed.has(String(p._id)))) return;

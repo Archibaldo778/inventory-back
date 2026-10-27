@@ -1,8 +1,9 @@
+import { inventoryStockPayload } from './catereaseInventoryStock.js';
 import { normalizeProductImages } from './productImages.js';
 const clean = (value) => String(value ?? '').trim();
 
 export function createInventoryClient({ key = process.env.CATEREASE_INVENTORY_API_KEY, fetchImpl = fetch } = {}) {
-  const request = async (path, options = {}) => {
+  const request = async (path, options = {}, raw = false) => {
     if (!clean(key)) throw new Error('CATEREASE_INVENTORY_API_KEY is not configured');
     const response = await fetchImpl(`https://caterease.app${path}`, {
       ...options,
@@ -14,7 +15,7 @@ export function createInventoryClient({ key = process.env.CATEREASE_INVENTORY_AP
       try { code = clean((await response.json())?.error?.code); } catch { /* empty response */ }
       throw Object.assign(new Error(`Caterease HTTP ${response.status}${code ? ` (${code})` : ''}`), { statusCode: response.status });
     }
-    return response.json();
+    return raw ? response : response.json();
   };
   return {
     async list(resource, locNum = '00001') {
@@ -33,6 +34,23 @@ export function createInventoryClient({ key = process.env.CATEREASE_INVENTORY_AP
         cursors.add(cursor);
       } while (cursor);
       return rows;
+    },
+    async readStock(itemNum, locNum) {
+      const params = new URLSearchParams({ locNum, itemId: itemNum, fields: 'ItemNum,ItemID,LocNum,MenuNum,Inactive,InvItem,InvInstock', limit: '2' });
+      const page = await request(`/v1/menuitem?${params}`);
+      if (!Array.isArray(page.data) || page.data.length !== 1 || page.pagination?.hasMore) throw new Error('Stock item missing or ambiguous');
+      return page.data[0];
+    },
+    async patchStock(itemNum, locNum, payload) {
+      const path = `/v1/menu-items/${encodeURIComponent(itemNum)}`;
+      const query = `?${new URLSearchParams({ locNum })}`;
+      const version = await request(`${path}/version${query}`, {}, true);
+      const etag = version.headers.get('etag');
+      if (!etag) throw new Error('Caterease stock update requires an ETag');
+      return request(`${path}${query}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json', 'If-Match': etag },
+        body: JSON.stringify(payload),
+      });
     },
     create(payload, key) {
       return request('/v1/menu-items', {
@@ -82,6 +100,7 @@ export function inventoryPayload(product, destination) {
   const photo = normalizeProductImages(product)[0];
   return {
     ...destination,
+    ...inventoryStockPayload(product),
     ...(photo && /^https:\/\//i.test(photo) ? { url: photo } : {}),
     itemName: product.name,
     itemID: clean(product.inventoryCode).toUpperCase(),

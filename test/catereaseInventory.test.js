@@ -14,7 +14,7 @@ const job = { payload, status: 'pending', idempotencyKey: 'stable-key' };
 const remote = { LocNum: '00001', MenuNum: 'occ-menu', ItemID: 'OCC00764', ItemName: product.name, ItemNum: 'remote-1' };
 
 test('inventory export preserves the exact name and OCC code without inventing prices or exporting stock as servings', () => {
-  assert.deepEqual(payload, { ...destination, itemName: product.name, itemID: 'OCC00764', description: 'Silver', category: 'Glassware', inactive: false });
+  assert.deepEqual(payload, { ...destination, itemName: product.name, itemID: 'OCC00764', description: 'Silver', category: 'Glassware', inactive: false, invItem: true, invInstock: 200 });
   assert.throws(() => inventoryPayload({ name: 'No code' }, destination), /OCC inventory code/);
 });
 test('destination is the unique active OCCDecks catalog at the full path at our location and Equipment type', () => {
@@ -72,10 +72,11 @@ test('enabling inventory export requires integration edit and sync permissions',
 
 test('worker automatically discovers a new product, saves delivery before the next run, and does not resend', async () => {
   const saved = { pf: Product.find, pi: Product.findById, sf: InventorySyncSettings.findOneAndUpdate, su: InventorySyncSettings.updateOne, jf: InventorySyncJob.find, ju: InventorySyncJob.updateOne, key: process.env.CATEREASE_INVENTORY_API_KEY };
-  let stored = null, writes = 0, reads = 0, inserts = 0;
+  let stored = null, writes = 0, reads = 0, inserts = 0, stockWrites = 0;
+  let sourceQuantity = 200, remoteQuantity = 200;
   const query = value => ({ select() { return this; }, sort() { return this; }, limit() { return this; }, async lean() { return value; } });
   process.env.CATEREASE_INVENTORY_API_KEY = 'test';
-  Product.find = () => query([{ ...product, _id: 'p1' }]);
+  Product.find = () => query([{ ...product, quantity: sourceQuantity, _id: 'p1' }]);
   Product.findById = () => query({ _id: 'p1' });
   InventorySyncSettings.findOneAndUpdate = () => query({ destination });
   InventorySyncSettings.updateOne = async () => ({ matchedCount: 1 });
@@ -88,6 +89,8 @@ test('worker automatically discovers a new product, saves delivery before the ne
     return { modifiedCount: 1 };
   };
   const client = {
+    async readStock() { return { ...remote, ItemNum: 'created', InvItem: true, InvInstock: remoteQuantity }; },
+    async patchStock(id, loc, body) { stockWrites++; remoteQuantity = body.invInstock; },
     async list(resource) { reads++; return resource === 'menu' ? catalogMenus() : resource === 'foodservtype' ? [{ Caption: 'Equipment', LocNum: '00001', ID: 4, Active: true }] : []; },
     async create() { writes++; assert.equal(stored.status, 'sending'); return { itemNum: 'created' }; },
   };
@@ -96,6 +99,13 @@ test('worker automatically discovers a new product, saves delivery before the ne
     assert.equal(stored.status, 'sent'); assert.equal(stored.itemNum, 'created');
     await runInventorySync({ client });
     assert.equal(writes, 1); assert.equal(reads, 3);
+    assert.equal(stored.stockQuantity, 200);
+    sourceQuantity = 0;
+    await runInventorySync({ client });
+    assert.equal(stored.stockQuantity, 0);
+    await runInventorySync({ client });
+    assert.equal(stockWrites, 1);
+    assert.equal(writes, 1);
     stored.status = 'sending';
     await runInventorySync({ client });
     assert.equal(stored.status, 'review'); assert.equal(writes, 1); assert.equal(inserts, 1);

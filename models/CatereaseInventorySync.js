@@ -17,6 +17,9 @@ const job = new mongoose.Schema({
   idempotencyKey: String,
   status: { type: String, enum: ['pending', 'sending', 'sent', 'failed', 'review'], default: 'pending' },
   itemNum: String,
+  stockQuantity: Number,
+  stockCheckedAt: Date,
+  stockError: String,
   error: String,
 }, { timestamps: true });
 export const InventorySyncSettings = mongoose.model('CatereaseInventorySettings', settings);

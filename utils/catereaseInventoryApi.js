@@ -84,11 +84,18 @@ export function inventoryDestination(menus, types, locNum = '00001') {
 // Only categories explicitly enabled for submenus are routed away from the root.
 export function inventoryCategoryDestination(product, destination, menus) {
   const category = clean(product.category).toLowerCase();
-  if (!['trays', 'additional supplies', 'bar equipment'].includes(category)) return destination;
+  const submenuTitles = [
+    'Trays', 'Additional supplies', 'Bar Equipment', 'Basket', 'Beverage Serveware',
+    'Beverage Tubs', 'Bowls', 'Candle Holders Votives', 'Cutting Board', 'Decor',
+    'Inserts', 'Kitchen Equipment', 'Knives', 'Plates', 'Platter',
+    'Electrical Equipment & Power Supplies', 'Risers', 'Side Serveware', 'Tabletop',
+  ];
+  const target = category === 'candle holders / votives' ? 'candle holders votives' : category;
+  if (!submenuTitles.some(title => title.toLowerCase() === target)) return destination;
   const roots = menus.filter(m => m.LocNum === destination.locNum && m.MenuNum === destination.menuNum && !m.Inactive);
   if (roots.length !== 1) throw new Error('OCCDecks root is missing or ambiguous');
   const matches = menus.filter(m => m.LocNum === destination.locNum && m.ParentID === roots[0].ID
-    && !m.Inactive && clean(m.Title).toLowerCase() === category);
+    && !m.Inactive && clean(m.Title).toLowerCase() === target);
   if (matches.length !== 1) throw new Error(`A unique active OCCDecks submenu is required for ${product.category}`);
   return { ...destination, menuNum: matches[0].MenuNum };
 }

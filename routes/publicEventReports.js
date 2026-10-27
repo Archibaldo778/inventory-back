@@ -1,3 +1,4 @@
+import { reportDraftGuard } from '../utils/eventReportDraft.js';
 import { Router } from 'express';
 import mongoose from 'mongoose';
 import Event from '../models/Event.js';
@@ -38,6 +39,7 @@ const publicReport = (report) => ({
   eventEndsAt: report.eventEndsAt || null,
   position: report.position, salesRep: report.salesRep, reportType: report.reportType || 'captain',
   status: report.status, submittedAt: report.submittedAt, answers: report.answers || {}, emailDelivery: report.emailDelivery,
+  draftRevision: report.draftRevision || 0, draftSavedAt: report.draftSavedAt || null,
   templateSnapshot: reportTemplate(report), photos: report.photos || [],
 });
 
@@ -58,6 +60,32 @@ router.get('/:eventId', limiter, async (req, res) => {
   }
 });
 
+router.post('/:eventId/draft', limiter, async (req, res) => {
+  try {
+    const access = loadAccess(req, res);
+    if (!access) return undefined;
+    let report = await EventReport.findOne({ eventId: req.params.eventId, slackUserId: clean(access.subjectId, 100) });
+    if (!report) return res.status(404).json({ message: 'Event report was not found' });
+    await validateStaffKitchenReportAccess(access, report);
+    if (report.status !== 'pending') return res.status(409).json({ message: 'This report was submitted or cancelled. Reload the page.' });
+    const event = await Event.findById(report.eventId).select(`title ${EVENT_REPORT_CONTEXT_SELECT}`).lean();
+    if (report.reportType === 'kitchen' && !requiresReportType(report.reportType, event || { title: report.eventTitle })) return res.status(403).json({ message: 'No report is required for this event' });
+    if (!await reportCaptainStillAssigned(report, event)) return res.status(403).json({ message: 'No report is available for your booking on this event' });
+    const templateSnapshot = reportTemplate(report);
+    if ((req.body?.templateRevision ?? 0) !== templateSnapshot.revision) return res.status(409).json({ message: 'The report form has changed. Reload before saving.' });
+    const revisionGuard = reportDraftGuard(report, req.body?.expectedDraftRevision);
+    const answers = captainTemplateAnswers(templateSnapshot, req.body?.answers, { draft: true });
+    const templateGuard = report.templateSnapshot ? { 'templateSnapshot.revision': templateSnapshot.revision } : { templateSnapshot: null };
+    report = await EventReport.findOneAndUpdate({ _id: report._id, status: 'pending', ...templateGuard, ...revisionGuard }, {
+      $set: { answers, templateSnapshot, draftSavedAt: new Date() }, $inc: { draftRevision: 1 },
+    }, { new: true, runValidators: true });
+    if (!report) return res.status(409).json({ message: 'This report changed. Reload before saving.' });
+    return res.json({ ok: true, report: publicReport(report) });
+  } catch (error) {
+    return sendApiError(res, error, { context: 'Report draft save failed', fallbackMessage: 'Could not save the draft' });
+  }
+});
+
 router.post('/:eventId', limiter, async (req, res) => {
   try {
     const access = loadAccess(req, res);
@@ -72,6 +100,7 @@ router.post('/:eventId', limiter, async (req, res) => {
     if (!await reportCaptainStillAssigned(report, event)) return res.status(403).json({ message: 'No Captain report is required for your booking on this event' });
     const templateSnapshot = reportTemplate(report);
     if ((req.body?.templateRevision ?? 0) !== templateSnapshot.revision) return res.status(409).json({ message: 'The report form has changed. Reload it before submitting.' });
+    const revisionGuard = reportDraftGuard(report, req.body?.expectedDraftRevision);
     const answers = captainTemplateAnswers(templateSnapshot, req.body?.answers);
     const photoFields = req.body?.photos?.length ? await validateReportPhotos(req.body.photos) : {};
     if (req.body?.photos?.length && report.photos?.some((photo) => photo.url)) return res.status(409).json({ message: 'Reload the report to preserve uploaded photos' });
@@ -79,7 +108,7 @@ router.post('/:eventId', limiter, async (req, res) => {
     // Cancellation and submission compete for the same pending state. A stale
     // form cannot revive a cancelled request or send a second submission email.
     const templateGuard = report.templateSnapshot ? { 'templateSnapshot.revision': templateSnapshot.revision } : { templateSnapshot: null };
-    report = await EventReport.findOneAndUpdate({ _id: report._id, status: 'pending', ...templateGuard }, { $set: {
+    report = await EventReport.findOneAndUpdate({ _id: report._id, status: 'pending', ...templateGuard, ...revisionGuard }, { $set: {
       ...kitchenIdentity, ...photoFields,
       salesRep: resolveReportSalesRep(report, event), answers, status: 'submitted', submittedAt: new Date(), digestRequested: requiresReportType(report.reportType, event),
       templateSnapshot,

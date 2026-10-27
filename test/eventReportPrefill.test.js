@@ -129,7 +129,7 @@ test('submitting a previously empty report saves its rep and sends to that repâ€
   t.mock.method(EventReport, 'findOne', async () => report);
   let sent;
   t.mock.method(EventReport, 'findOneAndUpdate', async (filter, update) => {
-    assert.deepEqual(filter, { _id: reportId, status: 'pending', templateSnapshot: null });
+    assert.deepEqual(filter, { _id: reportId, status: 'pending', templateSnapshot: null, $or: [{ draftRevision: 0 }, { draftRevision: { $exists: false } }] });
     Object.assign(report, update.$set); return report;
   });
   t.mock.method(globalThis, 'fetch', async (_url, options) => {

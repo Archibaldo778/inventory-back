@@ -66,12 +66,12 @@ export const pinReportTemplate = async (report, { Reports = EventReport, loadTem
 };
 export const pinCaptainTemplate = (report, options) => report.reportType === 'kitchen' ? report : pinReportTemplate(report, options);
 
-export const captainTemplateAnswers = (template, input = {}) => {
+export const captainTemplateAnswers = (template, input = {}, { draft = false } = {}) => {
   const values = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
   const answers = {};
   for (const field of templateFields(template)) {
     const value = field.type === 'checkbox' ? values[field.key] === true : String(values[field.key] ?? '').trim().slice(0, 5000);
-    if (field.required && (field.type === 'checkbox' ? !value : !value.length)) throw createApiError(400, `Complete the required question: ${field.label}`);
+    if (!draft && field.required && (field.type === 'checkbox' ? !value : !value.length)) throw createApiError(400, `Complete the required question: ${field.label}`);
     if (field.type === 'choice' && value && !field.options.includes(value)) throw createApiError(400, `Choose a listed answer: ${field.label}`);
     answers[field.key] = value;
   }

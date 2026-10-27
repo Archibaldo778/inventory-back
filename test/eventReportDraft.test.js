@@ -1,0 +1,41 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import router from '../routes/publicEventReports.js';
+import EventReport from '../models/EventReport.js';
+import Event from '../models/Event.js';
+import { issueEventGuestAccess } from '../utils/eventGuestAccess.js';
+import { captainTemplateAnswers } from '../utils/captainReportTemplate.js';
+import { reportDraftGuard } from '../utils/eventReportDraft.js';
+const handler = (path, method) => router.stack.find(l => l.route?.path === path && l.route.methods[method]).route.stack.at(-1).handle;
+const response = () => ({ code: 200, status(code) { this.code = code; return this; }, json(body) { this.body = body; return this; } });
+const template = { revision: 3, sections: [{ key: 'notes', fields: [{ key: 'custom_notes', type: 'textarea', required: true, label: 'Notes' }] }] };
+test('partial answers can be saved but not submitted; stale or malformed revisions cannot overwrite them', () => {
+  assert.deepEqual(captainTemplateAnswers(template, {}, { draft: true }), { custom_notes: '' });
+  assert.throws(() => captainTemplateAnswers(template, {}));
+  for (const revision of [0, -1, '1', null]) assert.throws(() => reportDraftGuard({ draftRevision: 1 }, revision));
+  assert.deepEqual(reportDraftGuard({ draftRevision: 1 }, 1), { draftRevision: 1 });
+});
+for (const reportType of ['captain', 'kitchen']) test(`${reportType} draft survives reopening without submission, photo replacement or notifications`, async t => {
+  const old = process.env.JWT_SECRET; process.env.JWT_SECRET = 'draft-test-secret';
+  t.after(() => { if (old === undefined) delete process.env.JWT_SECRET; else process.env.JWT_SECRET = old; });
+  const eventId = '507f1f77bcf86cd799439011';
+  const report = { _id: eventId, eventId, slackUserId: 'worker', reportType, status: 'pending', templateSnapshot: template, photos: [{ url: 'photo.jpg' }], nextReminderAt: 'tomorrow', toObject() { return { ...this }; } };
+  t.mock.method(EventReport, 'findOne', async () => report);
+  t.mock.method(Event, 'findById', () => ({ select: () => ({ lean: async () => ({ title: 'Dinner' }) }) }));
+  t.mock.method(globalThis, 'fetch', () => assert.fail('Draft must not send notifications'));
+  let writes = 0;
+  t.mock.method(EventReport, 'findOneAndUpdate', async (filter, update) => {
+    writes++; assert.equal(filter.status, 'pending'); assert.equal(update.$set.status, undefined);
+    assert.equal(update.$set.photos, undefined); assert.equal(update.$set.nextReminderAt, undefined);
+    Object.assign(report, update.$set); report.draftRevision = (report.draftRevision || 0) + update.$inc.draftRevision; return report;
+  });
+  const accessToken = issueEventGuestAccess({ eventIds: [eventId], capability: 'event:report', subjectId: 'worker' });
+  const req = { params: { eventId }, body: { accessToken, templateRevision: 3, answers: {} } };
+  const saved = response(); await handler('/:eventId/draft', 'post')(req, saved);
+  assert.equal(saved.code, 200); assert.equal(saved.body.report.draftRevision, 1);
+  assert.equal(report.status, 'pending'); assert.equal(report.nextReminderAt, 'tomorrow'); assert.equal(report.photos.length, 1);
+  const reopened = response(); await handler('/:eventId', 'get')({ params: { eventId }, query: { access: accessToken, accessToken } }, reopened);
+  assert.equal(reopened.code, 200); assert.deepEqual(reopened.body.report.answers, saved.body.report.answers);
+  const stale = response(); await handler('/:eventId/draft', 'post')(req, stale); assert.equal(stale.code, 409); assert.equal(writes, 1);
+  report.status = 'submitted'; const locked = response(); await handler('/:eventId/draft', 'post')(req, locked); assert.equal(locked.code, 409); assert.equal(writes, 1);
+});

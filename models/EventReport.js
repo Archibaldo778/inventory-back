@@ -22,6 +22,8 @@ const eventReportSchema = new mongoose.Schema({
   reminderCount: { type: Number, default: 0, min: 0 },
   digestRequested: { type: Boolean, default: false, select: false, index: true },
   submittedAt: { type: Date, default: null },
+  draftRevision: { type: Number, default: 0 },
+  draftSavedAt: { type: Date, default: null },
   answers: { type: mongoose.Schema.Types.Mixed, default: {} },
   photos: { type: [new mongoose.Schema({ fileName: String, contentType: String, size: Number, publicId: String, url: String }, { _id: false })], default: [] },
   photoData: { type: [String], default: undefined, select: false },

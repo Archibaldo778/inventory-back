@@ -132,7 +132,7 @@ test('public submission saves custom answers with the pinned form and ignores cl
   t.mock.method(User, 'find', () => ({ select: () => ({ lean: async () => [] }) }));
   t.mock.method(globalThis, 'fetch', () => assert.fail('No provider requests in this test'));
   t.mock.method(EventReport, 'findOneAndUpdate', async (filter, update) => {
-    assert.deepEqual(filter, { _id: eventId, status: 'pending', 'templateSnapshot.revision': 3 });
+    assert.deepEqual(filter, { _id: eventId, status: 'pending', 'templateSnapshot.revision': 3, $or: [{ draftRevision: 0 }, { draftRevision: { $exists: false } }] });
     Object.assign(report, update.$set); return report;
   });
   const accessToken = issueEventGuestAccess({ eventIds: [eventId], capability: 'event:report', subjectId: 'slack-captain' });
@@ -162,7 +162,7 @@ test('submission preserves photos already uploaded to Cloudinary instead of repl
   t.mock.method(User, 'find', () => ({ select: () => ({ lean: async () => [] }) }));
   t.mock.method(globalThis, 'fetch', () => assert.fail('No provider requests in this test'));
   t.mock.method(EventReport, 'findOneAndUpdate', async (filter, update) => {
-    assert.deepEqual(filter, { _id: eventId, status: 'pending', 'templateSnapshot.revision': 3 });
+    assert.deepEqual(filter, { _id: eventId, status: 'pending', 'templateSnapshot.revision': 3, $or: [{ draftRevision: 0 }, { draftRevision: { $exists: false } }] });
     Object.assign(report, update.$set); return report;
   });
   const accessToken = issueEventGuestAccess({ eventIds: [eventId], capability: 'event:report', subjectId: 'slack-captain' });

@@ -1,3 +1,4 @@
+import { listEventsNewestFirst } from '../utils/eventList.js';
 import { withoutCaptainReportPolicy, updateEventPreservingReportPolicy } from '../utils/eventReportPolicyGuard.js';
 import { Router } from 'express';
 import eventMenuCardsRouter from './eventMenuCards.js';
@@ -1479,7 +1480,7 @@ router.get('/', cacheWithGroup('5 minutes', CACHE_GROUP, {
         range: { from, to },
       });
     }
-    const items = await Event.find(q).select('-documentHistory').sort({ createdAt: -1 });
+    const items = await listEventsNewestFirst(Event, q);
     res.json(items);
   } catch (e) {
     sendApiError(res, e, {

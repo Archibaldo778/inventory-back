@@ -1,7 +1,7 @@
 import { isRoleOwner } from './roleOwners.js';
 
 // These operational event names do not require a captain or kitchen report.
-const EXEMPT_EVENT_NAME = /\b(?:travel\s*days?|tastings?|walk\s*(?:through|thru|throug)|load\s*(?:in|out)|rentals?\s*check\s*in)\b/i;
+const EXEMPT_EVENT_NAME = /\b(?:set\s*up\s*days?|travel\s*days?|tastings?|walk\s*(?:through|thru|throug)|load\s*(?:in|out)|rentals?\s*check\s*in)\b/i;
 
 export const requiresEventReport = (...events) => !events.some((event) => (
   [event?.title, event?.name].some((value) => EXEMPT_EVENT_NAME.test(

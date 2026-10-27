@@ -54,7 +54,7 @@ test('removed/unconfirmed workers and cancelled events do not become future repo
     assert.deepEqual(buildEventReportRequests({ event, schedule: changed, users: [user], reports: [] }), []);
   }
   assert.deepEqual(buildEventReportRequests({ event, schedule: { ...schedule, archived: true }, users: [user], reports: [] }), []);
-  for (const title of ['Tasting', 'Walk through', 'Load in', 'Load out', 'Travel Day - Miu Miu Saks Boston Opening Champagne Service']) {
+  for (const title of ['Setup Day for Dinner', 'Tasting', 'Walk through', 'Load in', 'Load out', 'Travel Day - Miu Miu Saks Boston Opening Champagne Service']) {
     assert.equal(buildEventReportRequests({ event: { ...event, title }, schedule, users: [user], reports: [] })[0].status, 'not_required');
   }
 });

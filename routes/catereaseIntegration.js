@@ -1,3 +1,4 @@
+import { leadershipPrintUpload } from '../utils/leadershipPrintUpload.js';
 import { decodeKitchenPrintPdf } from '../utils/kitchenPrintPdf.js';
 import { selectBarDocumentsForEvent } from '../utils/barDocumentSources.js';
 import { protectedBarRecheckReason } from '../utils/barDocumentRecheckPlan.js';
@@ -2055,7 +2056,7 @@ router.get('/operations/events/:id/dropbox-file', requireAuth, dropboxFileRateLi
   }
 });
 
-router.post('/operations/events/:id/leadership-print.pdf', requireAuth, leadershipPrintRateLimit, async (req, res) => {
+router.post('/operations/events/:id/leadership-print.pdf', requireAuth, leadershipPrintRateLimit, leadershipPrintUpload, async (req, res) => {
   try {
     const event = await loadAuthorizedOperationalEvent(req, res);
     if (!event) return undefined;
@@ -2096,9 +2097,11 @@ router.post('/operations/events/:id/leadership-print.pdf', requireAuth, leadersh
               deletedAt: null,
             }).select('preview index createdAt').sort({ index: 1, createdAt: 1 }).lean()
           : [];
-        const buffer = requestedFile.boardPdf === undefined
-          ? await createBoardPreviewsPdf({ pages })
-          : decodeKitchenPrintPdf(requestedFile.boardPdf);
+        const buffer = req.file?.buffer
+          ? decodeKitchenPrintPdf(req.file.buffer)
+          : requestedFile.boardPdf === undefined
+            ? await createBoardPreviewsPdf({ pages })
+            : decodeKitchenPrintPdf(requestedFile.boardPdf);
         totalBytes += buffer.length;
         if (totalBytes > 80 * 1024 * 1024) {
           return res.status(413).json({ error: 'The selected files are too large for one print job' });

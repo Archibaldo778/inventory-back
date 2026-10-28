@@ -75,3 +75,59 @@ test('PNG wardrobe uses uniform view and edit permissions', () => {
     assert.deepEqual(requestAccessKeys({ originalUrl: '/api/uniform-wardrobe/asset-1', method }, {}), ['uniforms.view', 'uniforms.edit']);
   }
 });
+
+test('new model stores the chosen default color while legacy callers still work', async () => {
+  let saved;
+  const router = createUniformWardrobeRouter({ Model: { create: async (fields) => {
+    saved = fields; return { toObject: () => fields };
+  } }, uploadImage: async () => '/white.png' });
+  const res = response();
+  await handler(router, 'post', '/')({ params: {}, body: { name: 'Mandarin', category: 'Jackets', colorName: 'White', swatch: '#ffffff' }, file: png }, res);
+  assert.equal(res.code, 201);
+  assert.equal(saved.colorName, 'White');
+  assert.equal(saved.swatch, '#ffffff');
+});
+
+test('a new color uploads its own PNG and appends it without replacing the default image', async () => {
+  const current = { image: '/white.png', colorName: 'White', variants: [] };
+  const router = createUniformWardrobeRouter({ Model: {
+    findOne: async () => current,
+    findOneAndUpdate: async (filter, update) => {
+      assert.equal(filter['variants.colorKey'].$ne, 'black');
+      assert.equal(update.$push.variants.image, '/black.png');
+      assert.equal(update.$push.variants.colorName, 'Black');
+      assert.equal(update.$set, undefined);
+      return { toObject: () => ({ ...current, variants: [update.$push.variants] }) };
+    },
+  }, uploadImage: async () => '/black.png' });
+  const res = response();
+  await handler(router, 'post', '/:id/colors')({ params: { id: 'model' }, body: { colorName: 'Black', swatch: '#000000' }, file: png }, res);
+  assert.equal(res.code, 201);
+  assert.equal(res.body.image, '/white.png');
+  assert.equal(res.body.variants.length, 1);
+});
+
+test('color uploads reject duplicates, missing PNG and invalid swatches before storage', async () => {
+  const router = createUniformWardrobeRouter({ Model: { findOne: async () => ({ colorName: 'White', variants: [] }) }, uploadImage: () => assert.fail('must not upload') });
+  for (const [body, file, code] of [
+    [{ colorName: 'WHITE', swatch: '#ffffff' }, png, 409],
+    [{ colorName: 'Black', swatch: '#000000' }, undefined, 400],
+    [{ colorName: 'Black', swatch: 'red' }, png, 400],
+  ]) {
+    const res = response();
+    await handler(router, 'post', '/:id/colors')({ params: { id: 'model' }, body, file }, res);
+    assert.equal(res.code, code);
+  }
+});
+
+test('removing a color pulls only that variant and keeps its PNG available to saved boards', async () => {
+  const router = createUniformWardrobeRouter({ Model: { findOneAndUpdate: async (filter, update) => {
+    assert.equal(filter['variants.id'], 'black');
+    assert.deepEqual(update, { $pull: { variants: { id: 'black' } } });
+    return { toObject: () => ({ image: '/white.png', variants: [] }) };
+  } } });
+  const res = response();
+  await handler(router, 'delete', '/:id/colors/:variantId')({ params: { id: 'model', variantId: 'black' } }, res);
+  assert.equal(res.code, 200);
+  assert.equal(res.body.image, '/white.png');
+});

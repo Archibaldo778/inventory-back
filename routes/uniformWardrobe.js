@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+import { wardrobeColorFields } from '../utils/uniformWardrobeColors.js';
 import multer from 'multer';
 import { Router } from 'express';
 import { Readable } from 'stream';
@@ -7,7 +9,7 @@ import { isAllowedImageUpload } from '../utils/imageSignature.js';
 import { cleanupManagedImageSafely } from '../utils/managedImageCleanup.js';
 import { sendApiError } from '../utils/apiErrors.js';
 
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024, files: 1, fields: 5 } });
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024, files: 1, fields: 8 } });
 const uploadPng = (file) => new Promise((resolve, reject) => {
   const stream = cloudinary.uploader.upload_stream(
     { folder: 'uniform-wardrobe', resource_type: 'image', format: 'png' },
@@ -40,8 +42,17 @@ export const createUniformWardrobeRouter = ({ Model = UniformWardrobeAsset, uplo
       if ((!current && !req.file) || (req.file && !isAllowedImageUpload(req.file, ['png']))) {
         return res.status(400).json({ error: 'Upload a PNG image with a transparent background' });
       }
+      let colorFields = {};
+      if (req.body?.colorName !== undefined) {
+        try { colorFields = wardrobeColorFields(req.body); }
+        catch (error) { return res.status(400).json({ error: error.message }); }
+        if ((current?.variants || []).some((variant) => variant.colorKey === colorFields.colorKey)) {
+          return res.status(409).json({ error: 'This model already has that color' });
+        }
+      }
       if (req.file) image = await uploadImage(req.file);
-      const fields = { name, category, ...(image ? { image } : {}) };
+      const { colorKey: _colorKey, ...baseColor } = colorFields;
+      const fields = { name, category, ...baseColor, ...(image ? { image } : {}) };
       let item;
       if (current) {
         Object.assign(current, fields);
@@ -59,6 +70,54 @@ export const createUniformWardrobeRouter = ({ Model = UniformWardrobeAsset, uplo
   };
   router.post('/', upload.single('image'), save);
   router.patch('/:id', upload.single('image'), save);
+  const saveColor = async (req, res) => {
+    let image = '';
+    try {
+      let fields;
+      try { fields = wardrobeColorFields(req.body); }
+      catch (error) { return res.status(400).json({ error: error.message }); }
+      const current = await Model.findOne({ _id: req.params.id, archivedAt: null });
+      if (!current) return res.status(404).json({ error: 'Model not found' });
+      const existing = (current.variants || []).find((variant) => variant.id === req.params.variantId);
+      if (req.params.variantId && !existing) return res.status(404).json({ error: 'Color not found' });
+      if (String(current.colorName || 'Original').toLowerCase() === fields.colorKey
+        || (current.variants || []).some((variant) => variant.id !== existing?.id && variant.colorKey === fields.colorKey)) {
+        return res.status(409).json({ error: 'This model already has that color' });
+      }
+      if ((!existing && !req.file) || (req.file && !isAllowedImageUpload(req.file, ['png']))) {
+        return res.status(400).json({ error: 'Upload the PNG for this color' });
+      }
+      if (req.file) image = await uploadImage(req.file);
+      const variant = { ...fields, id: existing?.id || randomUUID(), image: image || existing?.image };
+      const filter = { _id: req.params.id, archivedAt: null };
+      if (existing) filter['variants.id'] = existing.id;
+      else filter['variants.colorKey'] = { $ne: fields.colorKey };
+      const update = existing ? { $set: { 'variants.$': variant } } : { $push: { variants: variant } };
+      const updated = await Model.findOneAndUpdate(filter, update, { new: true, runValidators: true });
+      if (!updated) {
+        if (image) await cleanupManagedImageSafely(image, 'conflicting wardrobe color');
+        return res.status(409).json({ error: 'Model changed. Reload and try again.' });
+      }
+      return res.status(existing ? 200 : 201).json(serialize(updated));
+    } catch (error) {
+      if (image) await cleanupManagedImageSafely(image, 'orphaned wardrobe color');
+      return sendApiError(res, error, { context: 'Wardrobe color save failed', fallbackMessage: 'Could not save color' });
+    }
+  };
+  router.post('/:id/colors', upload.single('image'), saveColor);
+  router.patch('/:id/colors/:variantId', upload.single('image'), saveColor);
+  router.delete('/:id/colors/:variantId', async (req, res) => {
+    try {
+      const updated = await Model.findOneAndUpdate(
+        { _id: req.params.id, archivedAt: null, 'variants.id': req.params.variantId },
+        { $pull: { variants: { id: req.params.variantId } } }, { new: true }
+      );
+      if (!updated) return res.status(404).json({ error: 'Color not found' });
+      return res.json(serialize(updated));
+    } catch (error) {
+      return sendApiError(res, error, { context: 'Wardrobe color removal failed', fallbackMessage: 'Could not remove color' });
+    }
+  });
   router.delete('/:id', async (req, res) => {
     try {
       const item = await Model.findOneAndUpdate({ _id: req.params.id, archivedAt: null }, { $set: { archivedAt: new Date() } });

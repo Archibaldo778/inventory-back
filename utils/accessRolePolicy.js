@@ -21,7 +21,7 @@ export const ACCESS_RESOURCES = {
   events: 'events', decks: 'events', pages: 'events', 'nowsta-schedule': 'events',
   products: 'inventory', tools: 'inventory', 'decor-packouts': 'packouts',
   'kitchen-items': 'kitchen', 'kitchen-prep': 'kitchen', staff: 'staff',
-  'uniform-items': 'uniforms', 'uniform-sets': 'uniforms', 'uniform-packing': 'uniforms',
+  'uniform-items': 'uniforms', 'uniform-wardrobe': 'uniforms', 'uniform-sets': 'uniforms', 'uniform-packing': 'uniforms',
   bar: 'bar', 'beverage-items': 'bar', 'cocktail-recipes': 'bar', clients: 'clients',
   proposals: 'proposals', 'proposal-templates': 'proposals', 'event-reports': 'reports',
   venues: 'venues', users: 'users', 'role-options': 'users', operations: 'operations', transportation: 'operations',

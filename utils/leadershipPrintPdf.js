@@ -227,7 +227,8 @@ export const createBoardPreviewsPdf = async ({ pages }) => {
   for (const preview of previews) {
     const image = preview.mimeType === 'image/png'
       ? await output.embedPng(preview.buffer)
-      : await output.embedJpg(preview.buffer);
+      // JPEG decoding needs a standalone byte array, not an offset into Node's Buffer pool.
+      : await output.embedJpg(Uint8Array.from(preview.buffer));
     const scale = Math.min(
       (target.width - (margin * 2)) / image.width,
       (target.height - (margin * 2)) / image.height,

@@ -182,3 +182,18 @@ test('leadership document copy limit still includes overrides and inherited copi
   assert.equal(countLeadershipDocumentCopies(documents), 101);
   await assert.rejects(mergeLeadershipPrintPdfs({ documents, convert: () => assert.fail('over-limit job must not convert files') }), /100 document copies/);
 });
+
+
+test('small JPEG board previews print reliably regardless of the Buffer pool offset', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const jpeg = await readFile(new URL('./fixtures/kitchen-board-preview.jpg', import.meta.url));
+  const preview = `data:image/jpeg;base64,${jpeg.toString('base64')}`;
+  for (let attempt = 0; attempt < 25; attempt++) {
+    Buffer.allocUnsafe(200).fill(0);
+    const buffer = await createBoardPreviewsPdf({ pages: [{ preview }] });
+    const merged = await mergeLeadershipPrintPdfs({ documents: [{ fileName: 'Kitchen Board Photos.pdf', buffer }] });
+    const pdf = await PDFDocument.load(merged);
+    assert.equal(pdf.getPageCount(), 1);
+    assert.equal(pdf.getPage(0).getWidth(), 792);
+  }
+});

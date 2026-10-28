@@ -206,7 +206,7 @@ export const isCanvasPackoutItem = (item, packoutId, draftPackoutDeckIds = new M
   );
 };
 
-const mergePackoutItemsFromEventBoards = async (packout) => {
+const mergePackoutItemsFromEventBoards = async (packout, { persist = true } = {}) => {
   const previousItemsSignature = packoutItemsSignature(packout.items);
   const draftPackoutRows = await DecorPackout.find({
     eventId: packout.eventId,
@@ -229,7 +229,7 @@ const mergePackoutItemsFromEventBoards = async (packout) => {
     const zone = String(deck?.title || '').trim() || 'Decor';
     const originalImages = Array.isArray(page?.canvas?.images) ? page.canvas.images : [];
     const images = removeGeneratedDecorPackoutDuplicates(originalImages, packout._id);
-    if (images.length !== originalImages.length) {
+    if (persist && images.length !== originalImages.length) {
       const revision = Math.max(0, Number(page.revision) || 0);
       const revisionFilter = revision === 0
         ? { $or: [{ revision: 0 }, { revision: { $exists: false } }] }
@@ -350,6 +350,7 @@ const mergePackoutItemsFromEventBoards = async (packout) => {
     });
   });
   packout.items = preserveUnplacedDecorPackoutItems(packout.items, reconciledItems, matchedItemIds);
+  if (!persist) return packout;
   if (packoutItemsSignature(packout.items) !== previousItemsSignature) {
     await packout.save();
     clearCaches();
@@ -458,6 +459,7 @@ router.get('/:id/export', requireAuth, async (req, res) => {
   try {
     const packout = await loadPackout(req.params.id);
     if (!packout) return res.status(404).json({ error: 'Packout not found' });
+    await mergePackoutItemsFromEventBoards(packout, { persist: false });
     if (!packout.items?.length) return res.status(409).json({ error: 'This packout has no items' });
     const event = await Event.findById(packout.eventId).select('externalId title date client managerId meta').lean();
     if (!event) return res.status(404).json({ error: 'Event not found' });

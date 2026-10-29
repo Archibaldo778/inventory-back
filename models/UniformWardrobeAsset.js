@@ -4,6 +4,9 @@ const schema = new mongoose.Schema({
   name: { type: String, required: true, trim: true, maxlength: 120 },
   category: { type: String, required: true, trim: true, maxlength: 60 },
   image: { type: String, required: true },
+  tieStyle: { type: String, enum: ['tie', 'no-tie'] },
+  alternateImage: { type: String },
+  defaultLook: { type: String, enum: ['base', 'alternate'] },
   colorName: { type: String, trim: true, default: 'Original' },
   swatch: { type: String, default: '#808080' },
   variants: { type: [new mongoose.Schema({

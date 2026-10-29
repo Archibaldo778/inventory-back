@@ -9,7 +9,7 @@ import { isAllowedImageUpload } from '../utils/imageSignature.js';
 import { cleanupManagedImageSafely } from '../utils/managedImageCleanup.js';
 import { sendApiError } from '../utils/apiErrors.js';
 
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024, files: 1, fields: 8 } });
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024, files: 2, fields: 12 } });
 const uploadPng = (file) => new Promise((resolve, reject) => {
   const stream = cloudinary.uploader.upload_stream(
     { folder: 'uniform-wardrobe', resource_type: 'image', format: 'png' },
@@ -31,7 +31,10 @@ export const createUniformWardrobeRouter = ({ Model = UniformWardrobeAsset, uplo
   });
   const save = async (req, res) => {
     let image = '';
+    let alternateImage = '';
     try {
+      const file = req.files?.image?.[0] || req.file;
+      const alternateFile = req.files?.alternateImage?.[0];
       const name = String(req.body?.name || '').trim();
       const category = String(req.body?.category || '').trim();
       if (!name || name.length > 120 || !category || category.length > 60) {
@@ -39,7 +42,7 @@ export const createUniformWardrobeRouter = ({ Model = UniformWardrobeAsset, uplo
       }
       const current = req.params.id ? await Model.findOne({ _id: req.params.id, archivedAt: null }) : null;
       if (req.params.id && !current) return res.status(404).json({ error: 'Wardrobe image not found' });
-      if ((!current && !req.file) || (req.file && !isAllowedImageUpload(req.file, ['png']))) {
+      if ((!current && !file) || (file && !isAllowedImageUpload(file, ['png']))) {
         return res.status(400).json({ error: 'Upload a PNG image with a transparent background' });
       }
       let colorFields = {};
@@ -50,9 +53,19 @@ export const createUniformWardrobeRouter = ({ Model = UniformWardrobeAsset, uplo
           return res.status(409).json({ error: 'This model already has that color' });
         }
       }
-      if (req.file) image = await uploadImage(req.file);
+      const tieStyle = req.body?.tieStyle || current?.tieStyle;
+      const defaultLook = req.body?.defaultLook || current?.defaultLook || 'base';
+      const removeAlternate = req.body?.removeAlternate === 'true';
+      if ((tieStyle && !['tie', 'no-tie'].includes(tieStyle)) || !['base', 'alternate'].includes(defaultLook)
+        || (alternateFile && !isAllowedImageUpload(alternateFile, ['png']))
+        || ((alternateFile || (!removeAlternate && current?.alternateImage)) && !tieStyle)
+        || (defaultLook === 'alternate' && (removeAlternate || (!alternateFile && !current?.alternateImage)))) {
+        return res.status(400).json({ error: 'Choose a valid Tie / No tie option and upload a PNG for the alternate look' });
+      }
+      if (file) image = await uploadImage(file);
+      if (alternateFile) alternateImage = await uploadImage(alternateFile);
       const { colorKey: _colorKey, ...baseColor } = colorFields;
-      const fields = { name, category, ...baseColor, ...(image ? { image } : {}) };
+      const fields = { name, category, ...(tieStyle ? { tieStyle } : {}), ...(req.body?.defaultLook ? { defaultLook } : {}), ...(alternateImage ? { alternateImage } : removeAlternate ? { alternateImage: '' } : {}), ...baseColor, ...(image ? { image } : {}) };
       let item;
       if (current) {
         Object.assign(current, fields);
@@ -65,11 +78,12 @@ export const createUniformWardrobeRouter = ({ Model = UniformWardrobeAsset, uplo
       return res.status(current ? 200 : 201).json(serialize(item));
     } catch (error) {
       if (image) await cleanupManagedImageSafely(image, 'orphaned wardrobe PNG');
+      if (alternateImage) await cleanupManagedImageSafely(alternateImage, 'orphaned wardrobe alternate PNG');
       return sendApiError(res, error, { context: 'Wardrobe save failed', fallbackMessage: 'Could not save wardrobe image' });
     }
   };
-  router.post('/', upload.single('image'), save);
-  router.patch('/:id', upload.single('image'), save);
+  router.post('/', upload.fields([{ name: 'image', maxCount: 1 }, { name: 'alternateImage', maxCount: 1 }]), save);
+  router.patch('/:id', upload.fields([{ name: 'image', maxCount: 1 }, { name: 'alternateImage', maxCount: 1 }]), save);
   const saveColor = async (req, res) => {
     let image = '';
     try {

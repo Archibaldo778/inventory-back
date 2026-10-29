@@ -131,3 +131,27 @@ test('removing a color pulls only that variant and keeps its PNG available to sa
   assert.equal(res.code, 200);
   assert.equal(res.body.image, '/white.png');
 });
+
+test('set saves both tie looks together and retains them on metadata edit', async () => {
+  let saved;
+  const router = createUniformWardrobeRouter({ Model: { create: async (fields) => {
+    saved = fields; return { toObject: () => fields };
+  } }, uploadImage: async (file) => file === png ? '/base.png' : '/alternate.png' });
+  const res = response();
+  await handler(router, 'post', '/')({ params: {}, body: { name: 'Khaki', category: 'Khaki', tieStyle: 'no-tie', defaultLook: 'alternate' }, files: { image: [png], alternateImage: [{ ...png }] } }, res);
+  assert.equal(res.code, 201);
+  assert.equal(saved.image, '/base.png');
+  assert.equal(saved.alternateImage, '/alternate.png');
+  assert.equal(saved.defaultLook, 'alternate');
+  const current = { ...saved, save: async () => {}, toObject() { return { ...this }; } };
+  const edit = createUniformWardrobeRouter({ Model: { findOne: async () => current } });
+  await handler(edit, 'patch', '/:id')({ params: { id: 'one' }, body: { name: 'Updated', category: 'Khaki' } }, response());
+  assert.equal(current.alternateImage, '/alternate.png');
+  assert.equal(current.tieStyle, 'no-tie');
+});
+test('alternate default without alternate photo is rejected before upload', async () => {
+  const router = createUniformWardrobeRouter({ uploadImage: () => assert.fail('must validate first') });
+  const res = response();
+  await handler(router, 'post', '/')({ params: {}, body: { name: 'Khaki', category: 'Khaki', tieStyle: 'tie', defaultLook: 'alternate' }, file: png }, res);
+  assert.equal(res.code, 400);
+});

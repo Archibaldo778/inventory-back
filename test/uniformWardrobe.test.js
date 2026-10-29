@@ -155,3 +155,16 @@ test('alternate default without alternate photo is rejected before upload', asyn
   await handler(router, 'post', '/')({ params: {}, body: { name: 'Khaki', category: 'Khaki', tieStyle: 'tie', defaultLook: 'alternate' }, file: png }, res);
   assert.equal(res.code, 400);
 });
+
+test('accessory creation persists model category compatibility and layer order', async () => {
+ let saved;
+ const router = createUniformWardrobeRouter({ Model: { create: async (fields) => { saved = fields; return { toObject: () => fields }; } }, uploadImage: async () => '/apron.png' });
+ const res = response();
+ const id = '123456789012345678901234';
+ await handler(router, 'post', '/')({ params: {}, file: png, body: { name: 'Long apron', category: 'Aprons', assetType: 'addon', compatibleSetIds: JSON.stringify([id]), layerOrder: '20', colorName: 'Black', swatch: '#000000' } }, res);
+ assert.equal(res.code, 201);
+ assert.equal(saved.assetType, 'addon');
+ assert.deepEqual(saved.compatibleSetIds, [id]);
+ assert.equal(saved.layerOrder, 20);
+ assert.equal(saved.colorName, 'Black');
+});

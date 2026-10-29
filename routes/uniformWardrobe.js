@@ -1,3 +1,4 @@
+import { uniformAccessoryFields } from '../utils/uniformAccessoryFields.js';
 import { randomUUID } from 'node:crypto';
 import { wardrobeColorFields } from '../utils/uniformWardrobeColors.js';
 import multer from 'multer';
@@ -9,7 +10,7 @@ import { isAllowedImageUpload } from '../utils/imageSignature.js';
 import { cleanupManagedImageSafely } from '../utils/managedImageCleanup.js';
 import { sendApiError } from '../utils/apiErrors.js';
 
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024, files: 2, fields: 12 } });
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024, files: 2, fields: 16 } });
 const uploadPng = (file) => new Promise((resolve, reject) => {
   const stream = cloudinary.uploader.upload_stream(
     { folder: 'uniform-wardrobe', resource_type: 'image', format: 'png' },
@@ -45,6 +46,9 @@ export const createUniformWardrobeRouter = ({ Model = UniformWardrobeAsset, uplo
       if ((!current && !file) || (file && !isAllowedImageUpload(file, ['png']))) {
         return res.status(400).json({ error: 'Upload a PNG image with a transparent background' });
       }
+      let accessoryFields;
+      try { accessoryFields = uniformAccessoryFields(req.body || {}, current); }
+      catch (error) { return res.status(400).json({ error: error.message }); }
       let colorFields = {};
       if (req.body?.colorName !== undefined) {
         try { colorFields = wardrobeColorFields(req.body); }
@@ -65,7 +69,7 @@ export const createUniformWardrobeRouter = ({ Model = UniformWardrobeAsset, uplo
       if (file) image = await uploadImage(file);
       if (alternateFile) alternateImage = await uploadImage(alternateFile);
       const { colorKey: _colorKey, ...baseColor } = colorFields;
-      const fields = { name, category, ...(tieStyle ? { tieStyle } : {}), ...(req.body?.defaultLook ? { defaultLook } : {}), ...(alternateImage ? { alternateImage } : removeAlternate ? { alternateImage: '' } : {}), ...baseColor, ...(image ? { image } : {}) };
+      const fields = { name, category, ...accessoryFields, ...(tieStyle ? { tieStyle } : {}), ...(req.body?.defaultLook ? { defaultLook } : {}), ...(alternateImage ? { alternateImage } : removeAlternate ? { alternateImage: '' } : {}), ...baseColor, ...(image ? { image } : {}) };
       let item;
       if (current) {
         Object.assign(current, fields);

@@ -1,3 +1,4 @@
+import { parseUniformAssembly, resolveUniformAssembly } from '../utils/uniformAssembly.js';
 import { uniformAccessoryFields } from '../utils/uniformAccessoryFields.js';
 import { randomUUID } from 'node:crypto';
 import { wardrobeColorFields } from '../utils/uniformWardrobeColors.js';
@@ -10,7 +11,7 @@ import { isAllowedImageUpload } from '../utils/imageSignature.js';
 import { cleanupManagedImageSafely } from '../utils/managedImageCleanup.js';
 import { sendApiError } from '../utils/apiErrors.js';
 
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024, files: 2, fields: 16 } });
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024, files: 2, fields: 20 } });
 const uploadPng = (file) => new Promise((resolve, reject) => {
   const stream = cloudinary.uploader.upload_stream(
     { folder: 'uniform-wardrobe', resource_type: 'image', format: 'png' },
@@ -49,6 +50,16 @@ export const createUniformWardrobeRouter = ({ Model = UniformWardrobeAsset, uplo
       let accessoryFields;
       try { accessoryFields = uniformAccessoryFields(req.body || {}, current); }
       catch (error) { return res.status(400).json({ error: error.message }); }
+      let assembly;
+      if (req.body?.assembly !== undefined) {
+        try {
+          if ((accessoryFields.assetType || current?.assetType || 'set') !== 'set') throw new Error('Only sets can contain a composition');
+          const choices = parseUniformAssembly(req.body.assembly);
+          const parts = await Model.find({ _id: { $in: choices.map((entry) => entry.modelId) }, archivedAt: null });
+          assembly = resolveUniformAssembly(choices, parts, accessoryFields.templateKey ?? current?.templateKey);
+          if (!file) throw new Error('Upload the preview for this composition');
+        } catch (error) { return res.status(400).json({ error: error.message }); }
+      }
       let colorFields = {};
       if (req.body?.colorName !== undefined) {
         try { colorFields = wardrobeColorFields(req.body); }
@@ -69,7 +80,7 @@ export const createUniformWardrobeRouter = ({ Model = UniformWardrobeAsset, uplo
       if (file) image = await uploadImage(file);
       if (alternateFile) alternateImage = await uploadImage(alternateFile);
       const { colorKey: _colorKey, ...baseColor } = colorFields;
-      const fields = { name, category, ...accessoryFields, ...(tieStyle ? { tieStyle } : {}), ...(req.body?.defaultLook ? { defaultLook } : {}), ...(alternateImage ? { alternateImage } : removeAlternate ? { alternateImage: '' } : {}), ...baseColor, ...(image ? { image } : {}) };
+      const fields = { name, category, ...accessoryFields, ...(assembly ? { assembly } : {}), ...(tieStyle ? { tieStyle } : {}), ...(req.body?.defaultLook ? { defaultLook } : {}), ...(alternateImage ? { alternateImage } : removeAlternate ? { alternateImage: '' } : {}), ...baseColor, ...(image ? { image } : {}) };
       let item;
       if (current) {
         Object.assign(current, fields);

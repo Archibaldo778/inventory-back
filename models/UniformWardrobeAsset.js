@@ -3,6 +3,10 @@ import mongoose from 'mongoose';
 const schema = new mongoose.Schema({
   assetType: { type: String, enum: ['set', 'addon'] },
   compatibleSetIds: { type: [String], default: undefined },
+  templateKey: { type: String, trim: true, maxlength: 60 },
+  assembly: { type: [new mongoose.Schema({
+    modelId: String, colorId: String, section: String, name: String, color: String, image: String, order: Number,
+  }, { _id: false })], default: undefined },
   layerOrder: { type: Number, min: 0, max: 100 },
   name: { type: String, required: true, trim: true, maxlength: 120 },
   category: { type: String, required: true, trim: true, maxlength: 60 },

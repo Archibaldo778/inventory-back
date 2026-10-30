@@ -62,7 +62,7 @@ export const createUniformWardrobeRouter = ({ Model = UniformWardrobeAsset, uplo
         } catch (error) { return res.status(400).json({ error: error.message }); }
       }
       let colorFields = {};
-      if (req.body?.colorName !== undefined) {
+      if (category !== 'Body' && req.body?.colorName !== undefined) {
         try { colorFields = wardrobeColorFields(req.body); }
         catch (error) { return res.status(400).json({ error: error.message }); }
         if ((current?.variants || []).some((variant) => variant.colorKey === colorFields.colorKey)) {

@@ -212,3 +212,28 @@ test('saved compositions using a separated color resolve to the new model', asyn
   assert.equal(layers[1].colorId, 'base');
   assert.equal(layers[1].alternateImage, 'loops.png');
 });
+
+test('person bases create and update without clothing color fields, including older clients sending empty colors', async () => {
+  for (const method of ['post', 'patch']) for (const colorName of [undefined, '', '   ']) {
+    const current = { _id: 'body', assetType: 'addon', category: 'Body', templateKey: 'staff-v1', image: '/old.png', async save() {}, toObject() { return { ...this }; } };
+    const router = createUniformWardrobeRouter({ Model: {
+      findOne: async () => current,
+      create: async (fields) => ({ toObject: () => fields }),
+    }, uploadImage: async () => '/latino.png' });
+    const res = response();
+    await handler(router, method, method === 'post' ? '/' : '/:id')({ params: method === 'post' ? {} : { id: 'body' }, body: { name: 'Latino', category: 'Body', assetType: 'addon', templateKey: 'staff-v1', colorName, swatch: '#808080' }, file: png }, res);
+    assert.equal(res.code, method === 'post' ? 201 : 200);
+    assert.equal(res.body.name, 'Latino');
+    assert.equal(res.body.image, '/latino.png');
+    assert.equal(res.body.templateKey, 'staff-v1');
+    assert.equal(res.body.colorName, undefined);
+  }
+});
+
+test('empty clothing color is still rejected before upload', async () => {
+  const router = createUniformWardrobeRouter({ uploadImage: () => assert.fail('must not upload') });
+  const res = response();
+  await handler(router, 'post', '/')({ params: {}, body: { name: 'Polo', category: 'Shirts', assetType: 'addon', colorName: '' }, file: png }, res);
+  assert.equal(res.code, 400);
+  assert.match(res.body.error, /color name/);
+});

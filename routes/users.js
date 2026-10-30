@@ -111,6 +111,11 @@ const serializeUser = (source, auth) => {
   const user = typeof source.toObject === 'function' ? source.toObject() : source;
   const seeProposals = hasFullSalesAccess(user) || resolveSeeProposals(user) === true;
   const seeBarFinancials = hasFullSalesAccess(user) || resolveSeeBarFinancials(user) === true;
+  const isAcceptedAccount = Boolean(user?.inviteAcceptedAt) || user?.isActive !== false;
+  const pendingInvite = Boolean(user?.inviteExpiresAt)
+    && new Date(user.inviteExpiresAt).getTime() > Date.now()
+    && user?.isActive === false
+    && !user?.inviteAcceptedAt;
 
   return {
     id: user?._id || user?.id,
@@ -132,9 +137,7 @@ const serializeUser = (source, auth) => {
     canSeeBarFinancials: seeBarFinancials,
     permissions: buildPermissionsPayload(user?.permissions, seeProposals, seeBarFinancials),
     isActive: user?.isActive !== false,
-    inviteStatus: user?.inviteAcceptedAt
-      ? 'accepted'
-      : (user?.inviteExpiresAt && new Date(user.inviteExpiresAt).getTime() > Date.now() ? 'invited' : ''),
+    inviteStatus: isAcceptedAccount ? 'accepted' : (pendingInvite ? 'invited' : ''),
     inviteSentAt: user?.inviteSentAt || null,
     inviteAcceptedAt: user?.inviteAcceptedAt || null,
     createdAt: user?.createdAt,
@@ -218,6 +221,14 @@ const applyUserPayload = async (user, body, { allowPassword = false } = {}) => {
     }
     user.password = await bcrypt.hash(nextPassword, 10);
     user.tokenVersion = Number(user.tokenVersion || 0) + 1;
+    user.isActive = true;
+    user.inviteAcceptedAt = user.inviteAcceptedAt || new Date();
+    user.inviteTokenHash = '';
+    user.inviteReminderTokenHash = '';
+    user.inviteReminderAttemptedAt = null;
+    user.inviteReminderSentAt = null;
+    user.inviteReminderError = '';
+    user.inviteExpiresAt = null;
   }
 };
 
@@ -504,6 +515,51 @@ router.post('/invite', async (req, res) => {
   }
 });
 
+router.post('/:id/resend-invite', async (req, res) => {
+  try {
+    const target = await User.findById(req.params.id).select('+inviteTokenHash +inviteReminderTokenHash');
+    if (!target) return res.status(404).json({ message: 'Пользователь не найден' });
+    if (isRoleOwner(target)) return res.status(403).json({ message: 'This account is protected' });
+    if (!canManageDepartmentUser(req.auth, target)) return res.status(403).json({ message: 'You can manage only employees in your department' });
+    if (isSuperAdminRole(target.role) && !isSuperAdminAuth(req.auth)) {
+      return res.status(403).json({ message: 'You do not have permission to manage this account' });
+    }
+    if (target.isActive !== false || target.inviteAcceptedAt) {
+      return res.status(409).json({ message: 'This account is already registered and does not need a new registration link.' });
+    }
+
+    if (!isValidInviteEmail(target.email)) return res.status(400).json({ message: 'A valid email is required' });
+    const sender = resolveUserInvitationSender(req.auth);
+    const invite = createUserInviteToken();
+    const replacement = {
+      inviteSender: { name: sender.name, email: sender.email },
+      inviteTokenHash: invite.tokenHash, inviteReminderTokenHash: '',
+      inviteReminderAttemptedAt: null, inviteReminderSentAt: null, inviteReminderError: '',
+      inviteSentAt: null, inviteExpiresAt: invite.expiresAt,
+    };
+    const claimed = await User.findOneAndUpdate({
+      _id: target._id, isActive: false, inviteAcceptedAt: null,
+      inviteTokenHash: target.inviteTokenHash || '',
+    }, { $set: replacement }, { new: true });
+    if (!claimed) return res.status(409).json({ message: 'This account or invitation changed. Refresh the user list before trying again.' });
+
+    const inviteUrl = userInviteUrl(invite.token);
+    const delivery = await sendUserInviteEmail({
+      email: target.email,
+      name: target.username,
+      inviteUrl,
+      role: normalizeRole(target.role),
+      active: false,
+      sender: req.auth,
+    });
+    if (delivery.status !== 'sent') return res.status(502).json({ message: `Invitation was created but email failed: ${delivery.error}` });
+    await User.updateOne({ _id: target._id, isActive: false, inviteAcceptedAt: null, inviteTokenHash: invite.tokenHash }, { $set: { inviteSentAt: delivery.sentAt } });
+    return res.status(200).json({ delivery });
+  } catch (e) {
+    return sendApiError(res, e, { field: 'message', context: 'Resend invite failed', fallbackMessage: 'Could not resend the registration link' });
+  }
+});
+
 // Универсальное обновление пользователя
 router.patch('/update', handleUpdateByBodyId);
 router.put('/update', handleUpdateByBodyId);
@@ -534,7 +590,8 @@ router.put('/:id/password', async (req, res) => {
     if (String(password).length < 8) {
       return res.status(400).json({ message: 'Password must be at least 8 characters' });
     }
-    const target = await User.findById(req.params.id).select('_id role');
+    const targetDoc = await User.findById(req.params.id);
+    const target = targetDoc && typeof targetDoc.select === 'function' ? await targetDoc.select('_id role') : targetDoc;
     if (!target) return res.status(404).json({ message: 'Пользователь не найден' });
     if (isRoleOwner(target) && !isRoleOwner(req.auth)) return res.status(403).json({ message: 'This account is protected' });
     if (String(req.auth?.userId || '') !== String(target._id) && !canManageDepartmentUser(req.auth, target)) return res.status(403).json({ message: 'You can manage only employees in your department' });
@@ -543,7 +600,17 @@ router.put('/:id/password', async (req, res) => {
     }
     const hash = await bcrypt.hash(String(password), 10);
     await User.findByIdAndUpdate(req.params.id, {
-      $set: { password: hash },
+      $set: {
+        password: hash,
+        isActive: true,
+        inviteTokenHash: '',
+        inviteReminderTokenHash: '',
+        inviteReminderAttemptedAt: null,
+        inviteReminderSentAt: null,
+        inviteReminderError: '',
+        inviteExpiresAt: null,
+        inviteAcceptedAt: new Date(),
+      },
       $inc: { tokenVersion: 1 },
     }, { runValidators: true });
     res.json({ ok: true });

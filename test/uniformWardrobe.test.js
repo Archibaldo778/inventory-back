@@ -195,3 +195,20 @@ test('assembly snapshots keep secondary PNGs on both primary and variant colors'
  assert.equal(doc.toObject().assembly[0].alternateImage,'closed');
  assert.equal(doc.toObject().variants[0].alternateImage,'closed-green');
 });
+
+test('changing style moves the selected color and files in a transaction', async () => {
+ const session={};let created;
+ const source={_id:'pants',assetType:'addon',category:'Pants',templateKey:'staff-v1',layerOrder:22,variants:[{id:'khaki',colorName:'Khaki',swatch:'#ccaa88',image:'khaki.png',alternateImage:'loops.png'}],toObject(){return {...this};},async save(options){assert.equal(options.session,session);}};
+ const Model={db:{transaction:async(fn)=>fn(session)},findOne:()=>({session:async()=>source}),create:async(fields,options)=>{assert.equal(options.session,session);created=fields[0];return [{toObject:()=>created}];}};
+ const res=response();await handler(createUniformWardrobeRouter({Model}),'post','/:id/colors/:variantId/style')({params:{id:'pants',variantId:'khaki'},body:{name:'Chinos',category:'Pants',colorName:'Khaki',swatch:'#ccaa88'}},res);
+ assert.equal(res.code,200);assert.equal(created.image,'khaki.png');assert.equal(created.alternateImage,'loops.png');assert.equal(created.name,'Chinos');assert.deepEqual(created.previousSelections,[{modelId:'pants',colorId:'khaki',targetColorId:'base'}]);assert.deepEqual(source.variants,[]);
+});
+test('saved compositions using a separated color resolve to the new model', async () => {
+  const { resolveUniformAssembly } = await import('../utils/uniformAssembly.js');
+  const body = { _id: 'body', assetType: 'addon', category: 'Body', templateKey: 'staff-v1', image: 'body.png' };
+  const moved = { _id: 'chinos', assetType: 'addon', category: 'Pants', name: 'Chinos', templateKey: 'staff-v1', image: 'khaki.png', alternateImage: 'loops.png', colorName: 'Khaki', previousSelections: [{ modelId: 'pants', colorId: 'khaki' }] };
+  const layers = resolveUniformAssembly([{ modelId: 'body', colorId: 'base' }, { modelId: 'pants', colorId: 'khaki' }], [body, moved], 'staff-v1');
+  assert.equal(layers[1].modelId, 'chinos');
+  assert.equal(layers[1].colorId, 'base');
+  assert.equal(layers[1].alternateImage, 'loops.png');
+});

@@ -1,3 +1,4 @@
+import { uniformStyleMove } from '../utils/uniformStyleMove.js';
 import { parseUniformAssembly, resolveUniformAssembly } from '../utils/uniformAssembly.js';
 import { uniformAccessoryFields } from '../utils/uniformAccessoryFields.js';
 import { randomUUID } from 'node:crypto';
@@ -55,7 +56,7 @@ export const createUniformWardrobeRouter = ({ Model = UniformWardrobeAsset, uplo
         try {
           if ((accessoryFields.assetType || current?.assetType || 'set') !== 'set') throw new Error('Only sets can contain a composition');
           const choices = parseUniformAssembly(req.body.assembly);
-          const parts = await Model.find({ _id: { $in: choices.map((entry) => entry.modelId) }, archivedAt: null });
+          const parts = await Model.find({ $or: [{ _id: { $in: choices.map((entry) => entry.modelId) } }, { 'previousSelections.modelId': { $in: choices.map((entry) => entry.modelId) } }], archivedAt: null });
           assembly = resolveUniformAssembly(choices, parts, accessoryFields.templateKey ?? current?.templateKey);
           if (!file) throw new Error('Upload the preview for this composition');
         } catch (error) { return res.status(400).json({ error: error.message }); }
@@ -110,7 +111,7 @@ export const createUniformWardrobeRouter = ({ Model = UniformWardrobeAsset, uplo
       if (!current) return res.status(404).json({ error: 'Model not found' });
       const existing = (current.variants || []).find((variant) => variant.id === req.params.variantId);
       if (req.params.variantId && !existing) return res.status(404).json({ error: 'Color not found' });
-      if (String(current.colorName || 'Original').toLowerCase() === fields.colorKey
+      if ((!current.baseArchived && String(current.colorName || 'Original').toLowerCase() === fields.colorKey)
         || (current.variants || []).some((variant) => variant.id !== existing?.id && variant.colorKey === fields.colorKey)) {
         return res.status(409).json({ error: 'This model already has that color' });
       }
@@ -142,6 +143,37 @@ export const createUniformWardrobeRouter = ({ Model = UniformWardrobeAsset, uplo
   };
   router.post('/:id/colors', upload.fields([{ name: 'image', maxCount: 1 }, { name: 'alternateImage', maxCount: 1 }]), saveColor);
   router.patch('/:id/colors/:variantId', upload.fields([{ name: 'image', maxCount: 1 }, { name: 'alternateImage', maxCount: 1 }]), saveColor);
+  router.post('/:id/colors/:variantId/style', upload.fields([{ name: 'image', maxCount: 1 }, { name: 'alternateImage', maxCount: 1 }]), async (req, res) => {
+    let image = '', alternateImage = '';
+    try {
+      for (const file of [req.files?.image?.[0], req.files?.alternateImage?.[0]].filter(Boolean)) {
+        if (!isAllowedImageUpload(file, ['png'])) return res.status(400).json({ error: 'Upload a valid PNG' });
+      }
+      let fields;
+      try { fields = wardrobeColorFields(req.body); }
+      catch (error) { return res.status(400).json({ error: error.message }); }
+      if (req.files?.image?.[0]) fields.image = image = await uploadImage(req.files.image[0]);
+      if (req.files?.alternateImage?.[0]) fields.alternateImage = alternateImage = await uploadImage(req.files.alternateImage[0]);
+      const result = await Model.db.transaction(async (session) => {
+        const source = await Model.findOne({ _id: req.params.id, archivedAt: null }).session(session);
+        const target = req.body.targetModelId ? await Model.findOne({ _id: req.body.targetModelId, archivedAt: null }).session(session) : null;
+        if (req.body.targetModelId && !target) { const error = new Error('Target style not found'); error.status = 404; throw error; }
+        const plan = uniformStyleMove({ source: source?.toObject(), target: target?.toObject(), colorId: req.params.variantId, targetColorId: randomUUID(), name: req.body.name, category: req.body.category, fields });
+        let saved;
+        if (target) { Object.assign(target, plan.destination); saved = await target.save({ session }); }
+        else [saved] = await Model.create([plan.destination], { session });
+        Object.assign(source, plan.sourceUpdate);
+        await source.save({ session });
+        return saved;
+      });
+      return res.json(serialize(result));
+    } catch (error) {
+      if (image) await cleanupManagedImageSafely(image, 'failed wardrobe style change');
+      if (alternateImage) await cleanupManagedImageSafely(alternateImage, 'failed wardrobe style change');
+      if (error.status) return res.status(error.status).json({ error: error.message });
+      return sendApiError(res, error, { context: 'Wardrobe style change failed', fallbackMessage: 'Could not change style' });
+    }
+  });
   router.delete('/:id/colors/:variantId', async (req, res) => {
     try {
       const updated = await Model.findOneAndUpdate(

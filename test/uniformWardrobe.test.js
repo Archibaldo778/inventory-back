@@ -168,3 +168,30 @@ test('accessory creation persists model category compatibility and layer order',
  assert.equal(saved.layerOrder, 20);
  assert.equal(saved.colorName, 'Black');
 });
+
+test('shirt stores open and closed collar PNGs without legacy full-set tie mode', async () => {
+ let saved, uploads=0;
+ const router=createUniformWardrobeRouter({Model:{create:async(fields)=>{saved=fields;return {toObject:()=>fields};}},uploadImage:async()=>++uploads===1?'open.png':'closed.png'});
+ const res=response();
+ await handler(router,'post','/')({params:{},files:{image:[png],alternateImage:[png]},body:{name:'White Shirt',category:'Shirts',assetType:'addon',templateKey:'staff-v1'}},res);
+ assert.equal(res.code,201);
+ assert.equal(saved.image,'open.png');
+ assert.equal(saved.alternateImage,'closed.png');
+ assert.equal(saved.tieStyle,undefined);
+});
+
+test('color edits preserve secondary loops PNG unless a replacement is uploaded', async()=>{
+ let update;
+ const current={category:'Pants',colorName:'Black',variants:[{id:'khaki',colorKey:'khaki',image:'pants.png',alternateImage:'loops.png'}]};
+ const router=createUniformWardrobeRouter({Model:{findOne:async()=>current,findOneAndUpdate:async(_filter,fields)=>{update=fields;return {toObject:()=>current};}}});
+ const res=response();
+ await handler(router,'patch','/:id/colors/:variantId')({params:{id:'pants',variantId:'khaki'},body:{colorName:'Khaki',swatch:'#c0aa88'}},res);
+ assert.equal(res.code,200);
+ assert.equal(update.$set['variants.$'].alternateImage,'loops.png');
+});
+
+test('assembly snapshots keep secondary PNGs on both primary and variant colors',()=>{
+ const doc=new UniformWardrobeAsset({name:'Set',category:'Uniform',image:'preview',assembly:[{section:'Shirts',image:'open',alternateImage:'closed'}],variants:[{id:'green',colorName:'Green',colorKey:'green',swatch:'#008800',image:'open-green',alternateImage:'closed-green'}]});
+ assert.equal(doc.toObject().assembly[0].alternateImage,'closed');
+ assert.equal(doc.toObject().variants[0].alternateImage,'closed-green');
+});

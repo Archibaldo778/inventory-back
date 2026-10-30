@@ -73,7 +73,7 @@ export const createUniformWardrobeRouter = ({ Model = UniformWardrobeAsset, uplo
       const removeAlternate = req.body?.removeAlternate === 'true';
       if ((tieStyle && !['tie', 'no-tie'].includes(tieStyle)) || !['base', 'alternate'].includes(defaultLook)
         || (alternateFile && !isAllowedImageUpload(alternateFile, ['png']))
-        || ((alternateFile || (!removeAlternate && current?.alternateImage)) && !tieStyle)
+        || ((alternateFile || (!removeAlternate && current?.alternateImage)) && !tieStyle && !((accessoryFields.assetType || current?.assetType) === 'addon' && ['Shirts', 'Pants'].includes(category)))
         || (defaultLook === 'alternate' && (removeAlternate || (!alternateFile && !current?.alternateImage)))) {
         return res.status(400).json({ error: 'Choose a valid Tie / No tie option and upload a PNG for the alternate look' });
       }
@@ -101,6 +101,7 @@ export const createUniformWardrobeRouter = ({ Model = UniformWardrobeAsset, uplo
   router.patch('/:id', upload.fields([{ name: 'image', maxCount: 1 }, { name: 'alternateImage', maxCount: 1 }]), save);
   const saveColor = async (req, res) => {
     let image = '';
+    let alternateImage = '';
     try {
       let fields;
       try { fields = wardrobeColorFields(req.body); }
@@ -113,11 +114,15 @@ export const createUniformWardrobeRouter = ({ Model = UniformWardrobeAsset, uplo
         || (current.variants || []).some((variant) => variant.id !== existing?.id && variant.colorKey === fields.colorKey)) {
         return res.status(409).json({ error: 'This model already has that color' });
       }
-      if ((!existing && !req.file) || (req.file && !isAllowedImageUpload(req.file, ['png']))) {
+      const file = req.files?.image?.[0] || req.file;
+      const alternateFile = req.files?.alternateImage?.[0];
+      if (alternateFile && (!['Shirts', 'Pants'].includes(current.category) || !isAllowedImageUpload(alternateFile, ['png']))) return res.status(400).json({ error: 'Upload a valid secondary PNG for a shirt or pants' });
+      if ((!existing && !file) || (file && !isAllowedImageUpload(file, ['png']))) {
         return res.status(400).json({ error: 'Upload the PNG for this color' });
       }
-      if (req.file) image = await uploadImage(req.file);
-      const variant = { ...fields, id: existing?.id || randomUUID(), image: image || existing?.image };
+      if (file) image = await uploadImage(file);
+      if (alternateFile) alternateImage = await uploadImage(alternateFile);
+      const variant = { ...fields, id: existing?.id || randomUUID(), image: image || existing?.image, ...((alternateImage || existing?.alternateImage) ? { alternateImage: alternateImage || existing.alternateImage } : {}) };
       const filter = { _id: req.params.id, archivedAt: null };
       if (existing) filter['variants.id'] = existing.id;
       else filter['variants.colorKey'] = { $ne: fields.colorKey };
@@ -125,16 +130,18 @@ export const createUniformWardrobeRouter = ({ Model = UniformWardrobeAsset, uplo
       const updated = await Model.findOneAndUpdate(filter, update, { new: true, runValidators: true });
       if (!updated) {
         if (image) await cleanupManagedImageSafely(image, 'conflicting wardrobe color');
+        if (alternateImage) await cleanupManagedImageSafely(alternateImage, 'conflicting secondary color');
         return res.status(409).json({ error: 'Model changed. Reload and try again.' });
       }
       return res.status(existing ? 200 : 201).json(serialize(updated));
     } catch (error) {
       if (image) await cleanupManagedImageSafely(image, 'orphaned wardrobe color');
+      if (alternateImage) await cleanupManagedImageSafely(alternateImage, 'orphaned secondary color');
       return sendApiError(res, error, { context: 'Wardrobe color save failed', fallbackMessage: 'Could not save color' });
     }
   };
-  router.post('/:id/colors', upload.single('image'), saveColor);
-  router.patch('/:id/colors/:variantId', upload.single('image'), saveColor);
+  router.post('/:id/colors', upload.fields([{ name: 'image', maxCount: 1 }, { name: 'alternateImage', maxCount: 1 }]), saveColor);
+  router.patch('/:id/colors/:variantId', upload.fields([{ name: 'image', maxCount: 1 }, { name: 'alternateImage', maxCount: 1 }]), saveColor);
   router.delete('/:id/colors/:variantId', async (req, res) => {
     try {
       const updated = await Model.findOneAndUpdate(

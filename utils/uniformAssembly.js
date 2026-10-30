@@ -16,10 +16,10 @@ export const resolveUniformAssembly = (choices, parts, templateKey) => {
     if (!part || part.assetType !== 'addon' || part.archivedAt || part.templateKey !== templateKey) throw new Error('A selected part is missing or uses a different fitting template');
     if (sections.has(part.category)) throw new Error('Choose only one model per section');
     sections.add(part.category);
-    const color = choice.colorId === 'base' ? { image: part.image, colorName: part.colorName } : (part.variants || []).find((entry) => entry.id === choice.colorId);
+    const color = choice.colorId === 'base' ? { image: part.image, colorName: part.colorName, alternateImage: part.alternateImage } : (part.variants || []).find((entry) => entry.id === choice.colorId);
     if (!color?.image) throw new Error('A selected color no longer exists');
     return { modelId: choice.modelId, colorId: choice.colorId, section: part.category, name: part.name,
-      color: color.colorName || 'Original', image: color.image, order: part.layerOrder ?? 10 };
+      color: color.colorName || 'Original', image: color.image, ...(color.alternateImage ? { alternateImage: color.alternateImage } : {}), order: part.layerOrder ?? 10 };
   });
   if (!sections.has('Body')) throw new Error('Choose a Body layer');
   return layers.sort((a, b) => (a.section === 'Body' ? -1 : b.section === 'Body' ? 1 : a.order - b.order || a.section.localeCompare(b.section)));

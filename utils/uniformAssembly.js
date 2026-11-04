@@ -1,3 +1,4 @@
+import { uniformClothingSlot } from './uniformClothingSlots.js';
 const idPattern = /^[a-f0-9]{24}$/i;
 export const parseUniformAssembly = (raw) => {
   let choices;
@@ -16,8 +17,9 @@ export const resolveUniformAssembly = (choices, parts, templateKey) => {
     const colorId = moved ? (moved.previousSelections.find((old) => String(old.modelId) === String(choice.modelId) && old.colorId === (choice.colorId || 'base'))?.targetColorId || 'base') : choice.colorId;
     const part = moved || parts.find((entry) => String(entry._id || entry.id) === choice.modelId);
     if (!part || part.assetType !== 'addon' || part.archivedAt || part.templateKey !== templateKey) throw new Error('A selected part is missing or uses a different fitting template');
-    if (sections.has(part.category)) throw new Error('Choose only one model per section');
-    sections.add(part.category);
+    const slot = uniformClothingSlot(part) === 'Jackets' ? 'Jackets' : part.category;
+    if (sections.has(slot)) throw new Error('Choose only one model per section');
+    sections.add(slot);
     const color = colorId === 'base' ? { image: part.image, colorName: part.colorName, alternateImage: part.alternateImage } : (part.variants || []).find((entry) => entry.id === colorId);
     if (!color?.image) throw new Error('A selected color no longer exists');
     return { modelId: String(part._id || part.id), colorId, section: part.category, name: part.name,

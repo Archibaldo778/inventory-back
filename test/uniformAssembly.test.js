@@ -32,3 +32,23 @@ test('blazer, Mandarin and Nehru cannot be combined even under different or lega
  const parts=[body,tee,blazer];
  assert.equal(resolveUniformAssembly(select(parts),parts,'staff-v1').length,3);
 });
+
+test('custom Suit Jacket categories cannot bypass jacket exclusivity or occupy the shirt slot',()=>{
+ const shirt={...body,_id:'bbbbbbbbbbbbbbbbbbbbbbbb',category:'Shirts',name:'Button Down Shirt'};
+ const suit={...body,_id:'cccccccccccccccccccccccc',category:'Suit Jacket',name:'Suit Jacket'};
+ const select=parts=>parts.map(p=>({modelId:p._id,colorId:'base'}));
+ for(const [category,name] of [['Shirts','Mandarin'],['Mandarin','Classic'],['Nehru Jackets','Classic'],['Formal Wear','Burgundy Mandarin'],['Blazers','Classic']]) {
+  const other={...body,_id:'dddddddddddddddddddddddd',category,name};
+  for(const pair of [[suit,other],[other,suit]]) {
+   const parts=[body,shirt,...pair];
+   assert.throws(()=>resolveUniformAssembly(select(parts),parts,'staff-v1'),/one model/);
+  }
+ }
+ for(const category of ['Suit Jacket','  SUIT JACKETS  ','Formal Wear']) {
+  const parts=[body,shirt,{...suit,category}];
+  assert.equal(resolveUniformAssembly(select(parts),parts,'staff-v1').length,3);
+ }
+ const pants={...body,_id:'eeeeeeeeeeeeeeeeeeeeeeee',category:'Pants',name:'Jacket matching pants'};
+ const parts=[body,shirt,suit,pants];
+ assert.equal(resolveUniformAssembly(select(parts),parts,'staff-v1').length,4);
+});

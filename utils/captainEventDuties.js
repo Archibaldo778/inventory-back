@@ -5,7 +5,7 @@ import { nowstaPersonKeys } from './nowstaCaptainAssignments.js';
 
 export const isCaptainPosition = (position) => /\bcaptain\b/i.test(String(position || '').replace(/[_-]+/g, ' '));
 
-export const isReportLeadPosition = (position) => isCaptainPosition(position) || /\bmaitre[\s_-]*d\b/i.test(String(position || '').normalize('NFD').replace(/[\u0300-\u036f]/g, ''));
+export const isReportLeadPosition = (position) => isCaptainPosition(position) || /\bmaitre[\s_'’‘ʼ`-]*d\b/i.test(String(position || '').normalize('NFD').replace(/[\u0300-\u036f]/g, ''));
 
 export const captainAssignedShifts = (schedule, user) => {
   if (schedule?.archived || schedule?.excluded) return [];

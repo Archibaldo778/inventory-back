@@ -144,7 +144,7 @@ test('manual report opt-out keeps optional captain feedback and bar return dutie
 });
 
  test('confirmed Maitre D bookings can complete reports without gaining captain bar permissions', () => {
-  for (const position of ["Maitre D", "Maître d’", "MAITRE-D", "Maitre D - Working"]) {
+  for (const position of ["Maitre D", "Maître d’", "MAITRE-D", "Maitre D - Working", "Maitre 'D", "Maître ’D", "Sanit Maitre 'D", "Sanit Maitre D"]) {
     const booking = schedule(position);
     const duties = captainEventDuties({ event, schedule: booking, user });
     assert.equal(duties.reportAssigned, true, position);
@@ -153,4 +153,18 @@ test('manual report opt-out keeps optional captain feedback and bar return dutie
     booking.shifts[0].workers = [{ ...worker, status: 'declined' }];
     assert.equal(captainEventDuties({ event, schedule: booking, user }).reportAssigned, false);
   }
+});
+
+
+test('Blackrock Maitre apostrophe D booking exposes the captain report button without bar mutation rights', async (t) => {
+  const barEvent = { _id: barId, linkedEventId: eventId, assignedUserIds: [userId], items: [], audit: [], name: 'Blackrock Plans The Frick Collection Reception' };
+  t.mock.method(BarEvent, 'findById', async () => barEvent);
+  t.mock.method(Event, 'findById', () => ({ select: () => ({ lean: async () => event }) }));
+  t.mock.method(NowstaScheduleEntry, 'findOne', () => ({ select: () => ({ lean: async () => schedule("Maitre 'D") }) }));
+  const res = response();
+  await handler(router, '/events/:id', 'get')({ params: { id: barId }, auth: user }, res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.canUseCaptainReport, true);
+  assert.equal(res.body.reportRequired, true);
+  assert.equal(res.body.canOperateBar, false);
 });

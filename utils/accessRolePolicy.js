@@ -14,7 +14,8 @@ export const loadAccessRole = async (user) => {
   const saved = await AccessRole.findById(key).select('-audit').lean();
   const role = saved || BUILTIN_ROLES.find((entry) => entry._id === key);
   if (!role) throw Object.assign(new Error('Account role is unavailable'), { statusCode: 403 });
-  return { roleKey: key, baseRole: role.baseRole, accessPermissions: role.permissions || {}, canManageRoles: isRoleOwner(user), canTeachDocuments: canTeachDocumentAi(user) };
+  return { roleKey: key, baseRole: role.baseRole, accessPermissions: user.seeBarFinancials === true || user.permissions?.seeBarFinancials === true
+    ? { ...(role.permissions || {}), 'bar.view': true, 'bar.financials': true } : role.permissions || {}, canManageRoles: isRoleOwner(user), canTeachDocuments: canTeachDocumentAi(user) };
 };
 
 export const ACCESS_RESOURCES = {

@@ -144,7 +144,7 @@ const eventAssignedToAuth = (event, auth) => {
 };
 
 export const canViewEvent = (event, auth) => (
-  isBarManager(auth)
+  canSeeBarFinancials(auth) || isBarManager(auth)
   || BAR_VIEWER_ROLES.has(normalizeRole(auth?.role))
   || (isAssignedEventUser(auth) && eventAssignedToAuth(event, auth))
 );
@@ -893,7 +893,7 @@ router.delete('/tasks/:taskId', requireBarManager, async (req, res) => {
 
 router.get('/events', async (req, res) => {
   try {
-    if (!isBarManager(req.auth) && !isAssignedEventUser(req.auth) && !BAR_VIEWER_ROLES.has(normalizeRole(req.auth?.role))) {
+    if (!canSeeBarFinancials(req.auth) && !isBarManager(req.auth) && !isAssignedEventUser(req.auth) && !BAR_VIEWER_ROLES.has(normalizeRole(req.auth?.role))) {
       return res.status(403).json({ message: 'Bar access required' });
     }
     const activeDashboardEventIds = await syncDashboardEventsToBar();
@@ -906,7 +906,7 @@ router.get('/events', async (req, res) => {
     if (req.query.status && BAR_EVENT_STATUSES.includes(String(req.query.status))) {
       query.status = String(req.query.status);
     }
-    if (isAssignedEventUser(req.auth)) {
+    if (isAssignedEventUser(req.auth) && !canSeeBarFinancials(req.auth)) {
       query.assignedUserIds = req.auth.userId;
     }
     const events = await BarEvent.find(query).sort({ eventDate: -1, createdAt: -1 });
@@ -924,7 +924,7 @@ router.get('/events', async (req, res) => {
 
 router.get('/events-readiness', async (req, res) => {
   try {
-    if (!isBarManager(req.auth) && !isBarWorker(req.auth) && !BAR_VIEWER_ROLES.has(normalizeRole(req.auth?.role))) {
+    if (!canSeeBarFinancials(req.auth) && !isBarManager(req.auth) && !isBarWorker(req.auth) && !BAR_VIEWER_ROLES.has(normalizeRole(req.auth?.role))) {
       return res.status(403).json({ message: 'Bar access required' });
     }
     const requestedFrom = cleanString(req.query.from, 10);

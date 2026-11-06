@@ -14,14 +14,15 @@ const response = () => ({ code: 200, status(code) { this.code = code; return thi
 const route = (path, method) => router.stack.find((layer) => layer.route?.path === path && layer.route.methods[method]).route.stack.at(-1).handle;
 const env = (t, key, value) => { const before = process.env[key]; process.env[key] = value; t.after(() => { if (before === undefined) delete process.env[key]; else process.env[key] = before; }); };
 
-test('department admins have operational access but never bar financials, even with stale permission flags', async () => {
+test('department admins have operational access but bar financials only when explicitly granted', async () => {
   for (const role of ['kitchen admin', 'staffing admin']) {
     const auth = { role, seeBarFinancials: true, permissions: { seeBarFinancials: true } };
     const user = new User({ username: 'Department', email: 'department@example.com', role, password: 'hash', seeBarFinancials: true, permissions: { seeBarFinancials: true } });
     await user.validate();
-    assert.equal(user.seeBarFinancials, false);
-    assert.equal(user.permissions.seeBarFinancials, false);
-    assert.equal(canSeeBarFinancials(auth), false);
+    assert.equal(user.seeBarFinancials, true);
+    assert.equal(user.permissions.seeBarFinancials, true);
+    assert.equal(canSeeBarFinancials(auth), true);
+    assert.equal(canSeeBarFinancials({ role }), false);
     for (const guard of [requireAdmin, requireWorkspaceAccess, requireWorkspaceEditor]) {
       let passed = false;
       guard({ auth }, response(), () => { passed = true; });
@@ -130,4 +131,17 @@ test('department admins can update their employees without changing access permi
   assert.equal(saves, 1);
   assert.equal(employee.username, 'Chef Updated');
   assert.deepEqual(employee.permissions, { inventoryRead: false });
+});
+
+test('financial grant exposes bar views without granting edit or role administration', async (t) => {
+  const { loadAccessRole, requestPermission } = await import('../utils/accessRolePolicy.js');
+  t.mock.method(AccessRole, 'findById', () => ({ select: () => ({ lean: async () => ({ baseRole: 'staffing admin', permissions: { 'bar.view': false, 'bar.edit': false, 'bar.financials': false, 'users.assignRoles': false } }) }) }));
+  const account = { role: 'staffing admin', seeBarFinancials: true };
+  const access = await loadAccessRole(account);
+  const auth = { ...account, ...access };
+  assert.equal(requestPermission(auth, { method: 'GET', originalUrl: '/api/bar/events' }), true);
+  assert.equal(requestPermission(auth, { method: 'PATCH', originalUrl: '/api/bar/events/example' }), false);
+  assert.equal(auth.accessPermissions['users.assignRoles'], false);
+  const revoked = await loadAccessRole({ ...account, seeBarFinancials: false });
+  assert.equal(revoked.accessPermissions['bar.view'], false);
 });

@@ -133,9 +133,7 @@ export const canAccessWorkspace = (auth) => WORKSPACE_ROLE_SET.has(normalizeRole
 export const canManageInventory = (auth) => INVENTORY_MANAGER_ROLES.includes(normalizeRole(effectiveAccessRole(auth)));
 
 export const canAccessProposals = (auth) => permissionValue(auth, 'proposals.view', isAdminAuth(auth) || resolveSeeProposals(auth));
-export const canSeeBarFinancials = (auth) => permissionValue(auth, 'bar.financials', (
-  !isDepartmentAdmin(auth) && (normalizeRole(auth?.role) === 'super admin' || resolveSeeBarFinancials(auth))
-));
+export const canSeeBarFinancials = (auth) => resolveSeeBarFinancials(auth) || permissionValue(auth, 'bar.financials', normalizeRole(auth?.role) === 'super admin');
 
 export const requireAuth = async (req, res, next) => {
   res.setHeader?.('Cache-Control', 'private, no-store');

@@ -105,7 +105,7 @@ userSchema.pre('validate', function syncPermissions(next) {
     typeof this.seeBarFinancials === 'boolean'
       ? this.seeBarFinancials
       : (typeof permissionsSeeBarFinancials === 'boolean' ? permissionsSeeBarFinancials : false);
-  this.seeBarFinancials = ['kitchen admin', 'staffing admin'].includes(role) ? false : nextSeeBarFinancials;
+  this.seeBarFinancials = nextSeeBarFinancials;
   this.permissions = {
     ...rawPermissions,
     seeProposals: nextSeeProposals,

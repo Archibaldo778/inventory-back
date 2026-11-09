@@ -1,3 +1,4 @@
+import { eventDigestEmailHtml } from './eventDigestEmailHtml.js';
 import crypto from 'node:crypto';
 import EventReportDigest from '../models/EventReportDigest.js';
 import EventReport from '../models/EventReport.js';
@@ -14,7 +15,6 @@ const RETRY_MS = 5 * 60_000;
 const RETRY_WINDOW_MS = 23 * 60 * 60_000;
 const clean = (value) => String(value || '').trim();
 const email = (value) => clean(value).toLowerCase();
-const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 
 export const generateEventDigest = async ({ event, reports, fetchImpl = globalThis.fetch, apiKey = process.env.OPENAI_API_KEY }) => {
   if (!apiKey) throw new Error('OpenAI API key is not configured');
@@ -55,7 +55,7 @@ export const eventDigestPayload = ({ event, summary, recipients }) => ({
   to: recipients,
   subject: `Event summary · ${clean(event.title).replace(/[\r\n]/g, ' ').slice(0, 200)} · ${clean(event.date)}`,
   text: `EVENT SUMMARY\n${clean(event.title)} · ${clean(event.date)}\n\n${summary}\n\nAI summary based on all required captain and kitchen reports.`,
-  html: `<h1>Event summary</h1><p>${escapeHtml(event.title || '')} · ${escapeHtml(event.date || '')}</p><div style="white-space:pre-wrap">${escapeHtml(summary)}</div><p>AI summary based on all required captain and kitchen reports.</p>`,
+  html: eventDigestEmailHtml(event, summary),
 });
 
 export const sendEventDigest = async ({ eventId, payload, fetchImpl = globalThis.fetch, apiKey = process.env.RESEND_API_KEY }) => {
